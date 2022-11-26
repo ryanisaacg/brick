@@ -1,0 +1,22 @@
+stuff that I can pretty much do in any order:
+- the rest of the math operators
+- booleans and boolean operators
+- parentheses
+- compiler diagnostics
+- test suite
+
+stuff that requires thinking:
+- product types
+- sum types
+- pattern matching
+- function declarations
+- function calls
+- constant evaluation
+- external environment declarations
+
+stuff that requires learning:
+- closures
+- interesting optimizations
+- borrow-checking
+
+
