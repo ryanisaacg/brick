@@ -1,0 +1,20 @@
+[package]
+name = "brick"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+thiserror = "1.0"
+wasm-encoder = "0.20.0"
+
+[dev-dependencies]
+anyhow = "1.0"
+
+[lib]
+name = "brick"
+path = "src/lib.rs"
+
+[[bin]]
+name = "brick"
+path = "src/main.rs"
