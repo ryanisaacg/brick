@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::typecheck::{BinOpNumeric, IRExpression, IRExpressionValue, IRStatement, PrimitiveType, Type, IRStatementValue};
+use crate::typecheck::{
+    BinOpNumeric, IRExpression, IRExpressionValue, IRStatement, IRStatementValue, PrimitiveType,
+    Type,
+};
 use wasm_encoder::*;
 
 pub fn compile(statements: Vec<IRStatement>, arena: &Vec<IRExpression>) -> Vec<u8> {

@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{parser::{AstExpressionValue, AstStatementValue, BinOp, AstExpression, AstStatement}, provenance::Provenance};
+use crate::{
+    parser::{AstExpression, AstExpressionValue, AstStatement, AstStatementValue, BinOp},
+    provenance::Provenance,
+};
 use thiserror::Error;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -41,7 +44,6 @@ pub struct IRExpression {
     pub start: Provenance,
     pub end: Provenance,
 }
-    
 
 #[derive(Debug)]
 pub enum IRExpressionValue {

@@ -11,7 +11,12 @@ pub struct Provenance {
 }
 
 impl Provenance {
-    pub fn new(source_name: &'static str, source_text: &'static str, line: u32, offset: u32) -> Provenance {
+    pub fn new(
+        source_name: &'static str,
+        source_text: &'static str,
+        line: u32,
+        offset: u32,
+    ) -> Provenance {
         Provenance {
             source_name,
             source_text,

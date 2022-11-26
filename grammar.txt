@@ -7,6 +7,7 @@ declaration ::= word ":=" expression ";"
 assignment ::= word "=" expression ";"
 
 expression ::= sum_expr
-sum_expr ::= atom | atom "+" sum_expr | atom "-" sum_expr
+sum_expr ::= paren_expr | paren_expr "+" sum_expr | paren_expr "-" sum_expr
+paren_expr ::= atom | "(" expression ")"
 atom ::= word | integer | "-"integer | float | "-"float
 

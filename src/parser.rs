@@ -1,7 +1,10 @@
 use std::iter::Peekable;
 use thiserror::Error;
 
-use crate::{tokenizer::{TokenValue, TokenError, Token}, provenance::Provenance};
+use crate::{
+    provenance::Provenance,
+    tokenizer::{Token, TokenError, TokenValue},
+};
 
 #[derive(Debug, PartialEq)]
 pub struct AstStatement {
@@ -65,11 +68,15 @@ pub fn parse(
             Token {
                 value: TokenValue::Word(word),
                 start,
-                end
+                end,
             } => parse_assignment(&mut source, word, start, end, &mut arena)?,
             _ => todo!(),
         });
-        if let Some(Ok(Token { value: TokenValue::Semicolon, .. })) = source.peek() {
+        if let Some(Ok(Token {
+            value: TokenValue::Semicolon,
+            ..
+        })) = source.peek()
+        {
             source.next();
         }
     }
@@ -85,16 +92,21 @@ fn parse_assignment(
     expression_arena: &mut Vec<AstExpression>,
 ) -> Result<AstStatement, ParseError> {
     let operand = match source.peek() {
-        None => return Ok(AstStatement {
-            value: AstStatementValue::Expression(AstExpression {
-                value: AstExpressionValue::Name(assignee),
-                start: start.clone(),
-                end: end.clone(),
-            }),
-            start,
-            end,
-        }),
-        Some(Ok(Token { value: op @ (TokenValue::ColonEquals | TokenValue::Equals), .. })) => op.clone(),
+        None => {
+            return Ok(AstStatement {
+                value: AstStatementValue::Expression(AstExpression {
+                    value: AstExpressionValue::Name(assignee),
+                    start: start.clone(),
+                    end: end.clone(),
+                }),
+                start,
+                end,
+            })
+        }
+        Some(Ok(Token {
+            value: op @ (TokenValue::ColonEquals | TokenValue::Equals),
+            ..
+        })) => op.clone(),
         // TODO: gracefully handle non-assignment statements
         Some(_) => return Err(ParseError::UnexpectedToken(source.next().unwrap()?)),
     };
@@ -116,19 +128,31 @@ fn parse_assignment(
     }
 }
 
+fn parse_expr(
+    source: &mut TokenIter,
+    expression_arena: &mut Vec<AstExpression>,
+) -> Result<AstExpression, ParseError> {
+    parse_addition(source, expression_arena)
+}
+
 fn parse_addition(
     source: &mut TokenIter,
     expression_arena: &mut Vec<AstExpression>,
 ) -> Result<AstExpression, ParseError> {
-    let left = next_atom(source)?;
+    let left = next_paren_expr(source, expression_arena)?;
     let operand = match source.peek() {
-        Some(Ok(Token{ value: TokenValue::Plus, .. })) => BinOp::Add,
-        Some(Ok(Token { value: TokenValue::Minus, .. })) => BinOp::Subtract,
-        None | Some(Ok(Token { value: TokenValue::Semicolon, .. })) => return Ok(left),
-        Some(_) => return Err(ParseError::UnexpectedToken(source.next().unwrap()?)),
+        Some(Ok(Token {
+            value: TokenValue::Plus,
+            ..
+        })) => BinOp::Add,
+        Some(Ok(Token {
+            value: TokenValue::Minus,
+            ..
+        })) => BinOp::Subtract,
+        _ => return Ok(left),
     };
     source.next();
-    let right = parse_addition(source, expression_arena)?;
+    let right = next_paren_expr(source, expression_arena)?;
     let left_ptr = expression_arena.len();
     let start = left.start.clone();
     let end = right.end.clone();
@@ -142,27 +166,73 @@ fn parse_addition(
     })
 }
 
+fn next_paren_expr(
+    source: &mut TokenIter,
+    expression_arena: &mut Vec<AstExpression>,
+) -> Result<AstExpression, ParseError> {
+    if let Some(Ok(Token {
+        value: TokenValue::OpenParen,
+        ..
+    })) = source.peek()
+    {
+        source.next();
+        let expr = parse_expr(source, expression_arena)?;
+        if let Some(Ok(Token {
+            value: TokenValue::CloseParen,
+            ..
+        })) = source.next()
+        {
+            Ok(expr)
+        } else {
+            todo!(); // throw error because not )
+        }
+    } else {
+        next_atom(source)
+    }
+}
+
 fn next_atom(source: &mut TokenIter) -> Result<AstExpression, ParseError> {
     // TODO: expectation reasoning
-    let Token { value, start, end }= next_token(source)?;
+    let Token { value, start, end } = next_token(source)?;
     match value {
-        TokenValue::Word(word) => Ok(AstExpression { value: AstExpressionValue::Name(word), start, end }),
+        TokenValue::Word(word) => Ok(AstExpression {
+            value: AstExpressionValue::Name(word),
+            start,
+            end,
+        }),
         TokenValue::Int(int) => try_decimal(source, int as i64, start, end),
         // TODO: should this be treated as a unary operator instead?
         TokenValue::Minus => match next_token(source)? {
-            Token { value: TokenValue::Int(int), end, .. } => try_decimal(source, -(int as i64), start, end),
+            Token {
+                value: TokenValue::Int(int),
+                end,
+                ..
+            } => try_decimal(source, -(int as i64), start, end),
             other => Err(ParseError::UnexpectedToken(other)),
         },
         value => Err(ParseError::UnexpectedToken(Token { value, start, end })),
     }
 }
 
-fn try_decimal(source: &mut TokenIter, num: i64, start: Provenance, end: Provenance) -> Result<AstExpression, ParseError> {
+fn try_decimal(
+    source: &mut TokenIter,
+    num: i64,
+    start: Provenance,
+    end: Provenance,
+) -> Result<AstExpression, ParseError> {
     // TODO: handle overflow
-    if let Some(Ok(Token { value: TokenValue::Period, .. })) = source.peek() {
+    if let Some(Ok(Token {
+        value: TokenValue::Period,
+        ..
+    })) = source.peek()
+    {
         source.next();
         let (decimal, end) = match source.next().ok_or(ParseError::UnexpectedEndOfInput)?? {
-            Token { value: TokenValue::Int(value), end, .. } => (value as f64, end),
+            Token {
+                value: TokenValue::Int(value),
+                end,
+                ..
+            } => (value as f64, end),
             other => return Err(ParseError::UnexpectedToken(other)),
         };
         let num = num as f64;
@@ -188,4 +258,3 @@ fn try_decimal(source: &mut TokenIter, num: i64, start: Provenance, end: Provena
 fn next_token(source: &mut TokenIter) -> Result<Token, ParseError> {
     Ok(source.next().ok_or(ParseError::UnexpectedEndOfInput)??)
 }
-

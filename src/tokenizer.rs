@@ -1,6 +1,6 @@
 use std::fmt;
-use thiserror::Error;
 use std::iter::Peekable;
+use thiserror::Error;
 
 use crate::provenance::Provenance;
 
@@ -27,6 +27,8 @@ pub enum TokenValue {
     Equals,
     Semicolon,
     Period,
+    OpenParen,
+    CloseParen,
 }
 
 impl fmt::Display for TokenValue {
@@ -41,6 +43,8 @@ impl fmt::Display for TokenValue {
             Equals => write!(f, "="),
             Semicolon => write!(f, ";"),
             Period => write!(f, "."),
+            OpenParen => write!(f, "("),
+            CloseParen => write!(f, ")"),
         }
     }
 }
@@ -51,7 +55,10 @@ pub enum TokenError {
     UnexpectedStart(char, Provenance),
 }
 
-pub fn tokenize<'a>(source_name: &'static str, source_text: String) -> impl 'a + Iterator<Item = Result<Token, TokenError>> {
+pub fn tokenize<'a>(
+    source_name: &'static str,
+    source_text: String,
+) -> impl 'a + Iterator<Item = Result<Token, TokenError>> {
     let source_text = Box::leak(source_text.into_boxed_str());
     let source = source_text.chars().peekable();
 
@@ -83,7 +90,10 @@ impl<T: Iterator<Item = char>> TokenIterator<T> {
             }
             Some(chr) => {
                 self.offset += 1;
-                Some((chr, Provenance::new(self.source_name, self.source_text, self.line, self.offset)))
+                Some((
+                    chr,
+                    Provenance::new(self.source_name, self.source_text, self.line, self.offset),
+                ))
             }
         }
     }
@@ -138,10 +148,12 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     Some(('=', p)) => {
                         end = Some(p);
                         TokenValue::ColonEquals
-                    },
+                    }
                     _other => todo!("add an error variant here"),
                 },
                 '.' => TokenValue::Period,
+                '(' => TokenValue::OpenParen,
+                ')' => TokenValue::CloseParen,
                 ch if ch.is_whitespace() => return self.next(),
                 ch => return Some(Err(TokenError::UnexpectedStart(ch, start))),
             };
