@@ -18,5 +18,6 @@ stuff that requires learning:
 - closures
 - interesting optimizations
 - borrow-checking
+- binary debug info
 
 

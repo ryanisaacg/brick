@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::typecheck::{BinOpNumeric, IRExpression, IRExpressionValue, IRStatement, PrimitiveType, Type};
+use crate::typecheck::{BinOpNumeric, IRExpression, IRExpressionValue, IRStatement, PrimitiveType, Type, IRStatementValue};
 use wasm_encoder::*;
 
 pub fn compile(statements: Vec<IRStatement>, arena: &Vec<IRExpression>) -> Vec<u8> {
@@ -32,17 +32,17 @@ pub fn compile(statements: Vec<IRStatement>, arena: &Vec<IRExpression>) -> Vec<u
     let mut locals = HashMap::new();
     let mut current_offset = 0;
     for statement in statements {
-        match statement {
-            IRStatement::Expression(expr) => {
+        match statement.value {
+            IRStatementValue::Expression(expr) => {
                 expression(&mut f, &expr, arena, &locals);
             }
-            IRStatement::Declaration(name, expr) => {
+            IRStatementValue::Declaration(name, expr) => {
                 locals.insert(name, current_offset);
                 expression(&mut f, &expr, arena, &locals);
                 f.instruction(&Instruction::LocalSet(current_offset));
                 current_offset += 1;
             }
-            IRStatement::Assignment(name, expr) => match locals.get(&name) {
+            IRStatementValue::Assignment(name, expr) => match locals.get(&name) {
                 Some(offset) => {
                     expression(&mut f, &expr, arena, &locals);
                     f.instruction(&Instruction::LocalSet(*offset));
@@ -65,7 +65,7 @@ fn expression(
     arena: &Vec<IRExpression>,
     locals: &HashMap<String, u32>,
 ) {
-    match &expr.0 {
+    match &expr.value {
         IRExpressionValue::Int(constant) => {
             f.instruction(&Instruction::I64Const(*constant));
         }
@@ -83,13 +83,13 @@ fn expression(
             expression(f, &arena[*right], arena, locals);
             match operator {
                 BinOpNumeric::Add => {
-                    f.instruction(&match expr.1 {
+                    f.instruction(&match expr.kind {
                         Type::Primitive(PrimitiveType::Int64) => Instruction::I64Add,
                         Type::Primitive(PrimitiveType::Float64) => Instruction::F64Add,
                     });
                 }
                 BinOpNumeric::Subtract => {
-                    f.instruction(&match expr.1 {
+                    f.instruction(&match expr.kind {
                         Type::Primitive(PrimitiveType::Int64) => Instruction::I64Sub,
                         Type::Primitive(PrimitiveType::Float64) => Instruction::F64Sub,
                     });

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::parser::{AstExpression, AstStatement, BinOp};
+use crate::{parser::{AstExpressionValue, AstStatementValue, BinOp, AstExpression, AstStatement}, provenance::Provenance};
 use thiserror::Error;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -21,14 +21,27 @@ pub enum TypecheckError {
 }
 
 #[derive(Debug)]
-pub enum IRStatement {
+pub struct IRStatement {
+    pub value: IRStatementValue,
+    pub start: Provenance,
+    pub end: Provenance,
+}
+
+#[derive(Debug)]
+pub enum IRStatementValue {
     Expression(IRExpression),
     Declaration(String, IRExpression),
     Assignment(String, IRExpression),
 }
 
 #[derive(Debug)]
-pub struct IRExpression(pub IRExpressionValue, pub Type);
+pub struct IRExpression {
+    pub value: IRExpressionValue,
+    pub kind: Type,
+    pub start: Provenance,
+    pub end: Provenance,
+}
+    
 
 #[derive(Debug)]
 pub enum IRExpressionValue {
@@ -54,17 +67,21 @@ pub fn typecheck(
     let statements = statements
         .iter()
         .map(|statement| {
-            Ok(match statement {
-                AstStatement::Expression(expr) => {
+            let AstStatement { value, start, end } = statement;
+            let start = start.clone();
+            let end = end.clone();
+
+            let value = match value {
+                AstStatementValue::Expression(expr) => {
                     let expr = typecheck_expression(
                         expr,
                         &expression_arena,
                         &mut typed_arena,
                         &local_environment,
                     )?;
-                    IRStatement::Expression(expr)
+                    IRStatementValue::Expression(expr)
                 }
-                AstStatement::Assignment(name, expr) => {
+                AstStatementValue::Assignment(name, expr) => {
                     let local_type = local_environment.get(name);
                     let expr = typecheck_expression(
                         expr,
@@ -75,24 +92,26 @@ pub fn typecheck(
                     match local_type {
                         None => todo!(),
                         Some(local_type) => {
-                            if local_type != &expr.1 {
+                            if local_type != &expr.kind {
                                 todo!();
                             }
                         }
                     }
-                    IRStatement::Assignment(name.clone(), expr)
+                    IRStatementValue::Assignment(name.clone(), expr)
                 }
-                AstStatement::Declaration(name, expr) => {
+                AstStatementValue::Declaration(name, expr) => {
                     let expr = typecheck_expression(
                         expr,
                         &expression_arena,
                         &mut typed_arena,
                         &local_environment,
                     )?;
-                    local_environment.insert(name, expr.1.clone());
-                    IRStatement::Declaration(name.clone(), expr)
+                    local_environment.insert(name, expr.kind.clone());
+                    IRStatementValue::Declaration(name.clone(), expr)
                 }
-            })
+            };
+
+            Ok(IRStatement { value, start, end })
         })
         .collect::<Result<Vec<IRStatement>, TypecheckError>>()?;
 
@@ -106,26 +125,36 @@ pub fn typecheck_expression(
     typed_arena: &mut Vec<IRExpression>,
     local_environment: &HashMap<&String, Type>,
 ) -> Result<IRExpression, TypecheckError> {
-    use AstExpression::*;
-    match expression {
+    use AstExpressionValue::*;
+    let AstExpression { value, start, end } = expression;
+    let start = start.clone();
+    let end = end.clone();
+
+    match value {
         Name(name) => {
             let local_type = local_environment.get(name);
             match local_type {
-                Some(local_type) => Ok(IRExpression(
-                    IRExpressionValue::LocalVariable(name.clone()),
-                    local_type.clone(),
-                )),
+                Some(local_type) => Ok(IRExpression {
+                    value: IRExpressionValue::LocalVariable(name.clone()),
+                    kind: local_type.clone(),
+                    start,
+                    end,
+                }),
                 None => todo!(),
             }
         }
-        Int(val) => Ok(IRExpression(
-            IRExpressionValue::Int(*val),
-            Type::Primitive(PrimitiveType::Int64),
-        )),
-        Float(val) => Ok(IRExpression(
-            IRExpressionValue::Float(*val),
-            Type::Primitive(PrimitiveType::Float64),
-        )),
+        Int(val) => Ok(IRExpression {
+            value: IRExpressionValue::Int(*val),
+            kind: Type::Primitive(PrimitiveType::Int64),
+            start,
+            end,
+        }),
+        Float(val) => Ok(IRExpression {
+            value: IRExpressionValue::Float(*val),
+            kind: Type::Primitive(PrimitiveType::Float64),
+            start,
+            end,
+        }),
         BinExpr(op @ (BinOp::Add | BinOp::Subtract), left, right) => {
             let left = typecheck_expression(
                 &expression_arena[*left],
@@ -139,18 +168,18 @@ pub fn typecheck_expression(
                 typed_arena,
                 local_environment,
             )?;
-            if left.1 != right.1
-                || left.1 != Type::Primitive(PrimitiveType::Int64)
-                    && left.1 != Type::Primitive(PrimitiveType::Float64)
+            if left.kind != right.kind
+                || left.kind != Type::Primitive(PrimitiveType::Int64)
+                    && left.kind != Type::Primitive(PrimitiveType::Float64)
             {
                 Err(TypecheckError::BinaryOperandMismatch)
             } else {
                 let left_ptr = typed_arena.len();
-                let left_type = left.1.clone();
+                let left_type = left.kind.clone();
                 typed_arena.push(left);
                 typed_arena.push(right);
-                Ok(IRExpression(
-                    IRExpressionValue::BinaryNumeric(
+                Ok(IRExpression {
+                    value: IRExpressionValue::BinaryNumeric(
                         match op {
                             BinOp::Add => BinOpNumeric::Add,
                             BinOp::Subtract => BinOpNumeric::Subtract,
@@ -158,8 +187,10 @@ pub fn typecheck_expression(
                         left_ptr,
                         left_ptr + 1,
                     ),
-                    left_type,
-                ))
+                    kind: left_type,
+                    start,
+                    end,
+                })
             }
         }
     }
