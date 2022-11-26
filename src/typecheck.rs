@@ -6,6 +6,7 @@ use thiserror::Error;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
     Int64,
+    Float64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,6 +33,7 @@ pub struct IRExpression(pub IRExpressionValue, pub Type);
 #[derive(Debug)]
 pub enum IRExpressionValue {
     Int(i64),
+    Float(f64),
     LocalVariable(String),
     BinaryNumeric(BinOpNumeric, usize, usize),
 }
@@ -120,6 +122,10 @@ pub fn typecheck_expression(
             IRExpressionValue::Int(*val),
             Type::Primitive(PrimitiveType::Int64),
         )),
+        Float(val) => Ok(IRExpression(
+            IRExpressionValue::Float(*val),
+            Type::Primitive(PrimitiveType::Float64),
+        )),
         BinExpr(op @ (BinOp::Add | BinOp::Subtract), left, right) => {
             let left = typecheck_expression(
                 &expression_arena[*left],
@@ -133,10 +139,11 @@ pub fn typecheck_expression(
                 typed_arena,
                 local_environment,
             )?;
-            if left.1 != right.1 || left.1 != Type::Primitive(PrimitiveType::Int64) {
+            if left.1 != right.1 || left.1 != Type::Primitive(PrimitiveType::Int64) && left.1 != Type::Primitive(PrimitiveType::Float64) {
                 Err(TypecheckError::BinaryOperandMismatch)
             } else {
                 let left_ptr = typed_arena.len();
+                let left_type = left.1.clone();
                 typed_arena.push(left);
                 typed_arena.push(right);
                 Ok(IRExpression(
@@ -144,15 +151,13 @@ pub fn typecheck_expression(
                         match op {
                             BinOp::Add => BinOpNumeric::Add,
                             BinOp::Subtract => BinOpNumeric::Subtract,
-                            _ => unimplemented!(),
                         },
                         left_ptr,
                         left_ptr + 1,
                     ),
-                    Type::Primitive(PrimitiveType::Int64),
+                    left_type,
                 ))
             }
         }
-        _ => unimplemented!(),
     }
 }

@@ -2,17 +2,18 @@ use std::fmt;
 use std::iter::Peekable;
 use thiserror::Error;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum AstStatement {
     Declaration(String, AstExpression),
     Assignment(String, AstExpression),
     Expression(AstExpression),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum AstExpression {
     Name(String),
     Int(i64),
+    Float(f64),
     BinExpr(BinOp, usize, usize),
 }
 
@@ -85,7 +86,7 @@ fn parse_addition(
     source: &mut TokenIter,
     expression_arena: &mut Vec<AstExpression>,
 ) -> Result<AstExpression, ParseError> {
-    let left = next_arith_operand(source)?;
+    let left = next_atom(source)?;
     let operand = match source.peek() {
         None | Some(Ok(Token::Semicolon)) => return Ok(left),
         Some(Ok(Token::Plus)) => BinOp::Add,
@@ -101,14 +102,35 @@ fn parse_addition(
     Ok(AstExpression::BinExpr(operand, left_ptr, left_ptr + 1))
 }
 
-fn next_arith_operand(source: &mut TokenIter) -> Result<AstExpression, ParseError> {
+fn next_atom(source: &mut TokenIter) -> Result<AstExpression, ParseError> {
     match next_token(source)? {
         Token::Word(word) => Ok(AstExpression::Name(word)),
-        Token::Int(int) => Ok(AstExpression::Int(int as i64)),
+        Token::Int(int) => try_decimal(source, int as i64),
+        // TODO: should this be treated as a unary operator instead?
         Token::Minus => match next_token(source)? {
-            Token::Int(int) => Ok(AstExpression::Int(-(int as i64))),
+            Token::Int(int) => try_decimal(source, -(int as i64)),
             other => Err(ParseError::UnexpectedToken(other)),
         },
+        other => Err(ParseError::UnexpectedToken(other)),
+    }
+}
+
+fn try_decimal(source: &mut TokenIter, num: i64) -> Result<AstExpression, ParseError> {
+    // TODO: handle overflow
+    if let Some(Ok(Token::Period)) = source.peek() {
+        source.next();
+        let decimal = next_int(source)? as f64;
+        let num = num as f64;
+        let num = if decimal != 0.0 { num + decimal.copysign(num) * (10f64).powf(-decimal.log(10.0).ceil()) } else { num };
+        Ok(AstExpression::Float(num))
+    } else {
+        Ok(AstExpression::Int(num))
+    }
+}
+
+fn next_int(source: &mut TokenIter) -> Result<u64, ParseError> {
+    match source.next().ok_or(ParseError::UnexpectedEndOfInput)?? {
+        Token::Int(value) => Ok(value),
         other => Err(ParseError::UnexpectedToken(other)),
     }
 }
@@ -126,6 +148,7 @@ pub enum Token {
     ColonEquals,
     Equals,
     Semicolon,
+    Period,
 }
 
 impl fmt::Display for Token {
@@ -139,6 +162,7 @@ impl fmt::Display for Token {
             ColonEquals => write!(f, ":="),
             Equals => write!(f, "="),
             Semicolon => write!(f, ";"),
+            Period => write!(f, "."),
         }
     }
 }
@@ -178,6 +202,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
             Some(digit @ '0'..='9') => {
                 let mut number: u64 = (digit as u32 - '0' as u32) as u64;
 
+                // TODO: handle overflow
                 while let Some(candidate) = self.0.peek() {
                     match candidate {
                         digit @ '0'..='9' => {
@@ -199,6 +224,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 Some('=') => Some(Ok(Token::ColonEquals)),
                 other => todo!("add an error variant here"),
             },
+            Some('.') => Some(Ok(Token::Period)),
             Some(ch) if ch.is_whitespace() => self.next(),
             Some(ch) => Some(Err(TokenError::UnexpectedStart(ch))),
             None => None,

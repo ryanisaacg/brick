@@ -8,5 +8,5 @@ assignment ::= word "=" expression ";"
 
 expression ::= sum_expr
 sum_expr ::= atom | atom "+" sum_expr | atom "-" sum_expr
-atom ::= word | integer
+atom ::= word | integer | "-"integer | float | "-"float
 
