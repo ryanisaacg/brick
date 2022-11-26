@@ -1,0 +1,12 @@
+word ::= /[A-Za-z_][A-Za-z_0-9]/
+integer ::= /[0-9_]/
+float ::= integer | integer "." integer
+
+statement ::= declaration | assignment | expression
+declaration ::= word ":=" expression ";"
+assignment ::= word "=" expression ";"
+
+expression ::= sum_expr
+sum_expr ::= atom | atom "+" sum_expr | atom "-" sum_expr
+atom ::= word | integer
+
