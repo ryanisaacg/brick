@@ -139,7 +139,10 @@ pub fn typecheck_expression(
                 typed_arena,
                 local_environment,
             )?;
-            if left.1 != right.1 || left.1 != Type::Primitive(PrimitiveType::Int64) && left.1 != Type::Primitive(PrimitiveType::Float64) {
+            if left.1 != right.1
+                || left.1 != Type::Primitive(PrimitiveType::Int64)
+                    && left.1 != Type::Primitive(PrimitiveType::Float64)
+            {
                 Err(TypecheckError::BinaryOperandMismatch)
             } else {
                 let left_ptr = typed_arena.len();

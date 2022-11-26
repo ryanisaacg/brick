@@ -121,7 +121,11 @@ fn try_decimal(source: &mut TokenIter, num: i64) -> Result<AstExpression, ParseE
         source.next();
         let decimal = next_int(source)? as f64;
         let num = num as f64;
-        let num = if decimal != 0.0 { num + decimal.copysign(num) * (10f64).powf(-decimal.log(10.0).ceil()) } else { num };
+        let num = if decimal != 0.0 {
+            num + decimal.copysign(num) * (10f64).powf(-decimal.log(10.0).ceil())
+        } else {
+            num
+        };
         Ok(AstExpression::Float(num))
     } else {
         Ok(AstExpression::Int(num))
