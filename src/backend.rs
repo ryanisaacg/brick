@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+
 use crate::{
     parser::{AstExpression, AstStatement, BinOp},
     typecheck::{BinOpNumeric, IRExpression, IRExpressionValue, IRStatement, PrimitiveType, Type},
 };
 use wasm_encoder::*;
 
-pub fn compile(root: IRStatement, arena: &Vec<IRExpression>) -> Vec<u8> {
+pub fn compile(statements: Vec<IRStatement>, arena: &Vec<IRExpression>) -> Vec<u8> {
     let mut module = Module::new();
 
     // Encode the type section.
@@ -27,11 +29,29 @@ pub fn compile(root: IRStatement, arena: &Vec<IRExpression>) -> Vec<u8> {
 
     // Encode the code section.
     let mut codes = CodeSection::new();
-    let locals = vec![];
+    // TODO: get locals
+    let locals = vec![(1, ValType::I64)];
     let mut f = Function::new(locals);
-    match root {
-        IRStatement::Expression(expr) => {
-            expression(&mut f, &expr, arena);
+    let mut locals = HashMap::new();
+    let mut current_offset = 0;
+    for statement in statements {
+        match statement {
+            IRStatement::Expression(expr) => {
+                expression(&mut f, &expr, arena, &locals);
+            }
+            IRStatement::Declaration(name, expr) => {
+                locals.insert(name, current_offset);
+                expression(&mut f, &expr, arena, &locals);
+                f.instruction(&Instruction::LocalSet(current_offset));
+                current_offset += 1;
+            }
+            IRStatement::Assignment(name, expr) => match locals.get(&name) {
+                Some(offset) => {
+                    expression(&mut f, &expr, arena, &locals);
+                    f.instruction(&Instruction::LocalSet(*offset));
+                }
+                None => todo!(),
+            },
         }
     }
     f.instruction(&Instruction::End);
@@ -42,14 +62,25 @@ pub fn compile(root: IRStatement, arena: &Vec<IRExpression>) -> Vec<u8> {
     module.finish()
 }
 
-fn expression(f: &mut Function, expr: &IRExpression, arena: &Vec<IRExpression>) {
+fn expression(
+    f: &mut Function,
+    expr: &IRExpression,
+    arena: &Vec<IRExpression>,
+    locals: &HashMap<String, u32>,
+) {
     match &expr.0 {
         IRExpressionValue::Int(constant) => {
             f.instruction(&Instruction::I64Const(*constant));
         }
+        IRExpressionValue::LocalVariable(name) => match locals.get(name) {
+            Some(offset) => {
+                f.instruction(&Instruction::LocalGet(*offset));
+            }
+            None => todo!(),
+        },
         IRExpressionValue::BinaryNumeric(operator, left, right) => {
-            expression(f, &arena[*left], arena);
-            expression(f, &arena[*right], arena);
+            expression(f, &arena[*left], arena, locals);
+            expression(f, &arena[*right], arena, locals);
             match operator {
                 BinOpNumeric::Add => {
                     f.instruction(&Instruction::I64Add);

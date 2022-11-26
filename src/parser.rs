@@ -4,8 +4,9 @@ use thiserror::Error;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AstStatement {
-    Expression(AstExpression),
+    Declaration(String, AstExpression),
     Assignment(String, AstExpression),
+    Expression(AstExpression),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -17,14 +18,6 @@ pub enum AstExpression {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BinOp {
-    Power,
-
-    Multiply,
-    Divide,
-
-    BooleanOr,
-    BooleanAnd,
-
     Add,
     Subtract,
 }
@@ -43,33 +36,64 @@ pub enum ParseError {
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, TokenError>>;
 type TokenIter<'a> = Peekable<&'a mut dyn Iterator<Item = Result<Token, TokenError>>>;
 
-pub fn parse_str(src: &str) -> Result<(AstStatement, Vec<AstExpression>), ParseError> {
+pub fn parse_str(src: &str) -> Result<(Vec<AstStatement>, Vec<AstExpression>), ParseError> {
     parse_tokens(tokenize(src))
 }
 
 pub fn parse_tokens(
     mut source: impl Iterator<Item = Result<Token, TokenError>>,
-) -> Result<(AstStatement, Vec<AstExpression>), ParseError> {
+) -> Result<(Vec<AstStatement>, Vec<AstExpression>), ParseError> {
     let mut source = (&mut source as TokenIterInner<'_>).peekable();
     let mut arena = Vec::new();
-    let expr = addition(&mut source, &mut arena)?;
 
-    Ok((AstStatement::Expression(expr), arena))
+    let mut statements = Vec::new();
+
+    while let Some(token) = source.next() {
+        statements.push(match token? {
+            Token::Word(word) => parse_assignment(&mut source, word, &mut arena)?,
+            _ => todo!(),
+        });
+        if let Some(Ok(Token::Semicolon)) = source.peek() {
+            source.next();
+        }
+    }
+
+    Ok((statements, arena))
 }
 
-fn addition(
+fn parse_assignment(
+    source: &mut TokenIter,
+    assignee: String,
+    expression_arena: &mut Vec<AstExpression>,
+) -> Result<AstStatement, ParseError> {
+    let operand = match source.peek() {
+        None => return Ok(AstStatement::Expression(AstExpression::Name(assignee))),
+        Some(Ok(op @ (Token::ColonEquals | Token::Equals))) => op.clone(),
+        // TODO: gracefully handle non-assignment statements
+        Some(_) => return Err(ParseError::UnexpectedToken(source.next().unwrap()?)),
+    };
+    source.next();
+    let value = parse_addition(source, expression_arena)?;
+    match operand {
+        Token::Equals => Ok(AstStatement::Assignment(assignee, value)),
+        Token::ColonEquals => Ok(AstStatement::Declaration(assignee, value)),
+        _ => unreachable!(),
+    }
+}
+
+fn parse_addition(
     source: &mut TokenIter,
     expression_arena: &mut Vec<AstExpression>,
 ) -> Result<AstExpression, ParseError> {
     let left = next_arith_operand(source)?;
     let operand = match source.peek() {
-        None => return Ok(left),
+        None | Some(Ok(Token::Semicolon)) => return Ok(left),
         Some(Ok(Token::Plus)) => BinOp::Add,
         Some(Ok(Token::Minus)) => BinOp::Subtract,
         Some(_) => return Err(ParseError::UnexpectedToken(source.next().unwrap()?)),
     };
     source.next();
-    let right = addition(source, expression_arena)?;
+    let right = parse_addition(source, expression_arena)?;
     let left_ptr = expression_arena.len();
     expression_arena.push(left);
     expression_arena.push(right);
@@ -93,12 +117,15 @@ fn next_token(source: &mut TokenIter) -> Result<Token, ParseError> {
     Ok(source.next().ok_or(ParseError::UnexpectedEndOfInput)??)
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
     Word(String),
     Int(u64),
     Plus,
     Minus,
+    ColonEquals,
+    Equals,
+    Semicolon,
 }
 
 impl fmt::Display for Token {
@@ -109,6 +136,9 @@ impl fmt::Display for Token {
             Int(int) => write!(f, "int {}", int),
             Plus => write!(f, "+"),
             Minus => write!(f, "-"),
+            ColonEquals => write!(f, ":="),
+            Equals => write!(f, "="),
+            Semicolon => write!(f, ";"),
         }
     }
 }
@@ -163,31 +193,15 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
             }
             Some('+') => Some(Ok(Token::Plus)),
             Some('-') => Some(Ok(Token::Minus)),
+            Some('=') => Some(Ok(Token::Equals)),
+            Some(';') => Some(Ok(Token::Semicolon)),
+            Some(':') => match self.0.next() {
+                Some('=') => Some(Ok(Token::ColonEquals)),
+                other => todo!("add an error variant here"),
+            },
             Some(ch) if ch.is_whitespace() => self.next(),
             Some(ch) => Some(Err(TokenError::UnexpectedStart(ch))),
             None => None,
         }
     }
 }
-
-/*#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn arithmetic() {
-        let ast = parse(tokenize("1 + 2 - hello")).unwrap();
-        assert_eq!(
-            ast,
-            Expression::BinExpr(
-                BinOp::Add,
-                Box::new(Expression::Int(1)),
-                Box::new(Expression::BinExpr(
-                    BinOp::Subtract,
-                    Box::new(Expression::Int(2)),
-                    Box::new(Expression::Name("hello".to_string())),
-                )),
-            )
-        );
-    }
-}*/
