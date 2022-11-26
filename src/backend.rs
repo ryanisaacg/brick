@@ -1,7 +1,10 @@
-use crate::parser::{BinOp, Expression, Statement};
+use crate::{
+    parser::{AstExpression, AstStatement, BinOp},
+    typecheck::{BinOpNumeric, IRExpression, IRExpressionValue, IRStatement, PrimitiveType, Type},
+};
 use wasm_encoder::*;
 
-pub fn compile(root: Expression) -> Vec<u8> {
+pub fn compile(root: IRStatement, arena: &Vec<IRExpression>) -> Vec<u8> {
     let mut module = Module::new();
 
     // Encode the type section.
@@ -26,7 +29,11 @@ pub fn compile(root: Expression) -> Vec<u8> {
     let mut codes = CodeSection::new();
     let locals = vec![];
     let mut f = Function::new(locals);
-    expression(&mut f, root);
+    match root {
+        IRStatement::Expression(expr) => {
+            expression(&mut f, &expr, arena);
+        }
+    }
     f.instruction(&Instruction::End);
     codes.function(&f);
     module.section(&codes);
@@ -35,24 +42,30 @@ pub fn compile(root: Expression) -> Vec<u8> {
     module.finish()
 }
 
-fn expression(f: &mut Function, root: Expression) {
-    match root {
-        Expression::Int(constant) => {
-            f.instruction(&Instruction::I64Const(constant));
+fn expression(f: &mut Function, expr: &IRExpression, arena: &Vec<IRExpression>) {
+    match &expr.0 {
+        IRExpressionValue::Int(constant) => {
+            f.instruction(&Instruction::I64Const(*constant));
         }
-        Expression::BinOp(operator, left, right) => {
-            expression(f, *left);
-            expression(f, *right);
+        IRExpressionValue::BinaryNumeric(operator, left, right) => {
+            expression(f, &arena[*left], arena);
+            expression(f, &arena[*right], arena);
             match operator {
-                BinOp::Add => {
+                BinOpNumeric::Add => {
                     f.instruction(&Instruction::I64Add);
                 }
-                BinOp::Subtract => {
+                BinOpNumeric::Subtract => {
                     f.instruction(&Instruction::I64Sub);
                 }
-                _ => unimplemented!(),
             }
         }
-        Expression::Name(_) => unimplemented!(),
+    }
+}
+
+impl Into<ValType> for Type {
+    fn into(self) -> ValType {
+        match self {
+            Type::Primitive(PrimitiveType::Int64) => ValType::I64,
+        }
     }
 }
