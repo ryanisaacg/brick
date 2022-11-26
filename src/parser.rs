@@ -11,7 +11,7 @@ pub enum Statement {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Expression {
     Name(String),
-    Int(u64),
+    Int(i64),
     BinOp(BinOp, Box<Expression>, Box<Expression>),
 }
 
@@ -24,7 +24,7 @@ pub enum BinOp {
 
     BooleanOr,
     BooleanAnd,
-    
+
     Add,
     Subtract,
 }
@@ -66,7 +66,11 @@ fn addition(source: &mut TokenIter) -> Result<Expression, ParseError> {
 fn next_arith_operand(source: &mut TokenIter) -> Result<Expression, ParseError> {
     match next_token(source)? {
         Token::Word(word) => Ok(Expression::Name(word)),
-        Token::Int(int) => Ok(Expression::Int(int)),
+        Token::Int(int) => Ok(Expression::Int(int as i64)),
+        Token::Minus => match next_token(source)? {
+            Token::Int(int) => Ok(Expression::Int(-(int as i64))),
+            other => Err(ParseError::UnexpectedToken(other)),
+        },
         other => Err(ParseError::UnexpectedToken(other)),
     }
 }
