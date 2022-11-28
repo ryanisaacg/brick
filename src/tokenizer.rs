@@ -23,12 +23,17 @@ pub enum TokenValue {
     Int(u64),
     Plus,
     Minus,
-    ColonEquals,
     Equals,
     Semicolon,
     Period,
     OpenParen,
     CloseParen,
+    OpenBracket,
+    CloseBracket,
+    If,
+    Let,
+    True,
+    False,
 }
 
 impl fmt::Display for TokenValue {
@@ -39,12 +44,17 @@ impl fmt::Display for TokenValue {
             Int(int) => write!(f, "int {}", int),
             Plus => write!(f, "+"),
             Minus => write!(f, "-"),
-            ColonEquals => write!(f, ":="),
             Equals => write!(f, "="),
             Semicolon => write!(f, ";"),
             Period => write!(f, "."),
             OpenParen => write!(f, "("),
             CloseParen => write!(f, ")"),
+            OpenBracket => write!(f, "{{"),
+            CloseBracket => write!(f, "}}"),
+            Let => write!(f, "keyword let"),
+            If => write!(f, "keyword if"),
+            True => write!(f, "keyword true"),
+            False => write!(f, "keyword false"),
         }
     }
 }
@@ -120,7 +130,13 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         end = Some(p);
                     }
 
-                    TokenValue::Word(word)
+                    match word.as_str() {
+                        "if" => TokenValue::If,
+                        "true" => TokenValue::True,
+                        "false" => TokenValue::False,
+                        "let" => TokenValue::Let,
+                        _ => TokenValue::Word(word),
+                    }
                 }
                 digit @ '0'..='9' => {
                     let mut number: u64 = (digit as u32 - '0' as u32) as u64;
@@ -144,16 +160,11 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 '-' => TokenValue::Minus,
                 '=' => TokenValue::Equals,
                 ';' => TokenValue::Semicolon,
-                ':' => match self.next_char() {
-                    Some(('=', p)) => {
-                        end = Some(p);
-                        TokenValue::ColonEquals
-                    }
-                    _other => todo!("add an error variant here"),
-                },
                 '.' => TokenValue::Period,
                 '(' => TokenValue::OpenParen,
                 ')' => TokenValue::CloseParen,
+                '{' => TokenValue::OpenBracket,
+                '}' => TokenValue::CloseBracket,
                 ch if ch.is_whitespace() => return self.next(),
                 ch => return Some(Err(TokenError::UnexpectedStart(ch, start))),
             };
@@ -166,5 +177,21 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use TokenValue::*;
+
+    #[test]
+    fn reserved_words() {
+        let result = tokenize("test", "if let true false word".to_string())
+            .map(|token| token.map(|token| token.value))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(result, vec![If, Let, True, False, Word("word".to_string())]);
     }
 }

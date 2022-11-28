@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use crate::typecheck::{
-    BinOpNumeric, IRExpression, IRExpressionValue, IRStatement, IRStatementValue, PrimitiveType,
-    Type,
+    BinOpNumeric, IRContext, IRExpression, IRExpressionValue, IRStatement, IRStatementValue,
+    NumericType, Type,
 };
 use wasm_encoder::*;
 
-pub fn compile(statements: Vec<IRStatement>, arena: &Vec<IRExpression>) -> Vec<u8> {
+pub fn compile(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut module = Module::new();
 
     // Encode the type section.
@@ -29,30 +29,10 @@ pub fn compile(statements: Vec<IRStatement>, arena: &Vec<IRExpression>) -> Vec<u
 
     // Encode the code section.
     let mut codes = CodeSection::new();
-    // TODO: get locals
-    let locals = vec![(1, ValType::F64)];
-    let mut f = Function::new(locals);
-    let mut locals = HashMap::new();
-    let mut current_offset = 0;
+    let (locals, function_locals) = analyze_locals(&statements[..], arena);
+    let mut f = Function::new(function_locals);
     for statement in statements {
-        match statement.value {
-            IRStatementValue::Expression(expr) => {
-                expression(&mut f, &expr, arena, &locals);
-            }
-            IRStatementValue::Declaration(name, expr) => {
-                locals.insert(name, current_offset);
-                expression(&mut f, &expr, arena, &locals);
-                f.instruction(&Instruction::LocalSet(current_offset));
-                current_offset += 1;
-            }
-            IRStatementValue::Assignment(name, expr) => match locals.get(&name) {
-                Some(offset) => {
-                    expression(&mut f, &expr, arena, &locals);
-                    f.instruction(&Instruction::LocalSet(*offset));
-                }
-                None => todo!(),
-            },
-        }
+        emit_statement(&mut f, &statement, arena, &locals);
     }
     f.instruction(&Instruction::End);
     codes.function(&f);
@@ -62,18 +42,91 @@ pub fn compile(statements: Vec<IRStatement>, arena: &Vec<IRExpression>) -> Vec<u
     module.finish()
 }
 
-fn expression(
+// TODO: handle different bind points with the same name
+
+fn analyze_locals(
+    statements: &[IRStatement],
+    _arena: &IRContext,
+) -> (HashMap<String, u32>, Vec<(u32, ValType)>) {
+    let mut local_mapping = HashMap::new();
+    let mut current_offset = 0;
+    let mut locals = Vec::new();
+
+    let mut statements_to_analyze = Vec::new();
+    statements_to_analyze.extend(statements.iter());
+
+    // TODO: general-purpose traversal of the expression tree?
+
+    for val_type in [ValType::I32, ValType::I64, ValType::F32, ValType::F64] {
+        let mut val_offset = 0;
+        for statement in statements_to_analyze.iter() {
+            if let IRStatement {
+                value: IRStatementValue::Declaration(name, expr),
+                ..
+            } = statement
+            {
+                if represented_by(&expr.kind) == Some(val_type) {
+                    val_offset += 1;
+                    local_mapping.insert(name.to_string(), current_offset);
+                    current_offset += 1;
+                }
+            }
+        }
+        locals.push((val_offset, val_type));
+    }
+
+    (local_mapping, locals)
+}
+
+fn emit_statement(
+    f: &mut Function,
+    statement: &IRStatement,
+    arena: &IRContext,
+    locals: &HashMap<String, u32>,
+) {
+    match &statement.value {
+        IRStatementValue::Expression(expr) => {
+            emit_expression(f, &expr, arena, &locals);
+        }
+        IRStatementValue::Declaration(name, expr) => match locals.get(name) {
+            Some(offset) => {
+                emit_expression(f, &expr, arena, &locals);
+                f.instruction(&Instruction::LocalSet(*offset));
+            }
+            None => todo!(),
+        },
+    }
+}
+
+fn emit_expression(
     f: &mut Function,
     expr: &IRExpression,
-    arena: &Vec<IRExpression>,
+    arena: &IRContext,
     locals: &HashMap<String, u32>,
 ) {
     match &expr.value {
+        IRExpressionValue::Bool(val) => {
+            if *val {
+                f.instruction(&Instruction::I32Const(1));
+            } else {
+                f.instruction(&Instruction::I32Const(0));
+            }
+        }
         IRExpressionValue::Int(constant) => {
             f.instruction(&Instruction::I64Const(*constant));
         }
         IRExpressionValue::Float(constant) => {
             f.instruction(&Instruction::F64Const(*constant));
+        }
+        IRExpressionValue::Assignment(name, expr) => {
+            // TODO de-dupe with declaration
+            emit_expression(f, arena.expression(*expr), arena, locals);
+            match locals.get(name) {
+                Some(offset) => {
+                    f.instruction(&Instruction::LocalSet(*offset));
+                }
+                None => todo!(),
+            }
         }
         IRExpressionValue::LocalVariable(name) => match locals.get(name) {
             Some(offset) => {
@@ -82,31 +135,45 @@ fn expression(
             None => todo!(),
         },
         IRExpressionValue::BinaryNumeric(operator, left, right) => {
-            expression(f, &arena[*left], arena, locals);
-            expression(f, &arena[*right], arena, locals);
+            emit_expression(f, arena.expression(*left), arena, locals);
+            emit_expression(f, arena.expression(*right), arena, locals);
             match operator {
                 BinOpNumeric::Add => {
                     f.instruction(&match expr.kind {
-                        Type::Primitive(PrimitiveType::Int64) => Instruction::I64Add,
-                        Type::Primitive(PrimitiveType::Float64) => Instruction::F64Add,
+                        Type::Number(NumericType::Int64) => Instruction::I64Add,
+                        Type::Number(NumericType::Float64) => Instruction::F64Add,
+                        _ => unreachable!(),
                     });
                 }
                 BinOpNumeric::Subtract => {
                     f.instruction(&match expr.kind {
-                        Type::Primitive(PrimitiveType::Int64) => Instruction::I64Sub,
-                        Type::Primitive(PrimitiveType::Float64) => Instruction::F64Sub,
+                        Type::Number(NumericType::Int64) => Instruction::I64Sub,
+                        Type::Number(NumericType::Float64) => Instruction::F64Sub,
+                        _ => unreachable!(),
                     });
                 }
+            }
+        }
+        IRExpressionValue::If(predicate, block) => {
+            emit_expression(f, arena.expression(*predicate), arena, locals);
+            f.instruction(&Instruction::If(BlockType::Empty)); // TODO
+            emit_expression(f, arena.expression(*block), arena, locals);
+            f.instruction(&Instruction::End); // TODO
+        }
+        IRExpressionValue::Block(statements) => {
+            println!("{:?}", statements);
+            for statement in statements {
+                emit_statement(f, arena.statement(*statement), arena, locals);
             }
         }
     }
 }
 
-impl Into<ValType> for Type {
-    fn into(self) -> ValType {
-        match self {
-            Type::Primitive(PrimitiveType::Int64) => ValType::I64,
-            Type::Primitive(PrimitiveType::Float64) => ValType::F64,
-        }
+fn represented_by(kind: &Type) -> Option<ValType> {
+    match kind {
+        Type::Bool => Some(ValType::I32),
+        Type::Number(NumericType::Int64) => Some(ValType::I64),
+        Type::Number(NumericType::Float64) => Some(ValType::F64),
+        Type::Void => None,
     }
 }

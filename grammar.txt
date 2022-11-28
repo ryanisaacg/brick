@@ -2,12 +2,19 @@ word ::= /[A-Za-z_][A-Za-z_0-9]/
 integer ::= /[0-9_]/
 float ::= integer | integer "." integer
 
-statement ::= declaration | assignment | expression
-declaration ::= word ":=" expression ";"
+block ::= "{" block_contents "}"
+block_contents = statement | statement block_contents
+
+statement ::= declaration | assignment | expression | expression ";"
+declaration ::= "let" word "=" expression ";"
 assignment ::= word "=" expression ";"
 
-expression ::= sum_expr
+expression ::= if_expr | block_expr | assignment
+assignment ::= sum_expr | atom "=" sum_expr
 sum_expr ::= paren_expr | paren_expr "+" sum_expr | paren_expr "-" sum_expr
 paren_expr ::= atom | "(" expression ")"
 atom ::= word | integer | "-"integer | float | "-"float
 
+if_expr ::= "if" expression block_expr
+block_expr ::= "{" block_contents "}"
+block_contents ::= statement | statement block_contents
