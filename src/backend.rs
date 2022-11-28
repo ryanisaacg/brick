@@ -86,11 +86,11 @@ fn emit_statement(
 ) {
     match &statement.value {
         IRStatementValue::Expression(expr) => {
-            emit_expression(f, &expr, arena, &locals);
+            emit_expression(f, expr, arena, locals);
         }
         IRStatementValue::Declaration(name, expr) => match locals.get(name) {
             Some(offset) => {
-                emit_expression(f, &expr, arena, &locals);
+                emit_expression(f, expr, arena, locals);
                 f.instruction(&Instruction::LocalSet(*offset));
             }
             None => todo!(),

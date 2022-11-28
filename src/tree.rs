@@ -1,7 +1,9 @@
+type FindChildren<S, E> = Box<dyn Fn(Node<&S, &E>, &mut Vec<NodePtr>)>;
+
 pub struct SourceTree<Statement, Expression> {
     expressions: Vec<Expression>,
     statements: Vec<Statement>,
-    children_of: Box<dyn Fn(Node<&Statement, &Expression>, &mut Vec<NodePtr>)>,
+    children_of: FindChildren<Statement, Expression>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -18,7 +20,7 @@ pub enum NodePtr {
 
 impl<Statement, Expression> SourceTree<Statement, Expression> {
     pub fn new(
-        children_of: Box<dyn Fn(Node<&Statement, &Expression>, &mut Vec<NodePtr>)>,
+        children_of: FindChildren<Statement, Expression>,
     ) -> SourceTree<Statement, Expression> {
         SourceTree {
             expressions: Vec::new(),
@@ -54,7 +56,7 @@ impl<Statement, Expression> SourceTree<Statement, Expression> {
         index
     }
 
-    pub fn iter_from<'a>(&'a self, root: NodePtr) -> NodeIterator<'a, Statement, Expression> {
+    pub fn iter_from(&self, root: NodePtr) -> NodeIterator<'_, Statement, Expression> {
         NodeIterator {
             source_tree: self,
             call_stack: vec![root],

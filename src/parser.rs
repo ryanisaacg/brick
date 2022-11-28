@@ -7,14 +7,14 @@ use crate::{
     tree::{Node, NodePtr, SourceTree},
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AstStatement {
     pub value: AstStatementValue,
     pub start: Provenance,
     pub end: Provenance,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AstStatementValue {
     Declaration(String, usize),
     Expression(usize),
@@ -53,7 +53,7 @@ pub enum BinOp {
 pub enum ParseError {
     // TODO: reasons for the tokens being unexpected
     #[error("unexpected token {0}, {1}")]
-    UnexpectedToken(Lexeme, &'static str),
+    UnexpectedToken(Box<Lexeme>, &'static str),
     #[error("unexpected end of input")]
     UnexpectedEndOfInput,
     #[error("token error: {0}")]
@@ -73,7 +73,7 @@ pub fn parse(
 
     let mut statements = Vec::new();
 
-    while let Some(_) = source.peek() {
+    while source.peek().is_some() {
         let statement = parse_statement(&mut source, &mut context)?;
         let statement = context.add_statement(statement);
         statements.push(statement);
@@ -130,7 +130,7 @@ fn parse_declaration(
         } => name,
         other => {
             return Err(ParseError::UnexpectedToken(
-                other,
+                Box::new(other),
                 "expected word after 'let' in declaration",
             ))
         }
@@ -244,10 +244,10 @@ fn parse_assignment(
                     value: LexemeValue::Word(name),
                     start,
                     ..
-                } => (name, start.clone()),
+                } => (name, start),
                 other => {
                     return Err(ParseError::UnexpectedToken(
-                        other,
+                        Box::new(other),
                         "expected word on left side of =",
                     ))
                 }
@@ -390,7 +390,7 @@ fn next_atom(source: &mut TokenIter) -> Result<AstExpression, ParseError> {
                 ..
             } => try_decimal(source, -(int as i64), start, end),
             other => Err(ParseError::UnexpectedToken(
-                other,
+                Box::new(other),
                 "expected number after -",
             )),
         },
@@ -419,7 +419,7 @@ fn try_decimal(
             } => (value as f64, end),
             other => {
                 return Err(ParseError::UnexpectedToken(
-                    other,
+                    Box::new(other),
                     "expected number after decimal point",
                 ))
             }

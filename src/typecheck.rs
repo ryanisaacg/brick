@@ -111,7 +111,7 @@ pub struct Scope {
 
 // TODO: unification of separate IRContexts?
 
-pub fn typecheck<'a>(
+pub fn typecheck(
     statements: impl Iterator<Item = usize>,
     ir_context: &mut IRContext,
     parse_context: &ParseTree,
@@ -176,9 +176,9 @@ pub fn typecheck_expression(
     // TODO: analyze if, block
     Ok(match value {
         Assignment(name, expr) => {
-            let local_type = resolve(&local_scope[..], &name);
+            let local_type = resolve(local_scope, name);
             let expr = parse_context.expression(*expr);
-            let expr = typecheck_expression(expr, parse_context, ir_context, &local_scope[..])?;
+            let expr = typecheck_expression(expr, parse_context, ir_context, local_scope)?;
             match local_type {
                 None => todo!(),
                 Some(local_type) => {
@@ -282,8 +282,7 @@ pub fn typecheck_expression(
         }
         Block(parse_statements) => {
             let ir_statements = typecheck(
-                parse_statements
-                    .iter().cloned(),
+                parse_statements.iter().cloned(),
                 ir_context,
                 parse_context,
                 local_scope,
