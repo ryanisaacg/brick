@@ -301,7 +301,11 @@ pub fn typecheck_expression(
                 end,
             }
         }
-        BinExpr(op @ (BinOp::Add | BinOp::Subtract | BinOp::LessThan | BinOp::GreaterThan), left, right) => {
+        BinExpr(
+            op @ (BinOp::Add | BinOp::Subtract | BinOp::LessThan | BinOp::GreaterThan),
+            left,
+            right,
+        ) => {
             let left = typecheck_expression(
                 parse_context.expression(*left),
                 parse_context,
@@ -351,7 +355,6 @@ pub fn typecheck_expression(
                         start,
                         end,
                     }
-
                 }
             }
         }

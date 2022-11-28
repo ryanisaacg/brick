@@ -305,12 +305,21 @@ fn next_addition_expr(
     Ok(left)
 }
 
-fn make_bin_expr(context: &mut ParseTree, operator: BinOp, left: AstExpression, right: AstExpression) -> AstExpression {
+fn make_bin_expr(
+    context: &mut ParseTree,
+    operator: BinOp,
+    left: AstExpression,
+    right: AstExpression,
+) -> AstExpression {
     let start = left.start.clone();
     let end = right.end.clone();
 
     AstExpression {
-        value: AstExpressionValue::BinExpr(operator, context.add_expression(left), context.add_expression(right)),
+        value: AstExpressionValue::BinExpr(
+            operator,
+            context.add_expression(left),
+            context.add_expression(right),
+        ),
         start,
         end,
     }

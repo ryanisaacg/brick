@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::typecheck::{
-    BinOpNumeric, IRContext, IRExpression, IRExpressionValue, IRStatement, IRStatementValue,
-    NumericType, Type, BinOpComparison,
+    BinOpComparison, BinOpNumeric, IRContext, IRExpression, IRExpressionValue, IRStatement,
+    IRStatementValue, NumericType, Type,
 };
 use wasm_encoder::*;
 
