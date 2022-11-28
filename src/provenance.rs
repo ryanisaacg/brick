@@ -28,8 +28,7 @@ impl Provenance {
 
 impl fmt::Debug for Provenance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        //write!(f, "{}:{}", self.line, self.offset)
-        write!(f, "")
+        write!(f, "{}:{}", self.line, self.offset)
     }
 }
 

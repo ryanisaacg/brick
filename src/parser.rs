@@ -16,8 +16,20 @@ pub struct AstStatement {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AstStatementValue {
+    FunctionDeclaration {
+        name: String,
+        params: Vec<FunctionParameter>,
+        returns: Option<String>,
+        body: usize,
+    },
     Declaration(String, usize),
     Expression(usize),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct FunctionParameter {
+    pub name: String,
+    pub kind: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -53,8 +65,10 @@ pub enum BinOp {
 pub enum ParseError {
     #[error("unexpected token {0}, {1}")]
     UnexpectedLexeme(Box<Lexeme>, &'static str),
-    #[error("unexpected end of input at {0}")]
-    UnexpectedEndOfInput(Provenance),
+    #[error("unexpected end of input at {0}, {1}")]
+    UnexpectedEndOfInput(Provenance, &'static str),
+    #[error("expected type for parameter at {0}")]
+    MissingTypeForParam(Provenance),
     #[error("token error: {0}")]
     TokenError(#[from] LexError),
 }
@@ -72,8 +86,8 @@ pub fn parse(
 
     let mut statements = Vec::new();
 
-    while let Some(lexeme) = source.peek() {
-        let start = lexeme.as_ref().map_err(|e| e.clone())?.start;
+    while let Some(lexeme) = peek_token_optional(&mut source)? {
+        let start = lexeme.start;
         let statement = parse_statement(&mut source, &mut context, start)?;
         let statement = context.add_statement(statement);
         statements.push(statement);
@@ -87,18 +101,24 @@ fn parse_statement(
     context: &mut ParseTree,
     start: Provenance,
 ) -> Result<AstStatement, ParseError> {
-    let statement = match source
-        .peek()
-        .ok_or(ParseError::UnexpectedEndOfInput(start))?
-    {
-        Ok(Lexeme {
+    let statement = match peek_token(source, start, "expected let, fn, or expression")? {
+        Lexeme {
             value: LexemeValue::Let,
             start,
             ..
-        }) => {
+        } => {
             let start = *start;
             source.next();
-            parse_declaration(source, start, context)?
+            parse_declaration(source, context, start)?
+        }
+        Lexeme {
+            value: LexemeValue::Function,
+            start,
+            ..
+        } => {
+            let start = *start;
+            source.next();
+            parse_function_declaration(source, context, start)?
         }
         _ => {
             let expr = parse_expr(source, context, start)?;
@@ -111,36 +131,98 @@ fn parse_statement(
             }
         }
     };
-    if let Some(Ok(Lexeme {
+    if let Some(Lexeme {
         value: LexemeValue::Semicolon,
         ..
-    })) = source.peek()
+    }) = peek_token_optional(source)?
     {
         source.next();
     }
     Ok(statement)
 }
 
+fn parse_function_declaration(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+    start: Provenance,
+) -> Result<AstStatement, ParseError> {
+    let next = next_token(source, start, "expected function name")?;
+    let start = next.start;
+    let name = assert_lexeme_word(next, "expected name after 'fn'")?;
+
+    assert_next_lexeme_eq(
+        source.next(),
+        LexemeValue::OpenParen,
+        start,
+        "expected open parenthesis to start parameters",
+    )?;
+    let mut params = Vec::new();
+    let mut pos = start;
+    loop {
+        let token = peek_token(source, pos, "expected either parameters or close paren")?;
+        pos = token.start;
+        match token.value {
+            LexemeValue::CloseParen => break,
+            LexemeValue::Comma => {
+                source.next();
+            }
+            _ => {
+                let (name, end, type_hint) =
+                    parse_name_and_type_hint(source, pos, "expected parameter")?;
+                let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
+                pos = end;
+                params.push(FunctionParameter { name, kind });
+            }
+        }
+    }
+    assert_next_lexeme_eq(
+        source.next(),
+        LexemeValue::CloseParen,
+        start,
+        "expected closing parenthesis to start parameters",
+    )?;
+    let returns = if let Lexeme {
+        value: LexemeValue::Colon,
+        start,
+        ..
+    } = peek_token(source, start, "expected body after function declaration")?
+    {
+        let start = *start;
+        source.next();
+        Some(assert_lexeme_word(
+            next_token(source, start, "expected type after colon")?,
+            "",
+        )?)
+    } else {
+        None
+    };
+    let body = next_block(source, context, start)?;
+    let end = body.end;
+
+    Ok(AstStatement {
+        value: AstStatementValue::FunctionDeclaration {
+            name,
+            params,
+            returns,
+            body: context.add_expression(body),
+        },
+        start,
+        end,
+    })
+}
+
 fn parse_declaration(
     source: &mut TokenIter,
-    start: Provenance,
     context: &mut ParseTree,
+    start: Provenance,
 ) -> Result<AstStatement, ParseError> {
-    let name = match next_token(source, start)? {
-        Lexeme {
-            value: LexemeValue::Word(name),
-            ..
-        } => name,
-        other => {
-            return Err(ParseError::UnexpectedLexeme(
-                Box::new(other),
-                "expected word after 'let' in declaration",
-            ))
-        }
-    };
-    assert_lexeme_eq(
-        next_token(source, start)?,
+    // TODO: store type hint in declarations
+    let (name, start, _) =
+        parse_name_and_type_hint(source, start, "expected word after 'let' in declaration")?;
+    assert_next_lexeme_eq(
+        source.next(),
         LexemeValue::Equals,
+        start,
         "expected = after let binding target",
     )?;
     let value = parse_expr(source, context, start)?;
@@ -153,29 +235,50 @@ fn parse_declaration(
     })
 }
 
+fn parse_name_and_type_hint(
+    source: &mut TokenIter,
+    start: Provenance,
+    reason: &'static str,
+) -> Result<(String, Provenance, Option<String>), ParseError> {
+    let (name, _, mut end) = next_word(source, start, reason)?;
+    let type_hint = if let Some(Ok(Lexeme {
+        value: LexemeValue::Colon,
+        ..
+    })) = source.peek()
+    {
+        source.next();
+        let (type_hint, _, new_end) = next_word(source, end, "expected type hint after colon")?;
+        end = new_end;
+        Some(type_hint)
+    } else {
+        None
+    };
+
+    Ok((name, end, type_hint))
+}
+
 fn parse_expr(
     source: &mut TokenIter,
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    match source.peek() {
-        Some(Ok(Lexeme {
+    match peek_token(source, provenance, "expected expression")? {
+        Lexeme {
             value: token @ (LexemeValue::If | LexemeValue::While),
             start,
             ..
-        })) => {
+        } => {
             let start = *start;
             let token = token.clone();
             source.next();
             next_branch(source, context, token, start)
         }
-        Some(Ok(Lexeme {
+        Lexeme {
             value: LexemeValue::OpenBracket,
             start,
             ..
-        })) => {
+        } => {
             let start = *start;
-            source.next();
             next_block(source, context, start)
         }
         _ => parse_assignment(source, context, provenance),
@@ -189,12 +292,6 @@ fn next_branch(
     start: Provenance,
 ) -> Result<AstExpression, ParseError> {
     let predicate = parse_expr(source, context, start)?;
-    assert_next_lexeme_eq(
-        source.next(),
-        LexemeValue::OpenBracket,
-        start,
-        "expected { to start a block",
-    )?;
     let block = next_block(source, context, start)?;
 
     let predicate_ptr = context.add_expression(predicate);
@@ -217,16 +314,22 @@ fn next_block(
     context: &mut ParseTree,
     start: Provenance,
 ) -> Result<AstExpression, ParseError> {
+    let start = assert_next_lexeme_eq(
+        source.next(),
+        LexemeValue::OpenBracket,
+        start,
+        "expected { to start a block",
+    )?
+    .start;
     let mut statements = Vec::new();
     let mut end = start;
     loop {
-        match source.peek() {
-            None => return Err(ParseError::UnexpectedEndOfInput(start)),
-            Some(Ok(Lexeme {
+        match peek_token(source, start, "expected statement or close bracket")? {
+            Lexeme {
                 value: LexemeValue::CloseBracket,
                 end,
                 ..
-            })) => {
+            } => {
                 let end = *end;
                 source.next();
                 return Ok(AstExpression {
@@ -257,7 +360,7 @@ fn parse_assignment(
             ..
         })) => {
             let start = *start;
-            let (name, start) = match next_token(source, start)? {
+            let (name, start) = match next_token(source, start, "TODO")? {
                 Lexeme {
                     value: LexemeValue::Word(name),
                     start,
@@ -270,7 +373,12 @@ fn parse_assignment(
                     ))
                 }
             };
-            next_token(source, start)?; // TODO: assert that this is an =
+            assert_next_lexeme_eq(
+                source.next(),
+                LexemeValue::Equals,
+                start,
+                "expected equals in assignment",
+            )?;
             let value = parse_expr(source, context, start)?;
             let end = value.end;
             let value = context.add_expression(value);
@@ -290,13 +398,12 @@ fn next_compare_expr(
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    // TODO: seems busted
     let mut left = next_addition_expr(source, context, provenance)?;
 
-    while let Some(Ok(Lexeme {
+    while let Some(Lexeme {
         value: token @ (LexemeValue::LessThan | LexemeValue::GreaterThan),
         ..
-    })) = source.peek()
+    }) = peek_token_optional(source)?
     {
         let operator = match token {
             LexemeValue::LessThan => BinOp::LessThan,
@@ -316,13 +423,12 @@ fn next_addition_expr(
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    // TODO: seems busted
     let mut left = next_paren_expr(source, context, provenance)?;
 
-    while let Some(Ok(Lexeme {
+    while let Some(Lexeme {
         value: token @ (LexemeValue::Plus | LexemeValue::Minus),
         ..
-    })) = source.peek()
+    }) = peek_token_optional(source)?
     {
         let operator = match token {
             LexemeValue::Plus => BinOp::Add,
@@ -380,13 +486,17 @@ fn next_paren_expr(
 
         Ok(expr)
     } else {
-        next_atom(source, provenance)
+        next_atom(source, provenance, "TODO")
     }
 }
 
-fn next_atom(source: &mut TokenIter, provenance: Provenance) -> Result<AstExpression, ParseError> {
+fn next_atom(
+    source: &mut TokenIter,
+    provenance: Provenance,
+    reason: &'static str,
+) -> Result<AstExpression, ParseError> {
     // TODO: expectation reasoning
-    let Lexeme { value, start, end } = next_token(source, provenance)?;
+    let Lexeme { value, start, end } = next_token(source, provenance, reason)?;
     match value {
         LexemeValue::True => Ok(AstExpression {
             value: AstExpressionValue::Bool(true),
@@ -405,17 +515,19 @@ fn next_atom(source: &mut TokenIter, provenance: Provenance) -> Result<AstExpres
         }),
         LexemeValue::Int(int) => try_decimal(source, int as i64, start, end),
         // TODO: should this be treated as a unary operator instead?
-        LexemeValue::Minus => match next_token(source, start)? {
-            Lexeme {
-                value: LexemeValue::Int(int),
-                end,
-                ..
-            } => try_decimal(source, -(int as i64), start, end),
-            other => Err(ParseError::UnexpectedLexeme(
-                Box::new(other),
-                "expected number after -",
-            )),
-        },
+        LexemeValue::Minus => {
+            match next_token(source, start, "expected digit after negative sign")? {
+                Lexeme {
+                    value: LexemeValue::Int(int),
+                    end,
+                    ..
+                } => try_decimal(source, -(int as i64), start, end),
+                other => Err(ParseError::UnexpectedLexeme(
+                    Box::new(other),
+                    "expected number after -",
+                )),
+            }
+        }
         value => panic!("{:?}", value), //Err(ParseError::UnexpectedToken(Token { value, start, end })),
     }
 }
@@ -427,16 +539,16 @@ fn try_decimal(
     end: Provenance,
 ) -> Result<AstExpression, ParseError> {
     // TODO: handle overflow
-    if let Some(Ok(Lexeme {
+    if let Some(Lexeme {
         value: LexemeValue::Period,
         ..
-    })) = source.peek()
+    }) = peek_token_optional(source)?
     {
         source.next();
-        let (decimal, end) = match source
-            .next()
-            .ok_or(ParseError::UnexpectedEndOfInput(start))??
-        {
+        let (decimal, end) = match source.next().ok_or(ParseError::UnexpectedEndOfInput(
+            start,
+            "expected digit after decimal point",
+        ))?? {
             Lexeme {
                 value: LexemeValue::Int(value),
                 end,
@@ -469,10 +581,60 @@ fn try_decimal(
     }
 }
 
-fn next_token(source: &mut TokenIter, provenance: Provenance) -> Result<Lexeme, ParseError> {
-    Ok(source
+fn assert_lexeme_word(lexeme: Lexeme, reason: &'static str) -> Result<String, ParseError> {
+    match lexeme {
+        Lexeme {
+            value: LexemeValue::Word(word),
+            ..
+        } => Ok(word),
+        other => Err(ParseError::UnexpectedLexeme(Box::new(other), reason)),
+    }
+}
+
+fn next_token(
+    source: &mut TokenIter,
+    provenance: Provenance,
+    reason: &'static str,
+) -> Result<Lexeme, ParseError> {
+    let lex = source
         .next()
-        .ok_or(ParseError::UnexpectedEndOfInput(provenance))??)
+        .ok_or(ParseError::UnexpectedEndOfInput(provenance, reason))??;
+    Ok(lex)
+}
+
+fn next_word(
+    source: &mut TokenIter,
+    provenance: Provenance,
+    reason: &'static str,
+) -> Result<(String, Provenance, Provenance), ParseError> {
+    match next_token(source, provenance, reason)? {
+        Lexeme {
+            value: LexemeValue::Word(name),
+            start,
+            end,
+            ..
+        } => Ok((name, start, end)),
+        other => Err(ParseError::UnexpectedLexeme(Box::new(other), reason)),
+    }
+}
+
+fn peek_token<'a>(
+    source: &'a mut TokenIter,
+    provenance: Provenance,
+    reason: &'static str,
+) -> Result<&'a Lexeme, ParseError> {
+    Ok(source
+        .peek()
+        .ok_or(ParseError::UnexpectedEndOfInput(provenance, reason))?
+        .as_ref()
+        .map_err(|e| e.clone())?)
+}
+
+fn peek_token_optional<'a>(source: &'a mut TokenIter) -> Result<Option<&'a Lexeme>, ParseError> {
+    Ok(source
+        .peek()
+        .map(|result| result.as_ref().map_err(|e| e.clone()))
+        .transpose()?)
 }
 
 fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePtr>) {
@@ -481,7 +643,8 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
 
     match root {
         Node::Statement(AstStatement {
-            value: Declaration(_, child) | Expression(child),
+            value:
+                Declaration(_, child) | Expression(child) | FunctionDeclaration { body: child, .. },
             ..
         })
         | Node::Expression(AstExpression {
@@ -511,28 +674,31 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
         }) => {}
     }
 }
+
 fn assert_next_lexeme_eq(
     lexeme: Option<Result<Lexeme, LexError>>,
     target: LexemeValue,
     provenance: Provenance,
     reason: &'static str,
-) -> Result<(), ParseError> {
-    assert_lexeme_eq(
-        lexeme.ok_or(ParseError::UnexpectedEndOfInput(provenance))??,
-        target,
-        reason,
-    )
+) -> Result<Lexeme, ParseError> {
+    let lexeme = lexeme.ok_or(ParseError::UnexpectedEndOfInput(provenance, reason))??;
+    assert_lexeme_eq(&lexeme, target, reason)?;
+
+    Ok(lexeme)
 }
 
 fn assert_lexeme_eq(
-    lexeme: Lexeme,
+    lexeme: &Lexeme,
     target: LexemeValue,
     reason: &'static str,
 ) -> Result<(), ParseError> {
     if lexeme.value == target {
         Ok(())
     } else {
-        Err(ParseError::UnexpectedLexeme(Box::new(lexeme), reason))
+        Err(ParseError::UnexpectedLexeme(
+            Box::new(lexeme.clone()),
+            reason,
+        ))
     }
 }
 
@@ -542,9 +708,7 @@ mod test {
 
     use super::*;
 
-    fn tokens<'a>(
-        tokens: &'a [LexemeValue],
-    ) -> impl 'a + Iterator<Item = Result<Lexeme, LexError>> {
+    fn tokens(tokens: &[LexemeValue]) -> impl '_ + Iterator<Item = Result<Lexeme, LexError>> {
         let provenance = Provenance::new("test", "test", 0, 0);
         tokens.iter().map(move |token| {
             Ok(Lexeme {
@@ -648,6 +812,66 @@ mod test {
                     Expr(AstExpression { value: Name(_), .. }),
                 ],
             ]
+        );
+    }
+
+    #[test]
+    fn function() {
+        let (statements, ast) = parse(tokens(&[
+            LexemeValue::Function,
+            LexemeValue::Word("f".to_string()),
+            LexemeValue::OpenParen,
+            LexemeValue::Word("argument".to_string()),
+            LexemeValue::Colon,
+            LexemeValue::Word("i64".to_string()),
+            LexemeValue::CloseParen,
+            LexemeValue::Colon,
+            LexemeValue::Word("i64".to_string()),
+            LexemeValue::OpenBracket,
+            LexemeValue::Int(3),
+            LexemeValue::Plus,
+            LexemeValue::Int(5),
+            LexemeValue::CloseBracket,
+        ]))
+        .unwrap();
+        let nodes = statements
+            .into_iter()
+            .map(|statement| {
+                let mut line = Vec::new();
+                line.extend(ast.iter_from(NodePtr::Statement(statement)));
+                line
+            })
+            .collect::<Vec<_>>();
+        let matchable_nodes = nodes.iter().map(|line| &line[..]).collect::<Vec<_>>();
+
+        use AstExpressionValue::*;
+        use AstStatementValue::*;
+        use Node::{Expression as Expr, Statement};
+        assert_matches!(
+            matchable_nodes.as_slice(),
+            &[&[
+                Statement(AstStatement {
+                    value: FunctionDeclaration {
+                        returns: Some(_),
+                        ..
+                    },
+                    ..
+                }),
+                Expr(AstExpression {
+                    value: Block(_),
+                    ..
+                }),
+                Statement(AstStatement {
+                    value: Expression(_),
+                    ..
+                }),
+                Expr(AstExpression {
+                    value: BinExpr(BinOp::Add, _, _),
+                    ..
+                }),
+                Expr(AstExpression { value: Int(3), .. }),
+                Expr(AstExpression { value: Int(5), .. }),
+            ],]
         );
     }
 }

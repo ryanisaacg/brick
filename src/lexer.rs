@@ -24,19 +24,22 @@ pub enum LexemeValue {
     Plus,
     Minus,
     Equals,
+    Colon,
+    Comma,
     Semicolon,
     Period,
     OpenParen,
     CloseParen,
     OpenBracket,
     CloseBracket,
+    LessThan,
+    GreaterThan,
     If,
     While,
     Let,
     True,
     False,
-    LessThan,
-    GreaterThan,
+    Function,
 }
 
 impl fmt::Display for LexemeValue {
@@ -49,6 +52,8 @@ impl fmt::Display for LexemeValue {
             Minus => write!(f, "-"),
             Equals => write!(f, "="),
             Semicolon => write!(f, ";"),
+            Comma => write!(f, ","),
+            Colon => write!(f, ":"),
             Period => write!(f, "."),
             OpenParen => write!(f, "("),
             CloseParen => write!(f, ")"),
@@ -61,6 +66,7 @@ impl fmt::Display for LexemeValue {
             While => write!(f, "keyword while"),
             True => write!(f, "keyword true"),
             False => write!(f, "keyword false"),
+            Function => write!(f, "keyword fn"),
         }
     }
 }
@@ -142,6 +148,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "true" => LexemeValue::True,
                         "false" => LexemeValue::False,
                         "let" => LexemeValue::Let,
+                        "fn" => LexemeValue::Function,
                         _ => LexemeValue::Word(word),
                     }
                 }
@@ -166,7 +173,9 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 '+' => LexemeValue::Plus,
                 '-' => LexemeValue::Minus,
                 '=' => LexemeValue::Equals,
+                ',' => LexemeValue::Comma,
                 ';' => LexemeValue::Semicolon,
+                ':' => LexemeValue::Colon,
                 '.' => LexemeValue::Period,
                 '(' => LexemeValue::OpenParen,
                 ')' => LexemeValue::CloseParen,
@@ -196,11 +205,14 @@ mod test {
 
     #[test]
     fn reserved_words() {
-        let result = lex("test", "if let true false word".to_string())
+        let result = lex("test", "if let true false fn word".to_string())
             .map(|token| token.map(|token| token.value))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        assert_eq!(result, vec![If, Let, True, False, Word("word".to_string())]);
+        assert_eq!(
+            result,
+            vec![If, Let, True, False, Function, Word("word".to_string())]
+        );
     }
 }

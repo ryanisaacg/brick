@@ -4,15 +4,16 @@ stuff that I can pretty much do in any order:
 - integer promotion
 - integer -> float promotion
 - float -> int casting
+- blocks returning values
 
 stuff that requires thinking:
 - product types
 - sum types
 - pattern matching
-- function declarations
 - function calls
 - constant evaluation
 - external environment declarations
+- nested function declarations
 
 stuff that requires learning:
 - closures

@@ -1,78 +1,95 @@
 use std::collections::HashMap;
 
-use crate::typecheck::{
-    BinOpComparison, BinOpNumeric, IRContext, IRExpression, IRExpressionValue, IRStatement,
-    IRStatementValue, NumericType, Type,
+use crate::{
+    tree::{Node, NodePtr},
+    typecheck::{
+        BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRExpression, IRExpressionValue,
+        IRStatement, IRStatementValue, NumericType, Type,
+    },
 };
 use wasm_encoder::*;
 
 pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut module = Module::new();
-
-    // Encode the type section.
     let mut types = TypeSection::new();
-    let params = vec![];
-    let results = vec![ValType::I64];
-    types.function(params, results);
-    module.section(&types);
-
-    // Encode the function section.
     let mut functions = FunctionSection::new();
-    let type_index = 0;
-    functions.function(type_index);
-    module.section(&functions);
-
-    // Encode the export section.
     let mut exports = ExportSection::new();
-    exports.export("f", ExportKind::Func, 0);
-    module.section(&exports);
-
-    // Encode the code section.
     let mut codes = CodeSection::new();
-    let (locals, function_locals) = analyze_locals(&statements[..], arena);
-    let mut f = Function::new(function_locals);
+
+    let mut function_index = 0;
     for statement in statements {
-        emit_statement(&mut f, &statement, arena, &locals);
+        if let IRStatementValue::FunctionDeclaration(decl) = statement.value {
+            emit_function_types(&decl, &mut types);
+            functions.function(function_index);
+            // TODO: should we export function
+            exports.export(decl.name.as_ref(), ExportKind::Func, function_index);
+            let (locals, function_locals) = analyze_locals(&decl, arena);
+            let mut f = Function::new(function_locals);
+            emit_expression(&mut f, arena.expression(decl.body), arena, &locals);
+            f.instruction(&Instruction::End);
+            codes.function(&f);
+
+            function_index += 1;
+        }
     }
-    f.instruction(&Instruction::End);
-    codes.function(&f);
+
+    module.section(&types);
+    module.section(&functions);
+    module.section(&exports);
     module.section(&codes);
 
-    // Extract the encoded Wasm bytes for this module.
     module.finish()
+}
+
+fn emit_function_types(decl: &FunDecl, types: &mut TypeSection) {
+    // TODO: param types that can't be represented
+    let params = decl
+        .params
+        .iter()
+        .map(|param| represented_by(&param.kind).unwrap());
+    let results = if let Some(kind) = represented_by(&decl.returns) {
+        vec![kind]
+    } else {
+        // TODO
+        vec![]
+    };
+    types.function(params, results);
 }
 
 // TODO: handle different bind points with the same name
 
 fn analyze_locals(
-    statements: &[IRStatement],
-    _arena: &IRContext,
+    decl: &FunDecl,
+    arena: &IRContext,
 ) -> (HashMap<String, u32>, Vec<(u32, ValType)>) {
     let mut local_mapping = HashMap::new();
     let mut current_offset = 0;
     let mut locals = Vec::new();
 
-    let mut statements_to_analyze = Vec::new();
-    statements_to_analyze.extend(statements.iter());
-
-    // TODO: general-purpose traversal of the expression tree?
+    for param in decl.params.iter() {
+        let val_type = represented_by(&param.kind).unwrap(); // TODO: params unrepresentable
+        local_mapping.insert(param.name.to_string(), current_offset);
+        current_offset += 1;
+        locals.push((1, val_type));
+    }
 
     for val_type in [ValType::I32, ValType::I64, ValType::F32, ValType::F64] {
-        let mut val_offset = 0;
-        for statement in statements_to_analyze.iter() {
-            if let IRStatement {
+        let mut val_count = 0;
+        for node in arena.iter_from(NodePtr::Expression(decl.body)) {
+            if let Node::Statement(IRStatement {
                 value: IRStatementValue::Declaration(name, expr),
                 ..
-            } = statement
+            }) = node
             {
+                let expr = arena.expression(*expr);
                 if represented_by(&expr.kind) == Some(val_type) {
-                    val_offset += 1;
+                    val_count += 1;
                     local_mapping.insert(name.to_string(), current_offset);
                     current_offset += 1;
                 }
             }
         }
-        locals.push((val_offset, val_type));
+        locals.push((val_count, val_type));
     }
 
     (local_mapping, locals)
@@ -85,12 +102,15 @@ fn emit_statement(
     locals: &HashMap<String, u32>,
 ) {
     match &statement.value {
+        IRStatementValue::FunctionDeclaration(_) => {
+            unreachable!(); // TODO
+        }
         IRStatementValue::Expression(expr) => {
-            emit_expression(f, expr, arena, locals);
+            emit_expression(f, arena.expression(*expr), arena, locals);
         }
         IRStatementValue::Declaration(name, expr) => match locals.get(name) {
             Some(offset) => {
-                emit_expression(f, expr, arena, locals);
+                emit_expression(f, arena.expression(*expr), arena, locals);
                 f.instruction(&Instruction::LocalSet(*offset));
             }
             None => todo!(),

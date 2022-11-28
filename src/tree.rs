@@ -1,9 +1,23 @@
+use std::fmt;
+
 type FindChildren<S, E> = Box<dyn Fn(Node<&S, &E>, &mut Vec<NodePtr>)>;
+
+// TODO: maybe unify into one vec?
 
 pub struct SourceTree<Statement, Expression> {
     expressions: Vec<Expression>,
     statements: Vec<Statement>,
     children_of: FindChildren<Statement, Expression>,
+}
+
+impl<S: fmt::Debug, E: fmt::Debug> fmt::Debug for SourceTree<S, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "expressions: {:?}\nstatements: {:?}",
+            self.expressions, self.statements
+        )
+    }
 }
 
 #[derive(Copy, Clone, Debug)]

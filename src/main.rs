@@ -5,11 +5,9 @@ fn main() {
     let binary = compile(
         "hardcoded",
         r#"
-    let a = 0;
-    while a < 5 {
-        a = a + 1;
-    }
-    a"#,
+fn f(a: i64, b: i64): i64 {
+    a + b
+}"#,
     )
     .unwrap();
     fs::write("out.wasm", binary).expect("Unable to write file");

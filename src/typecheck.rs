@@ -5,6 +5,7 @@ use crate::{
         AstExpression, AstExpressionValue, AstStatement, AstStatementValue, BinOp, ParseTree,
     },
     provenance::Provenance,
+    tree::{Node, NodePtr, SourceTree},
 };
 use thiserror::Error;
 
@@ -34,32 +35,7 @@ impl fmt::Display for Type {
     }
 }
 
-pub struct IRContext {
-    pub statements: Vec<IRStatement>,
-    pub expressions: Vec<IRExpression>,
-}
-
-impl IRContext {
-    pub fn expression(&self, index: usize) -> &IRExpression {
-        &self.expressions[index]
-    }
-
-    pub fn statement(&self, index: usize) -> &IRStatement {
-        &self.statements[index]
-    }
-
-    fn add_expression(&mut self, expr: IRExpression) -> usize {
-        let index = self.expressions.len();
-        self.expressions.push(expr);
-        index
-    }
-
-    fn add_statement(&mut self, statement: IRStatement) -> usize {
-        let index = self.statements.len();
-        self.statements.push(statement);
-        index
-    }
-}
+pub type IRContext = SourceTree<IRStatement, IRExpression>;
 
 #[derive(Debug, Error)]
 pub enum TypecheckError {
@@ -76,8 +52,23 @@ pub struct IRStatement {
 
 #[derive(Debug)]
 pub enum IRStatementValue {
-    Expression(IRExpression),
-    Declaration(String, IRExpression),
+    FunctionDeclaration(FunDecl),
+    Expression(usize),
+    Declaration(String, usize),
+}
+
+#[derive(Debug)]
+pub struct FunDecl {
+    pub name: String,
+    pub params: Vec<FunctionParameter>,
+    pub returns: Type,
+    pub body: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct FunctionParameter {
+    pub name: String,
+    pub kind: Type,
 }
 
 #[derive(Debug)]
@@ -151,7 +142,7 @@ pub fn typecheck(
                         ir_context,
                         &local_scope[..],
                     )?;
-                    IRStatementValue::Expression(expr)
+                    IRStatementValue::Expression(ir_context.add_expression(expr))
                 }
                 AstStatementValue::Declaration(name, expr) => {
                     let expr = typecheck_expression(
@@ -163,7 +154,50 @@ pub fn typecheck(
                     local_scope[0]
                         .declarations
                         .insert(name.to_string(), expr.kind.clone());
-                    IRStatementValue::Declaration(name.clone(), expr)
+                    IRStatementValue::Declaration(name.clone(), ir_context.add_expression(expr))
+                }
+                AstStatementValue::FunctionDeclaration {
+                    name,
+                    params,
+                    returns,
+                    body,
+                } => {
+                    let params = params
+                        .iter()
+                        .map(|param| FunctionParameter {
+                            name: param.name.to_string(),
+                            kind: type_name_to_type(param.kind.as_ref()),
+                        })
+                        .collect::<Vec<_>>();
+                    let mut local_scope = local_scope.clone();
+                    local_scope.insert(
+                        0,
+                        Scope {
+                            declarations: params
+                                .iter()
+                                .map(|FunctionParameter { name, kind }| {
+                                    (name.to_string(), kind.clone())
+                                })
+                                .collect(),
+                        },
+                    );
+                    let body = typecheck_expression(
+                        parse_context.expression(*body),
+                        parse_context,
+                        ir_context,
+                        &local_scope[..],
+                    )?;
+                    let returns = returns
+                        .as_ref()
+                        .map(|type_name| type_name_to_type(type_name.as_ref()))
+                        .unwrap_or(Type::Void);
+
+                    IRStatementValue::FunctionDeclaration(FunDecl {
+                        name: name.to_string(),
+                        params,
+                        returns,
+                        body: ir_context.add_expression(body),
+                    })
                 }
             };
 
@@ -374,6 +408,19 @@ pub fn typecheck_expression(
     })
 }
 
+fn type_name_to_type(name: &str) -> Type {
+    use NumericType::*;
+    use Type::*;
+
+    match name {
+        "void" => Void,
+        "bool" => Bool,
+        "i64" => Number(Int64),
+        "f64" => Number(Float64),
+        _ => todo!(),
+    }
+}
+
 fn resolve<'a, 'b>(scope: &'a [Scope], name: &'b str) -> Option<&'a Type> {
     for level in scope {
         if let Some(kind) = level.declarations.get(name) {
@@ -382,4 +429,48 @@ fn resolve<'a, 'b>(scope: &'a [Scope], name: &'b str) -> Option<&'a Type> {
     }
 
     None
+}
+
+pub fn traverse(root: Node<&IRStatement, &IRExpression>, children: &mut Vec<NodePtr>) {
+    use IRExpressionValue::*;
+    use IRStatementValue::*;
+
+    match root {
+        Node::Statement(IRStatement {
+            value:
+                Declaration(_, child)
+                | Expression(child)
+                | FunctionDeclaration(FunDecl { body: child, .. }),
+            ..
+        })
+        | Node::Expression(IRExpression {
+            value: Assignment(_, child),
+            ..
+        }) => {
+            children.push(NodePtr::Expression(*child));
+        }
+        Node::Expression(IRExpression {
+            value:
+                BinaryNumeric(_, left, right)
+                | Comparison(_, left, right)
+                | If(left, right)
+                | While(left, right),
+            ..
+        }) => {
+            children.push(NodePtr::Expression(*right));
+            children.push(NodePtr::Expression(*left));
+        }
+        Node::Expression(IRExpression {
+            value: Block(statements),
+            ..
+        }) => {
+            for statement in statements {
+                children.push(NodePtr::Statement(*statement));
+            }
+        }
+        Node::Expression(IRExpression {
+            value: Bool(_) | Int(_) | Float(_) | LocalVariable(_),
+            ..
+        }) => {}
+    }
 }

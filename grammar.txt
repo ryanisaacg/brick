@@ -5,9 +5,16 @@ float ::= integer | integer "." integer
 block ::= "{" block_contents "}"
 block_contents = statement | statement block_contents
 
-statement ::= declaration | assignment | expression | expression ";"
+statement ::= declaration | assignment | function | expression | expression ";"
 declaration ::= "let" word "=" expression ";"
 assignment ::= word "=" expression ";"
+function ::= "fn" word "(" function_args ")" type_annotation block
+function_args ::= word type_annotation | 
+    word type_annotation "," |
+    word type_annotation "," function_args
+
+type_annotation ::= ":" type
+type ::= word
 
 expression ::= if_expr | while_expr | block_expr | assignment_expr
 assignment_expr ::= compare_expr | atom "=" compare_expr

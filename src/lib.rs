@@ -8,7 +8,7 @@ pub mod tree;
 pub mod typecheck;
 
 use parser::ParseError;
-use typecheck::TypecheckError;
+use typecheck::{traverse, TypecheckError};
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -21,10 +21,7 @@ pub enum CompileError {
 pub fn compile(source_name: &'static str, contents: &str) -> Result<Vec<u8>, CompileError> {
     let tokens = lexer::lex(source_name, contents.to_string());
     let (statement, arena) = parser::parse(tokens)?;
-    let mut ir_context = typecheck::IRContext {
-        statements: Vec::new(),
-        expressions: Vec::new(),
-    };
+    let mut ir_context = typecheck::IRContext::new(Box::new(traverse));
     let ir = typecheck::typecheck(statement.into_iter(), &mut ir_context, &arena, &[])?;
     Ok(backend::emit(ir, &ir_context))
 }
