@@ -160,8 +160,16 @@ fn emit_expression(
             emit_expression(f, arena.expression(*block), arena, locals);
             f.instruction(&Instruction::End); // TODO
         }
+        IRExpressionValue::While(predicate, block) => {
+            f.instruction(&Instruction::Loop(BlockType::Empty));
+            emit_expression(f, arena.expression(*predicate), arena, locals);
+            f.instruction(&Instruction::If(BlockType::Empty)); // TODO
+            emit_expression(f, arena.expression(*block), arena, locals);
+            f.instruction(&Instruction::Br(1)); // TODO: does this work
+            f.instruction(&Instruction::End); // TODO
+            f.instruction(&Instruction::End);
+        }
         IRExpressionValue::Block(statements) => {
-            println!("{:?}", statements);
             for statement in statements {
                 emit_statement(f, arena.statement(*statement), arena, locals);
             }

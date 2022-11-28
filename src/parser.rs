@@ -36,6 +36,7 @@ pub enum AstExpressionValue {
     Bool(bool),
     BinExpr(BinOp, usize, usize),
     If(usize, usize),
+    While(usize, usize),
     /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
 }
@@ -142,13 +143,14 @@ fn parse_expr(
 ) -> Result<AstExpression, ParseError> {
     match source.peek() {
         Some(Ok(Token {
-            value: TokenValue::If,
+            value: token @ (TokenValue::If | TokenValue::While),
             start,
             ..
         })) => {
             let start = start.clone();
+            let token = token.clone();
             source.next();
-            next_if(source, context, start)
+            next_branch(source, context, token, start)
         }
         Some(Ok(Token {
             value: TokenValue::OpenBracket,
@@ -163,9 +165,10 @@ fn parse_expr(
     }
 }
 
-fn next_if(
+fn next_branch(
     source: &mut TokenIter,
     context: &mut ParseTree,
+    token: TokenValue,
     start: Provenance,
 ) -> Result<AstExpression, ParseError> {
     let predicate = parse_expr(source, context)?;
@@ -177,7 +180,11 @@ fn next_if(
     let block_ptr = context.add_expression(block);
 
     Ok(AstExpression {
-        value: AstExpressionValue::If(predicate_ptr, block_ptr),
+        value: if token == TokenValue::If {
+            AstExpressionValue::If(predicate_ptr, block_ptr)
+        } else {
+            AstExpressionValue::While(predicate_ptr, block_ptr)
+        },
         start,
         end,
     })
@@ -389,11 +396,7 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
 
     match root {
         Node::Statement(AstStatement {
-            value: Declaration(_, child),
-            ..
-        })
-        | Node::Statement(AstStatement {
-            value: Expression(child),
+            value: Declaration(_, child) | Expression(child),
             ..
         })
         | Node::Expression(AstExpression {
@@ -403,11 +406,7 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
             children.push(NodePtr::Expression(*child));
         }
         Node::Expression(AstExpression {
-            value: BinExpr(_, left, right),
-            ..
-        })
-        | Node::Expression(AstExpression {
-            value: If(left, right),
+            value: BinExpr(_, left, right) | If(left, right) | While(left, right),
             ..
         }) => {
             children.push(NodePtr::Expression(*left));

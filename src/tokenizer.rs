@@ -31,6 +31,7 @@ pub enum TokenValue {
     OpenBracket,
     CloseBracket,
     If,
+    While,
     Let,
     True,
     False,
@@ -53,6 +54,7 @@ impl fmt::Display for TokenValue {
             CloseBracket => write!(f, "}}"),
             Let => write!(f, "keyword let"),
             If => write!(f, "keyword if"),
+            While => write!(f, "keyword while"),
             True => write!(f, "keyword true"),
             False => write!(f, "keyword false"),
         }
@@ -132,6 +134,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
 
                     match word.as_str() {
                         "if" => TokenValue::If,
+                        "while" => TokenValue::While,
                         "true" => TokenValue::True,
                         "false" => TokenValue::False,
                         "let" => TokenValue::Let,

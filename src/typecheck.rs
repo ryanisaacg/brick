@@ -84,6 +84,7 @@ pub enum IRExpressionValue {
     LocalVariable(String),
     BinaryNumeric(BinOpNumeric, usize, usize),
     If(usize, usize),
+    While(usize, usize),
     /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
 }
@@ -236,6 +237,34 @@ pub fn typecheck_expression(
             // TODO: if-else can return types
             IRExpression {
                 value: IRExpressionValue::If(
+                    ir_context.add_expression(predicate),
+                    ir_context.add_expression(block),
+                ),
+                kind: Type::Void,
+                start,
+                end,
+            }
+        }
+        // TODO
+        While(predicate, block) => {
+            let predicate = typecheck_expression(
+                parse_context.expression(*predicate),
+                parse_context,
+                ir_context,
+                local_scope,
+            )?;
+            if predicate.kind != Type::Bool {
+                todo!(); // compiler diagnostic
+            }
+            let block = typecheck_expression(
+                parse_context.expression(*block),
+                parse_context,
+                ir_context,
+                local_scope,
+            )?;
+            // TODO: if-else can return types
+            IRExpression {
+                value: IRExpressionValue::While(
                     ir_context.add_expression(predicate),
                     ir_context.add_expression(block),
                 ),

@@ -14,7 +14,7 @@ fn main() {
     if true {
         a = 3.0;
     }
-    if false {
+    while false {
         a = 4.0;
     }
     a"#
