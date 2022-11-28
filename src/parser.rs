@@ -67,14 +67,16 @@ pub type ParseTree = SourceTree<AstStatement, AstExpression>;
 
 pub fn parse(
     mut source: impl Iterator<Item = Result<Token, TokenError>>,
-) -> Result<(Vec<AstStatement>, ParseTree), ParseError> {
+) -> Result<(Vec<usize>, ParseTree), ParseError> {
     let mut source = itertools::peek_nth(&mut source as TokenIterInner<'_>);
     let mut context = ParseTree::new(Box::new(traverse));
 
     let mut statements = Vec::new();
 
     while let Some(_) = source.peek() {
-        statements.push(parse_statement(&mut source, &mut context)?);
+        let statement = parse_statement(&mut source, &mut context)?;
+        let statement = context.add_statement(statement);
+        statements.push(statement);
     }
 
     Ok((statements, context))
@@ -447,8 +449,8 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
             value: BinExpr(_, left, right) | If(left, right) | While(left, right),
             ..
         }) => {
-            children.push(NodePtr::Expression(*left));
             children.push(NodePtr::Expression(*right));
+            children.push(NodePtr::Expression(*left));
         }
         Node::Expression(AstExpression {
             value: Block(statements),
@@ -467,6 +469,8 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
 
 #[cfg(test)]
 mod test {
+    use matches::assert_matches;
+
     use super::*;
 
     fn tokens<'a>(
@@ -515,5 +519,38 @@ mod test {
             TokenValue::Word("a".to_string()),
         ]))
         .unwrap();
+        let nodes = statements.into_iter().map(|statement| {
+            let mut line = Vec::new();
+            line.extend(ast.iter_from(NodePtr::Statement(statement)));
+            line
+        }).collect::<Vec<_>>();
+        let matchable_nodes = nodes.iter().map(|line| &line[..]).collect::<Vec<_>>();
+
+        use Node::{Statement, Expression as Expr};
+        use AstStatementValue::*;
+        use AstExpressionValue::*;
+        assert_matches!(matchable_nodes.as_slice(), &[
+            &[
+                Statement(AstStatement { value: Declaration(_, _), .. }),
+                Expr(AstExpression { value: BinExpr(BinOp::Add, _, _), .. }),
+                Expr(AstExpression { value: BinExpr(BinOp::Subtract, _, _), .. }),
+                Expr(AstExpression { value: Int(15), .. }),
+                Expr(AstExpression { value: Int(10), .. }),
+                Expr(AstExpression { value: Int(3), .. }),
+            ],
+            &[
+                Statement(AstStatement { value: Expression(_), .. }),
+                Expr(AstExpression { value: If(_, _), .. }),
+                Expr(AstExpression { value: Bool(true), .. }),
+                Expr(AstExpression { value: Block(_), .. }),
+                Statement(AstStatement { value: Expression(_), .. }),
+                Expr(AstExpression { value: Assignment(_, _), .. }),
+                Expr(AstExpression { value: Int(3), .. }),
+            ],
+            &[
+                Statement(AstStatement { value: Expression(_), .. }),
+                Expr(AstExpression { value: Word(_), .. }),
+            ],
+        ]);
     }
 }

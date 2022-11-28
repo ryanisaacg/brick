@@ -1,7 +1,7 @@
 use std::fmt;
 
 // TODO: don't include whole-source view in debug
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Provenance {
     source_name: &'static str,
     #[allow(dead_code)]
@@ -23,6 +23,13 @@ impl Provenance {
             line,
             offset,
         }
+    }
+}
+
+impl fmt::Debug for Provenance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        //write!(f, "{}:{}", self.line, self.offset)
+        write!(f, "")
     }
 }
 

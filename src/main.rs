@@ -22,7 +22,7 @@ fn main() {
         statements: Vec::new(),
         expressions: Vec::new(),
     };
-    let ir = typecheck(statement.iter(), &mut ir_context, &arena, &[]).unwrap();
+    let ir = typecheck(statement.into_iter(), &mut ir_context, &arena, &[]).unwrap();
     let binary = compile(ir, &ir_context);
     fs::write("out.wasm", binary).expect("Unable to write file");
 }

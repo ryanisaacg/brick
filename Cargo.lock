@@ -14,6 +14,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "itertools",
+ "matches",
  "thiserror",
  "wasm-encoder",
 ]
@@ -38,6 +39,12 @@ name = "leb128"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "884e2677b40cc8c339eaefcb701c32ef1fd2493d71118dc0ca4b6a736c93bd67"
+
+[[package]]
+name = "matches"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
 
 [[package]]
 name = "proc-macro2"

@@ -112,7 +112,7 @@ pub struct Scope {
 // TODO: unification of separate IRContexts?
 
 pub fn typecheck<'a>(
-    statements: impl Iterator<Item = &'a AstStatement>,
+    statements: impl Iterator<Item = usize>,
     ir_context: &mut IRContext,
     parse_context: &ParseTree,
     scopes: &[Scope],
@@ -126,7 +126,7 @@ pub fn typecheck<'a>(
 
     let statements = statements
         .map(|statement| {
-            let AstStatement { value, start, end } = statement;
+            let AstStatement { value, start, end } = parse_context.statement(statement);
             let start = start.clone();
             let end = end.clone();
 
@@ -283,8 +283,7 @@ pub fn typecheck_expression(
         Block(parse_statements) => {
             let ir_statements = typecheck(
                 parse_statements
-                    .iter()
-                    .map(|statement| parse_context.statement(*statement)),
+                    .iter().cloned(),
                 ir_context,
                 parse_context,
                 local_scope,

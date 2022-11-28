@@ -4,13 +4,13 @@ pub struct SourceTree<Statement, Expression> {
     children_of: Box<dyn Fn(Node<&Statement, &Expression>, &mut Vec<NodePtr>)>,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Node<Statement, Expression> {
     Statement(Statement),
     Expression(Expression),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum NodePtr {
     Statement(usize),
     Expression(usize),
