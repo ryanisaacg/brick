@@ -9,8 +9,9 @@ statement ::= declaration | assignment | expression | expression ";"
 declaration ::= "let" word "=" expression ";"
 assignment ::= word "=" expression ";"
 
-expression ::= if_expr | while_expr | block_expr | assignment
-assignment ::= sum_expr | atom "=" sum_expr
+expression ::= if_expr | while_expr | block_expr | assignment_expr
+assignment_expr ::= compare_expr | atom "=" compare_expr
+compare_expr ::= sum_expr | sum_expr ">" compare_expr | sum_expr "<" compare_expr
 sum_expr ::= paren_expr | paren_expr "+" sum_expr | paren_expr "-" sum_expr
 paren_expr ::= atom | "(" expression ")"
 atom ::= word | integer | "-"integer | float | "-"float

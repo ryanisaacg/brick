@@ -45,6 +45,8 @@ pub enum AstExpressionValue {
 pub enum BinOp {
     Add,
     Subtract,
+    LessThan,
+    GreaterThan,
 }
 
 #[derive(Debug, Error)]
@@ -249,11 +251,36 @@ fn parse_assignment(
                 end,
             })
         }
-        _ => parse_addition(source, context),
+        _ => next_compare_expr(source, context),
     }
 }
 
-fn parse_addition(
+fn next_compare_expr(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+) -> Result<AstExpression, ParseError> {
+    // TODO: seems busted
+    let mut left = next_addition_expr(source, context)?;
+
+    while let Some(Ok(Token {
+        value: token @ (TokenValue::LessThan | TokenValue::GreaterThan),
+        ..
+    })) = source.peek()
+    {
+        let operator = match token {
+            TokenValue::LessThan => BinOp::LessThan,
+            TokenValue::GreaterThan => BinOp::GreaterThan,
+            _ => unimplemented!(),
+        };
+        source.next();
+        let right = next_compare_expr(source, context)?;
+        left = make_bin_expr(context, operator, left, right);
+    }
+
+    Ok(left)
+}
+
+fn next_addition_expr(
     source: &mut TokenIter,
     context: &mut ParseTree,
 ) -> Result<AstExpression, ParseError> {
@@ -272,19 +299,21 @@ fn parse_addition(
         };
         source.next();
         let right = next_paren_expr(source, context)?;
-        let start = left.start.clone();
-        let end = right.end.clone();
-        let left_ptr = context.add_expression(left);
-        let right_ptr = context.add_expression(right);
-
-        left = AstExpression {
-            value: AstExpressionValue::BinExpr(operator, left_ptr, right_ptr),
-            start,
-            end,
-        };
+        left = make_bin_expr(context, operator, left, right);
     }
 
     Ok(left)
+}
+
+fn make_bin_expr(context: &mut ParseTree, operator: BinOp, left: AstExpression, right: AstExpression) -> AstExpression {
+    let start = left.start.clone();
+    let end = right.end.clone();
+
+    AstExpression {
+        value: AstExpressionValue::BinExpr(operator, context.add_expression(left), context.add_expression(right)),
+        start,
+        end,
+    }
 }
 
 fn next_paren_expr(

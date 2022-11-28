@@ -10,12 +10,9 @@ fn main() {
     let tokens = tokenize(
         "hardcoded",
         r#"
-    let a = 5.0 - (1.0 - 2.0) + 10.0;
-    if true {
-        a = 3.0;
-    }
-    while false {
-        a = 4.0;
+    let a = 0;
+    while a < 5 {
+        a = a + 1;
     }
     a"#
         .to_string(),

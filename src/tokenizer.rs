@@ -35,6 +35,8 @@ pub enum TokenValue {
     Let,
     True,
     False,
+    LessThan,
+    GreaterThan,
 }
 
 impl fmt::Display for TokenValue {
@@ -52,6 +54,8 @@ impl fmt::Display for TokenValue {
             CloseParen => write!(f, ")"),
             OpenBracket => write!(f, "{{"),
             CloseBracket => write!(f, "}}"),
+            LessThan => write!(f, "<"),
+            GreaterThan => write!(f, ">"),
             Let => write!(f, "keyword let"),
             If => write!(f, "keyword if"),
             While => write!(f, "keyword while"),
@@ -168,6 +172,8 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 ')' => TokenValue::CloseParen,
                 '{' => TokenValue::OpenBracket,
                 '}' => TokenValue::CloseBracket,
+                '<' => TokenValue::LessThan,
+                '>' => TokenValue::GreaterThan,
                 ch if ch.is_whitespace() => return self.next(),
                 ch => return Some(Err(TokenError::UnexpectedStart(ch, start))),
             };

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::typecheck::{
     BinOpNumeric, IRContext, IRExpression, IRExpressionValue, IRStatement, IRStatementValue,
-    NumericType, Type,
+    NumericType, Type, BinOpComparison,
 };
 use wasm_encoder::*;
 
@@ -12,7 +12,7 @@ pub fn compile(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     // Encode the type section.
     let mut types = TypeSection::new();
     let params = vec![];
-    let results = vec![ValType::F64];
+    let results = vec![ValType::I64];
     types.function(params, results);
     module.section(&types);
 
@@ -149,6 +149,27 @@ fn emit_expression(
                     f.instruction(&match expr.kind {
                         Type::Number(NumericType::Int64) => Instruction::I64Sub,
                         Type::Number(NumericType::Float64) => Instruction::F64Sub,
+                        _ => unreachable!(),
+                    });
+                }
+            }
+        }
+        IRExpressionValue::Comparison(operator, left, right) => {
+            let left = arena.expression(*left);
+            emit_expression(f, left, arena, locals);
+            emit_expression(f, arena.expression(*right), arena, locals);
+            match operator {
+                BinOpComparison::GreaterThan => {
+                    f.instruction(&match left.kind {
+                        Type::Number(NumericType::Int64) => Instruction::I64GtS,
+                        Type::Number(NumericType::Float64) => Instruction::F64Gt,
+                        _ => unreachable!(),
+                    });
+                }
+                BinOpComparison::LessThan => {
+                    f.instruction(&match left.kind {
+                        Type::Number(NumericType::Int64) => Instruction::I64LtS,
+                        Type::Number(NumericType::Float64) => Instruction::F64Lt,
                         _ => unreachable!(),
                     });
                 }

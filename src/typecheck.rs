@@ -83,6 +83,7 @@ pub enum IRExpressionValue {
     Float(f64),
     LocalVariable(String),
     BinaryNumeric(BinOpNumeric, usize, usize),
+    Comparison(BinOpComparison, usize, usize),
     If(usize, usize),
     While(usize, usize),
     /// Importantly, Block references statements, not expressions!
@@ -95,6 +96,12 @@ pub enum IRExpressionValue {
 pub enum BinOpNumeric {
     Add,
     Subtract,
+}
+
+#[derive(Debug)]
+pub enum BinOpComparison {
+    LessThan,
+    GreaterThan,
 }
 
 #[derive(Clone, Debug)]
@@ -294,7 +301,7 @@ pub fn typecheck_expression(
                 end,
             }
         }
-        BinExpr(op @ (BinOp::Add | BinOp::Subtract), left, right) => {
+        BinExpr(op @ (BinOp::Add | BinOp::Subtract | BinOp::LessThan | BinOp::GreaterThan), left, right) => {
             let left = typecheck_expression(
                 parse_context.expression(*left),
                 parse_context,
@@ -314,18 +321,37 @@ pub fn typecheck_expression(
                 return Err(TypecheckError::BinaryOperandMismatch);
             } else {
                 let left_type = left.kind.clone();
-                IRExpression {
-                    value: IRExpressionValue::BinaryNumeric(
-                        match op {
-                            BinOp::Add => BinOpNumeric::Add,
-                            BinOp::Subtract => BinOpNumeric::Subtract,
-                        },
-                        ir_context.add_expression(left),
-                        ir_context.add_expression(right),
-                    ),
-                    kind: left_type,
-                    start,
-                    end,
+                if *op == BinOp::Add || *op == BinOp::Subtract {
+                    IRExpression {
+                        value: IRExpressionValue::BinaryNumeric(
+                            match op {
+                                BinOp::Add => BinOpNumeric::Add,
+                                BinOp::Subtract => BinOpNumeric::Subtract,
+                                _ => unreachable!(),
+                            },
+                            ir_context.add_expression(left),
+                            ir_context.add_expression(right),
+                        ),
+                        kind: left_type,
+                        start,
+                        end,
+                    }
+                } else {
+                    IRExpression {
+                        value: IRExpressionValue::Comparison(
+                            match op {
+                                BinOp::LessThan => BinOpComparison::LessThan,
+                                BinOp::GreaterThan => BinOpComparison::GreaterThan,
+                                _ => unreachable!(),
+                            },
+                            ir_context.add_expression(left),
+                            ir_context.add_expression(right),
+                        ),
+                        kind: Type::Bool,
+                        start,
+                        end,
+                    }
+
                 }
             }
         }
