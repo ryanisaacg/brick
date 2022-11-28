@@ -12,6 +12,7 @@ wasm-encoder = "0.20.0"
 
 [dev-dependencies]
 anyhow = "1.0"
+wasmtime = "3.0.0"
 
 [lib]
 name = "brick"

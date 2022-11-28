@@ -6,7 +6,7 @@ use crate::typecheck::{
 };
 use wasm_encoder::*;
 
-pub fn compile(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
+pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut module = Module::new();
 
     // Encode the type section.

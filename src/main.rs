@@ -1,28 +1,16 @@
-use brick::{
-    backend::compile,
-    parser::parse,
-    lexer::lex,
-    typecheck::{typecheck, IRContext},
-};
+use brick::compile;
 use std::fs;
 
 fn main() {
-    let tokens = lex(
+    let binary = compile(
         "hardcoded",
         r#"
     let a = 0;
     while a < 5 {
         a = a + 1;
     }
-    a"#
-        .to_string(),
-    );
-    let (statement, arena) = parse(tokens).unwrap();
-    let mut ir_context = IRContext {
-        statements: Vec::new(),
-        expressions: Vec::new(),
-    };
-    let ir = typecheck(statement.into_iter(), &mut ir_context, &arena, &[]).unwrap();
-    let binary = compile(ir, &ir_context);
+    a"#,
+    )
+    .unwrap();
     fs::write("out.wasm", binary).expect("Unable to write file");
 }
