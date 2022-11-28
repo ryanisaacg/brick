@@ -51,11 +51,10 @@ pub enum BinOp {
 
 #[derive(Debug, Error)]
 pub enum ParseError {
-    // TODO: reasons for the tokens being unexpected
     #[error("unexpected token {0}, {1}")]
-    UnexpectedToken(Box<Lexeme>, &'static str),
-    #[error("unexpected end of input")]
-    UnexpectedEndOfInput,
+    UnexpectedLexeme(Box<Lexeme>, &'static str),
+    #[error("unexpected end of input at {0}")]
+    UnexpectedEndOfInput(Provenance),
     #[error("token error: {0}")]
     TokenError(#[from] LexError),
 }
@@ -73,8 +72,9 @@ pub fn parse(
 
     let mut statements = Vec::new();
 
-    while source.peek().is_some() {
-        let statement = parse_statement(&mut source, &mut context)?;
+    while let Some(lexeme) = source.peek() {
+        let start = lexeme.as_ref().map_err(|e| e.clone())?.start;
+        let statement = parse_statement(&mut source, &mut context, start)?;
         let statement = context.add_statement(statement);
         statements.push(statement);
     }
@@ -82,25 +82,28 @@ pub fn parse(
     Ok((statements, context))
 }
 
-// TODO
 fn parse_statement(
     source: &mut TokenIter,
     context: &mut ParseTree,
+    start: Provenance,
 ) -> Result<AstStatement, ParseError> {
-    let statement = match source.peek().ok_or(ParseError::UnexpectedEndOfInput)? {
+    let statement = match source
+        .peek()
+        .ok_or(ParseError::UnexpectedEndOfInput(start))?
+    {
         Ok(Lexeme {
             value: LexemeValue::Let,
             start,
             ..
         }) => {
-            let start = start.clone();
+            let start = *start;
             source.next();
             parse_declaration(source, start, context)?
         }
         _ => {
-            let expr = parse_expr(source, context)?;
-            let start = expr.start.clone();
-            let end = expr.end.clone();
+            let expr = parse_expr(source, context, start)?;
+            let start = expr.start;
+            let end = expr.end;
             AstStatement {
                 value: AstStatementValue::Expression(context.add_expression(expr)),
                 start,
@@ -123,21 +126,25 @@ fn parse_declaration(
     start: Provenance,
     context: &mut ParseTree,
 ) -> Result<AstStatement, ParseError> {
-    let name = match next_token(source)? {
+    let name = match next_token(source, start)? {
         Lexeme {
             value: LexemeValue::Word(name),
             ..
         } => name,
         other => {
-            return Err(ParseError::UnexpectedToken(
+            return Err(ParseError::UnexpectedLexeme(
                 Box::new(other),
                 "expected word after 'let' in declaration",
             ))
         }
     };
-    next_token(source)?; // TODO: assert that this is an =
-    let value = parse_expr(source, context)?;
-    let end = value.end.clone();
+    assert_lexeme_eq(
+        next_token(source, start)?,
+        LexemeValue::Equals,
+        "expected = after let binding target",
+    )?;
+    let value = parse_expr(source, context, start)?;
+    let end = value.end;
 
     Ok(AstStatement {
         value: AstStatementValue::Declaration(name, context.add_expression(value)),
@@ -149,6 +156,7 @@ fn parse_declaration(
 fn parse_expr(
     source: &mut TokenIter,
     context: &mut ParseTree,
+    provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
     match source.peek() {
         Some(Ok(Lexeme {
@@ -156,7 +164,7 @@ fn parse_expr(
             start,
             ..
         })) => {
-            let start = start.clone();
+            let start = *start;
             let token = token.clone();
             source.next();
             next_branch(source, context, token, start)
@@ -166,11 +174,11 @@ fn parse_expr(
             start,
             ..
         })) => {
-            let start = start.clone();
+            let start = *start;
             source.next();
             next_block(source, context, start)
         }
-        _ => parse_assignment(source, context),
+        _ => parse_assignment(source, context, provenance),
     }
 }
 
@@ -180,12 +188,17 @@ fn next_branch(
     token: LexemeValue,
     start: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    let predicate = parse_expr(source, context)?;
-    source.next(); // TODO: assert that this is {
-    let block = next_block(source, context, start.clone())?; // TODO: get start
+    let predicate = parse_expr(source, context, start)?;
+    assert_next_lexeme_eq(
+        source.next(),
+        LexemeValue::OpenBracket,
+        start,
+        "expected { to start a block",
+    )?;
+    let block = next_block(source, context, start)?;
 
     let predicate_ptr = context.add_expression(predicate);
-    let end = block.end.clone();
+    let end = block.end;
     let block_ptr = context.add_expression(block);
 
     Ok(AstExpression {
@@ -205,15 +218,16 @@ fn next_block(
     start: Provenance,
 ) -> Result<AstExpression, ParseError> {
     let mut statements = Vec::new();
+    let mut end = start;
     loop {
         match source.peek() {
-            None => return Err(ParseError::UnexpectedEndOfInput),
+            None => return Err(ParseError::UnexpectedEndOfInput(start)),
             Some(Ok(Lexeme {
                 value: LexemeValue::CloseBracket,
                 end,
                 ..
             })) => {
-                let end = end.clone();
+                let end = *end;
                 source.next();
                 return Ok(AstExpression {
                     value: AstExpressionValue::Block(statements),
@@ -222,7 +236,8 @@ fn next_block(
                 });
             }
             _ => {
-                let statement = parse_statement(source, context)?;
+                let statement = parse_statement(source, context, end)?;
+                end = statement.end;
                 statements.push(context.add_statement(statement));
             }
         }
@@ -232,29 +247,32 @@ fn next_block(
 fn parse_assignment(
     source: &mut TokenIter,
     context: &mut ParseTree,
+    provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
     // TODO: actually determine assignments
     match source.peek_nth(1) {
         Some(Ok(Lexeme {
             value: LexemeValue::Equals,
+            start,
             ..
         })) => {
-            let (name, start) = match next_token(source)? {
+            let start = *start;
+            let (name, start) = match next_token(source, start)? {
                 Lexeme {
                     value: LexemeValue::Word(name),
                     start,
                     ..
                 } => (name, start),
                 other => {
-                    return Err(ParseError::UnexpectedToken(
+                    return Err(ParseError::UnexpectedLexeme(
                         Box::new(other),
                         "expected word on left side of =",
                     ))
                 }
             };
-            next_token(source)?; // TODO: assert that this is an =
-            let value = parse_expr(source, context)?;
-            let end = value.end.clone();
+            next_token(source, start)?; // TODO: assert that this is an =
+            let value = parse_expr(source, context, start)?;
+            let end = value.end;
             let value = context.add_expression(value);
 
             Ok(AstExpression {
@@ -263,16 +281,17 @@ fn parse_assignment(
                 end,
             })
         }
-        _ => next_compare_expr(source, context),
+        _ => next_compare_expr(source, context, provenance),
     }
 }
 
 fn next_compare_expr(
     source: &mut TokenIter,
     context: &mut ParseTree,
+    provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
     // TODO: seems busted
-    let mut left = next_addition_expr(source, context)?;
+    let mut left = next_addition_expr(source, context, provenance)?;
 
     while let Some(Ok(Lexeme {
         value: token @ (LexemeValue::LessThan | LexemeValue::GreaterThan),
@@ -285,7 +304,7 @@ fn next_compare_expr(
             _ => unimplemented!(),
         };
         source.next();
-        let right = next_compare_expr(source, context)?;
+        let right = next_compare_expr(source, context, provenance)?;
         left = make_bin_expr(context, operator, left, right);
     }
 
@@ -295,9 +314,10 @@ fn next_compare_expr(
 fn next_addition_expr(
     source: &mut TokenIter,
     context: &mut ParseTree,
+    provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
     // TODO: seems busted
-    let mut left = next_paren_expr(source, context)?;
+    let mut left = next_paren_expr(source, context, provenance)?;
 
     while let Some(Ok(Lexeme {
         value: token @ (LexemeValue::Plus | LexemeValue::Minus),
@@ -310,7 +330,7 @@ fn next_addition_expr(
             _ => unimplemented!(),
         };
         source.next();
-        let right = next_paren_expr(source, context)?;
+        let right = next_paren_expr(source, context, provenance)?;
         left = make_bin_expr(context, operator, left, right);
     }
 
@@ -323,8 +343,8 @@ fn make_bin_expr(
     left: AstExpression,
     right: AstExpression,
 ) -> AstExpression {
-    let start = left.start.clone();
-    let end = right.end.clone();
+    let start = left.start;
+    let end = right.end;
 
     AstExpression {
         value: AstExpressionValue::BinExpr(
@@ -340,31 +360,33 @@ fn make_bin_expr(
 fn next_paren_expr(
     source: &mut TokenIter,
     context: &mut ParseTree,
+    provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
     if let Some(Ok(Lexeme {
         value: LexemeValue::OpenParen,
+        start,
         ..
     })) = source.peek()
     {
+        let start = *start;
         source.next();
-        let expr = parse_expr(source, context)?;
-        if let Some(Ok(Lexeme {
-            value: LexemeValue::CloseParen,
-            ..
-        })) = source.next()
-        {
-            Ok(expr)
-        } else {
-            todo!(); // throw error because not )
-        }
+        let expr = parse_expr(source, context, start)?;
+        assert_next_lexeme_eq(
+            source.next(),
+            LexemeValue::CloseParen,
+            expr.start,
+            "parenthesized expressions must end with a )",
+        )?;
+
+        Ok(expr)
     } else {
-        next_atom(source)
+        next_atom(source, provenance)
     }
 }
 
-fn next_atom(source: &mut TokenIter) -> Result<AstExpression, ParseError> {
+fn next_atom(source: &mut TokenIter, provenance: Provenance) -> Result<AstExpression, ParseError> {
     // TODO: expectation reasoning
-    let Lexeme { value, start, end } = next_token(source)?;
+    let Lexeme { value, start, end } = next_token(source, provenance)?;
     match value {
         LexemeValue::True => Ok(AstExpression {
             value: AstExpressionValue::Bool(true),
@@ -383,13 +405,13 @@ fn next_atom(source: &mut TokenIter) -> Result<AstExpression, ParseError> {
         }),
         LexemeValue::Int(int) => try_decimal(source, int as i64, start, end),
         // TODO: should this be treated as a unary operator instead?
-        LexemeValue::Minus => match next_token(source)? {
+        LexemeValue::Minus => match next_token(source, start)? {
             Lexeme {
                 value: LexemeValue::Int(int),
                 end,
                 ..
             } => try_decimal(source, -(int as i64), start, end),
-            other => Err(ParseError::UnexpectedToken(
+            other => Err(ParseError::UnexpectedLexeme(
                 Box::new(other),
                 "expected number after -",
             )),
@@ -411,14 +433,17 @@ fn try_decimal(
     })) = source.peek()
     {
         source.next();
-        let (decimal, end) = match source.next().ok_or(ParseError::UnexpectedEndOfInput)?? {
+        let (decimal, end) = match source
+            .next()
+            .ok_or(ParseError::UnexpectedEndOfInput(start))??
+        {
             Lexeme {
                 value: LexemeValue::Int(value),
                 end,
                 ..
             } => (value as f64, end),
             other => {
-                return Err(ParseError::UnexpectedToken(
+                return Err(ParseError::UnexpectedLexeme(
                     Box::new(other),
                     "expected number after decimal point",
                 ))
@@ -444,8 +469,10 @@ fn try_decimal(
     }
 }
 
-fn next_token(source: &mut TokenIter) -> Result<Lexeme, ParseError> {
-    Ok(source.next().ok_or(ParseError::UnexpectedEndOfInput)??)
+fn next_token(source: &mut TokenIter, provenance: Provenance) -> Result<Lexeme, ParseError> {
+    Ok(source
+        .next()
+        .ok_or(ParseError::UnexpectedEndOfInput(provenance))??)
 }
 
 fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePtr>) {
@@ -484,6 +511,30 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
         }) => {}
     }
 }
+fn assert_next_lexeme_eq(
+    lexeme: Option<Result<Lexeme, LexError>>,
+    target: LexemeValue,
+    provenance: Provenance,
+    reason: &'static str,
+) -> Result<(), ParseError> {
+    assert_lexeme_eq(
+        lexeme.ok_or(ParseError::UnexpectedEndOfInput(provenance))??,
+        target,
+        reason,
+    )
+}
+
+fn assert_lexeme_eq(
+    lexeme: Lexeme,
+    target: LexemeValue,
+    reason: &'static str,
+) -> Result<(), ParseError> {
+    if lexeme.value == target {
+        Ok(())
+    } else {
+        Err(ParseError::UnexpectedLexeme(Box::new(lexeme), reason))
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -498,8 +549,8 @@ mod test {
         tokens.iter().map(move |token| {
             Ok(Lexeme {
                 value: token.clone(),
-                start: provenance.clone(),
-                end: provenance.clone(),
+                start: provenance,
+                end: provenance,
             })
         })
     }

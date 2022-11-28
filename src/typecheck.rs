@@ -127,8 +127,8 @@ pub fn typecheck(
     let statements = statements
         .map(|statement| {
             let AstStatement { value, start, end } = parse_context.statement(statement);
-            let start = start.clone();
-            let end = end.clone();
+            let start = *start;
+            let end = *end;
 
             let value = match value {
                 AstStatementValue::Expression(expr) => {
@@ -170,8 +170,8 @@ pub fn typecheck_expression(
 ) -> Result<IRExpression, TypecheckError> {
     use AstExpressionValue::*;
     let AstExpression { value, start, end } = expression;
-    let start = start.clone();
-    let end = end.clone();
+    let start = *start;
+    let end = *end;
 
     // TODO: analyze if, block
     Ok(match value {

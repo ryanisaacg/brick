@@ -65,7 +65,7 @@ impl fmt::Display for LexemeValue {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error)]
 pub enum LexError {
     #[error("unexpected character {0} at {1}")]
     UnexpectedStart(char, Provenance),
@@ -180,7 +180,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
 
             Some(Ok(Lexeme {
                 value,
-                start: start.clone(),
+                start,
                 end: end.unwrap_or(start),
             }))
         } else {
