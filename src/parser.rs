@@ -2,8 +2,8 @@ use itertools::PeekNth;
 use thiserror::Error;
 
 use crate::{
+    lexer::{LexError, Lexeme, LexemeValue},
     provenance::Provenance,
-    lexer::{Lexeme, LexError, LexemeValue},
     tree::{Node, NodePtr, SourceTree},
 };
 
@@ -52,8 +52,8 @@ pub enum BinOp {
 #[derive(Debug, Error)]
 pub enum ParseError {
     // TODO: reasons for the tokens being unexpected
-    #[error("unexpected token {0}")]
-    UnexpectedToken(Lexeme),
+    #[error("unexpected token {0}, {1}")]
+    UnexpectedToken(Lexeme, &'static str),
     #[error("unexpected end of input")]
     UnexpectedEndOfInput,
     #[error("token error: {0}")]
@@ -128,7 +128,12 @@ fn parse_declaration(
             value: LexemeValue::Word(name),
             ..
         } => name,
-        other => return Err(ParseError::UnexpectedToken(other)),
+        other => {
+            return Err(ParseError::UnexpectedToken(
+                other,
+                "expected word after 'let' in declaration",
+            ))
+        }
     };
     next_token(source)?; // TODO: assert that this is an =
     let value = parse_expr(source, context)?;
@@ -240,7 +245,12 @@ fn parse_assignment(
                     start,
                     ..
                 } => (name, start.clone()),
-                other => return Err(ParseError::UnexpectedToken(other)),
+                other => {
+                    return Err(ParseError::UnexpectedToken(
+                        other,
+                        "expected word on left side of =",
+                    ))
+                }
             };
             next_token(source)?; // TODO: assert that this is an =
             let value = parse_expr(source, context)?;
@@ -379,7 +389,10 @@ fn next_atom(source: &mut TokenIter) -> Result<AstExpression, ParseError> {
                 end,
                 ..
             } => try_decimal(source, -(int as i64), start, end),
-            other => Err(ParseError::UnexpectedToken(other)),
+            other => Err(ParseError::UnexpectedToken(
+                other,
+                "expected number after -",
+            )),
         },
         value => panic!("{:?}", value), //Err(ParseError::UnexpectedToken(Token { value, start, end })),
     }
@@ -404,7 +417,12 @@ fn try_decimal(
                 end,
                 ..
             } => (value as f64, end),
-            other => return Err(ParseError::UnexpectedToken(other)),
+            other => {
+                return Err(ParseError::UnexpectedToken(
+                    other,
+                    "expected number after decimal point",
+                ))
+            }
         };
         let num = num as f64;
         let num = if decimal != 0.0 {
@@ -508,49 +526,77 @@ mod test {
             LexemeValue::Int(3),
             LexemeValue::Semicolon,
             LexemeValue::CloseBracket,
-            LexemeValue::If,
-            LexemeValue::False,
-            LexemeValue::OpenBracket,
-            LexemeValue::Word("a".to_string()),
-            LexemeValue::Equals,
-            LexemeValue::Int(4),
-            LexemeValue::Semicolon,
-            LexemeValue::CloseBracket,
             LexemeValue::Word("a".to_string()),
         ]))
         .unwrap();
-        let nodes = statements.into_iter().map(|statement| {
-            let mut line = Vec::new();
-            line.extend(ast.iter_from(NodePtr::Statement(statement)));
-            line
-        }).collect::<Vec<_>>();
+        let nodes = statements
+            .into_iter()
+            .map(|statement| {
+                let mut line = Vec::new();
+                line.extend(ast.iter_from(NodePtr::Statement(statement)));
+                line
+            })
+            .collect::<Vec<_>>();
         let matchable_nodes = nodes.iter().map(|line| &line[..]).collect::<Vec<_>>();
 
-        use Node::{Statement, Expression as Expr};
-        use AstStatementValue::*;
         use AstExpressionValue::*;
-        assert_matches!(matchable_nodes.as_slice(), &[
+        use AstStatementValue::*;
+        use Node::{Expression as Expr, Statement};
+        assert_matches!(
+            matchable_nodes.as_slice(),
             &[
-                Statement(AstStatement { value: Declaration(_, _), .. }),
-                Expr(AstExpression { value: BinExpr(BinOp::Add, _, _), .. }),
-                Expr(AstExpression { value: BinExpr(BinOp::Subtract, _, _), .. }),
-                Expr(AstExpression { value: Int(15), .. }),
-                Expr(AstExpression { value: Int(10), .. }),
-                Expr(AstExpression { value: Int(3), .. }),
-            ],
-            &[
-                Statement(AstStatement { value: Expression(_), .. }),
-                Expr(AstExpression { value: If(_, _), .. }),
-                Expr(AstExpression { value: Bool(true), .. }),
-                Expr(AstExpression { value: Block(_), .. }),
-                Statement(AstStatement { value: Expression(_), .. }),
-                Expr(AstExpression { value: Assignment(_, _), .. }),
-                Expr(AstExpression { value: Int(3), .. }),
-            ],
-            &[
-                Statement(AstStatement { value: Expression(_), .. }),
-                Expr(AstExpression { value: Word(_), .. }),
-            ],
-        ]);
+                &[
+                    Statement(AstStatement {
+                        value: Declaration(_, _),
+                        ..
+                    }),
+                    Expr(AstExpression {
+                        value: BinExpr(BinOp::Add, _, _),
+                        ..
+                    }),
+                    Expr(AstExpression {
+                        value: BinExpr(BinOp::Subtract, _, _),
+                        ..
+                    }),
+                    Expr(AstExpression { value: Int(15), .. }),
+                    Expr(AstExpression { value: Int(10), .. }),
+                    Expr(AstExpression { value: Int(3), .. }),
+                ],
+                &[
+                    Statement(AstStatement {
+                        value: Expression(_),
+                        ..
+                    }),
+                    Expr(AstExpression {
+                        value: If(_, _),
+                        ..
+                    }),
+                    Expr(AstExpression {
+                        value: Bool(true),
+                        ..
+                    }),
+                    Expr(AstExpression {
+                        value: Block(_),
+                        ..
+                    }),
+                    Statement(AstStatement {
+                        value: Expression(_),
+                        ..
+                    }),
+                    Expr(AstExpression {
+                        value: Assignment(_, _),
+                        ..
+                    }),
+                    Expr(AstExpression { value: Int(3), .. }),
+                ],
+                &[
+                    Statement(AstStatement {
+                        value: Expression(_),
+                        ..
+                    }),
+                    Expr(AstExpression { value: Name(_), .. }),
+                ],
+            ]
+        );
     }
 }
