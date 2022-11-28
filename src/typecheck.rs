@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use crate::{
     parser::{
@@ -19,6 +19,19 @@ pub enum Type {
     Void,
     Bool,
     Number(NumericType),
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use NumericType::*;
+        use Type::*;
+        match self {
+            Void => write!(f, "void"),
+            Bool => write!(f, "bool"),
+            Number(Int64) => write!(f, "i64"),
+            Number(Float64) => write!(f, "f64"),
+        }
+    }
 }
 
 pub struct IRContext {
@@ -50,8 +63,8 @@ impl IRContext {
 
 #[derive(Debug, Error)]
 pub enum TypecheckError {
-    #[error("Operands don't match")]
-    BinaryOperandMismatch,
+    #[error("Operands types {0} and {1} don't match at {2}")]
+    BinaryOperandMismatch(Type, Type, Provenance),
 }
 
 #[derive(Debug)]
@@ -320,7 +333,9 @@ pub fn typecheck_expression(
                 || left.kind != Type::Number(NumericType::Int64)
                     && left.kind != Type::Number(NumericType::Float64)
             {
-                return Err(TypecheckError::BinaryOperandMismatch);
+                return Err(TypecheckError::BinaryOperandMismatch(
+                    left.kind, right.kind, start,
+                ));
             } else {
                 let left_type = left.kind.clone();
                 if *op == BinOp::Add || *op == BinOp::Subtract {
