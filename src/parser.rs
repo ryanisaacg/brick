@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::{
     provenance::Provenance,
-    tokenizer::{Token, TokenError, TokenValue},
+    lexer::{Lexeme, LexError, LexemeValue},
     tree::{Node, NodePtr, SourceTree},
 };
 
@@ -53,20 +53,20 @@ pub enum BinOp {
 pub enum ParseError {
     // TODO: reasons for the tokens being unexpected
     #[error("unexpected token {0}")]
-    UnexpectedToken(Token),
+    UnexpectedToken(Lexeme),
     #[error("unexpected end of input")]
     UnexpectedEndOfInput,
     #[error("token error: {0}")]
-    TokenError(#[from] TokenError),
+    TokenError(#[from] LexError),
 }
 
-type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, TokenError>>;
+type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Lexeme, LexError>>;
 type TokenIter<'a> = PeekNth<TokenIterInner<'a>>;
 
 pub type ParseTree = SourceTree<AstStatement, AstExpression>;
 
 pub fn parse(
-    mut source: impl Iterator<Item = Result<Token, TokenError>>,
+    mut source: impl Iterator<Item = Result<Lexeme, LexError>>,
 ) -> Result<(Vec<usize>, ParseTree), ParseError> {
     let mut source = itertools::peek_nth(&mut source as TokenIterInner<'_>);
     let mut context = ParseTree::new(Box::new(traverse));
@@ -88,8 +88,8 @@ fn parse_statement(
     context: &mut ParseTree,
 ) -> Result<AstStatement, ParseError> {
     let statement = match source.peek().ok_or(ParseError::UnexpectedEndOfInput)? {
-        Ok(Token {
-            value: TokenValue::Let,
+        Ok(Lexeme {
+            value: LexemeValue::Let,
             start,
             ..
         }) => {
@@ -108,8 +108,8 @@ fn parse_statement(
             }
         }
     };
-    if let Some(Ok(Token {
-        value: TokenValue::Semicolon,
+    if let Some(Ok(Lexeme {
+        value: LexemeValue::Semicolon,
         ..
     })) = source.peek()
     {
@@ -124,8 +124,8 @@ fn parse_declaration(
     context: &mut ParseTree,
 ) -> Result<AstStatement, ParseError> {
     let name = match next_token(source)? {
-        Token {
-            value: TokenValue::Word(name),
+        Lexeme {
+            value: LexemeValue::Word(name),
             ..
         } => name,
         other => return Err(ParseError::UnexpectedToken(other)),
@@ -146,8 +146,8 @@ fn parse_expr(
     context: &mut ParseTree,
 ) -> Result<AstExpression, ParseError> {
     match source.peek() {
-        Some(Ok(Token {
-            value: token @ (TokenValue::If | TokenValue::While),
+        Some(Ok(Lexeme {
+            value: token @ (LexemeValue::If | LexemeValue::While),
             start,
             ..
         })) => {
@@ -156,8 +156,8 @@ fn parse_expr(
             source.next();
             next_branch(source, context, token, start)
         }
-        Some(Ok(Token {
-            value: TokenValue::OpenBracket,
+        Some(Ok(Lexeme {
+            value: LexemeValue::OpenBracket,
             start,
             ..
         })) => {
@@ -172,7 +172,7 @@ fn parse_expr(
 fn next_branch(
     source: &mut TokenIter,
     context: &mut ParseTree,
-    token: TokenValue,
+    token: LexemeValue,
     start: Provenance,
 ) -> Result<AstExpression, ParseError> {
     let predicate = parse_expr(source, context)?;
@@ -184,7 +184,7 @@ fn next_branch(
     let block_ptr = context.add_expression(block);
 
     Ok(AstExpression {
-        value: if token == TokenValue::If {
+        value: if token == LexemeValue::If {
             AstExpressionValue::If(predicate_ptr, block_ptr)
         } else {
             AstExpressionValue::While(predicate_ptr, block_ptr)
@@ -203,8 +203,8 @@ fn next_block(
     loop {
         match source.peek() {
             None => return Err(ParseError::UnexpectedEndOfInput),
-            Some(Ok(Token {
-                value: TokenValue::CloseBracket,
+            Some(Ok(Lexeme {
+                value: LexemeValue::CloseBracket,
                 end,
                 ..
             })) => {
@@ -230,13 +230,13 @@ fn parse_assignment(
 ) -> Result<AstExpression, ParseError> {
     // TODO: actually determine assignments
     match source.peek_nth(1) {
-        Some(Ok(Token {
-            value: TokenValue::Equals,
+        Some(Ok(Lexeme {
+            value: LexemeValue::Equals,
             ..
         })) => {
             let (name, start) = match next_token(source)? {
-                Token {
-                    value: TokenValue::Word(name),
+                Lexeme {
+                    value: LexemeValue::Word(name),
                     start,
                     ..
                 } => (name, start.clone()),
@@ -264,14 +264,14 @@ fn next_compare_expr(
     // TODO: seems busted
     let mut left = next_addition_expr(source, context)?;
 
-    while let Some(Ok(Token {
-        value: token @ (TokenValue::LessThan | TokenValue::GreaterThan),
+    while let Some(Ok(Lexeme {
+        value: token @ (LexemeValue::LessThan | LexemeValue::GreaterThan),
         ..
     })) = source.peek()
     {
         let operator = match token {
-            TokenValue::LessThan => BinOp::LessThan,
-            TokenValue::GreaterThan => BinOp::GreaterThan,
+            LexemeValue::LessThan => BinOp::LessThan,
+            LexemeValue::GreaterThan => BinOp::GreaterThan,
             _ => unimplemented!(),
         };
         source.next();
@@ -289,14 +289,14 @@ fn next_addition_expr(
     // TODO: seems busted
     let mut left = next_paren_expr(source, context)?;
 
-    while let Some(Ok(Token {
-        value: token @ (TokenValue::Plus | TokenValue::Minus),
+    while let Some(Ok(Lexeme {
+        value: token @ (LexemeValue::Plus | LexemeValue::Minus),
         ..
     })) = source.peek()
     {
         let operator = match token {
-            TokenValue::Plus => BinOp::Add,
-            TokenValue::Minus => BinOp::Subtract,
+            LexemeValue::Plus => BinOp::Add,
+            LexemeValue::Minus => BinOp::Subtract,
             _ => unimplemented!(),
         };
         source.next();
@@ -331,15 +331,15 @@ fn next_paren_expr(
     source: &mut TokenIter,
     context: &mut ParseTree,
 ) -> Result<AstExpression, ParseError> {
-    if let Some(Ok(Token {
-        value: TokenValue::OpenParen,
+    if let Some(Ok(Lexeme {
+        value: LexemeValue::OpenParen,
         ..
     })) = source.peek()
     {
         source.next();
         let expr = parse_expr(source, context)?;
-        if let Some(Ok(Token {
-            value: TokenValue::CloseParen,
+        if let Some(Ok(Lexeme {
+            value: LexemeValue::CloseParen,
             ..
         })) = source.next()
         {
@@ -354,28 +354,28 @@ fn next_paren_expr(
 
 fn next_atom(source: &mut TokenIter) -> Result<AstExpression, ParseError> {
     // TODO: expectation reasoning
-    let Token { value, start, end } = next_token(source)?;
+    let Lexeme { value, start, end } = next_token(source)?;
     match value {
-        TokenValue::True => Ok(AstExpression {
+        LexemeValue::True => Ok(AstExpression {
             value: AstExpressionValue::Bool(true),
             start,
             end,
         }),
-        TokenValue::False => Ok(AstExpression {
+        LexemeValue::False => Ok(AstExpression {
             value: AstExpressionValue::Bool(false),
             start,
             end,
         }),
-        TokenValue::Word(word) => Ok(AstExpression {
+        LexemeValue::Word(word) => Ok(AstExpression {
             value: AstExpressionValue::Name(word),
             start,
             end,
         }),
-        TokenValue::Int(int) => try_decimal(source, int as i64, start, end),
+        LexemeValue::Int(int) => try_decimal(source, int as i64, start, end),
         // TODO: should this be treated as a unary operator instead?
-        TokenValue::Minus => match next_token(source)? {
-            Token {
-                value: TokenValue::Int(int),
+        LexemeValue::Minus => match next_token(source)? {
+            Lexeme {
+                value: LexemeValue::Int(int),
                 end,
                 ..
             } => try_decimal(source, -(int as i64), start, end),
@@ -392,15 +392,15 @@ fn try_decimal(
     end: Provenance,
 ) -> Result<AstExpression, ParseError> {
     // TODO: handle overflow
-    if let Some(Ok(Token {
-        value: TokenValue::Period,
+    if let Some(Ok(Lexeme {
+        value: LexemeValue::Period,
         ..
     })) = source.peek()
     {
         source.next();
         let (decimal, end) = match source.next().ok_or(ParseError::UnexpectedEndOfInput)?? {
-            Token {
-                value: TokenValue::Int(value),
+            Lexeme {
+                value: LexemeValue::Int(value),
                 end,
                 ..
             } => (value as f64, end),
@@ -426,7 +426,7 @@ fn try_decimal(
     }
 }
 
-fn next_token(source: &mut TokenIter) -> Result<Token, ParseError> {
+fn next_token(source: &mut TokenIter) -> Result<Lexeme, ParseError> {
     Ok(source.next().ok_or(ParseError::UnexpectedEndOfInput)??)
 }
 
@@ -474,11 +474,11 @@ mod test {
     use super::*;
 
     fn tokens<'a>(
-        tokens: &'a [TokenValue],
-    ) -> impl 'a + Iterator<Item = Result<Token, TokenError>> {
+        tokens: &'a [LexemeValue],
+    ) -> impl 'a + Iterator<Item = Result<Lexeme, LexError>> {
         let provenance = Provenance::new("test", "test", 0, 0);
         tokens.iter().map(move |token| {
-            Ok(Token {
+            Ok(Lexeme {
                 value: token.clone(),
                 start: provenance.clone(),
                 end: provenance.clone(),
@@ -489,34 +489,34 @@ mod test {
     #[test]
     fn adding() {
         let (statements, ast) = parse(tokens(&[
-            TokenValue::Let,
-            TokenValue::Word("a".to_string()),
-            TokenValue::Equals,
-            TokenValue::OpenParen,
-            TokenValue::Int(15),
-            TokenValue::Minus,
-            TokenValue::Int(10),
-            TokenValue::CloseParen,
-            TokenValue::Plus,
-            TokenValue::Int(3),
-            TokenValue::Semicolon,
-            TokenValue::If,
-            TokenValue::True,
-            TokenValue::OpenBracket,
-            TokenValue::Word("a".to_string()),
-            TokenValue::Equals,
-            TokenValue::Int(3),
-            TokenValue::Semicolon,
-            TokenValue::CloseBracket,
-            TokenValue::If,
-            TokenValue::False,
-            TokenValue::OpenBracket,
-            TokenValue::Word("a".to_string()),
-            TokenValue::Equals,
-            TokenValue::Int(4),
-            TokenValue::Semicolon,
-            TokenValue::CloseBracket,
-            TokenValue::Word("a".to_string()),
+            LexemeValue::Let,
+            LexemeValue::Word("a".to_string()),
+            LexemeValue::Equals,
+            LexemeValue::OpenParen,
+            LexemeValue::Int(15),
+            LexemeValue::Minus,
+            LexemeValue::Int(10),
+            LexemeValue::CloseParen,
+            LexemeValue::Plus,
+            LexemeValue::Int(3),
+            LexemeValue::Semicolon,
+            LexemeValue::If,
+            LexemeValue::True,
+            LexemeValue::OpenBracket,
+            LexemeValue::Word("a".to_string()),
+            LexemeValue::Equals,
+            LexemeValue::Int(3),
+            LexemeValue::Semicolon,
+            LexemeValue::CloseBracket,
+            LexemeValue::If,
+            LexemeValue::False,
+            LexemeValue::OpenBracket,
+            LexemeValue::Word("a".to_string()),
+            LexemeValue::Equals,
+            LexemeValue::Int(4),
+            LexemeValue::Semicolon,
+            LexemeValue::CloseBracket,
+            LexemeValue::Word("a".to_string()),
         ]))
         .unwrap();
         let nodes = statements.into_iter().map(|statement| {

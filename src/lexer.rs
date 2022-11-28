@@ -5,20 +5,20 @@ use thiserror::Error;
 use crate::provenance::Provenance;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Token {
-    pub value: TokenValue,
+pub struct Lexeme {
+    pub value: LexemeValue,
     pub start: Provenance,
     pub end: Provenance,
 }
 
-impl fmt::Display for Token {
+impl fmt::Display for Lexeme {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} at {}", self.value, self.start)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TokenValue {
+pub enum LexemeValue {
     Word(String),
     Int(u64),
     Plus,
@@ -39,9 +39,9 @@ pub enum TokenValue {
     GreaterThan,
 }
 
-impl fmt::Display for TokenValue {
+impl fmt::Display for LexemeValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use TokenValue::*;
+        use LexemeValue::*;
         match self {
             Word(word) => write!(f, "word {}", word),
             Int(int) => write!(f, "int {}", int),
@@ -66,15 +66,15 @@ impl fmt::Display for TokenValue {
 }
 
 #[derive(Debug, Error)]
-pub enum TokenError {
+pub enum LexError {
     #[error("unexpected character {0} at {1}")]
     UnexpectedStart(char, Provenance),
 }
 
-pub fn tokenize<'a>(
+pub fn lex<'a>(
     source_name: &'static str,
     source_text: String,
-) -> impl 'a + Iterator<Item = Result<Token, TokenError>> {
+) -> impl 'a + Iterator<Item = Result<Lexeme, LexError>> {
     let source_text = Box::leak(source_text.into_boxed_str());
     let source = source_text.chars().peekable();
 
@@ -116,9 +116,9 @@ impl<T: Iterator<Item = char>> TokenIterator<T> {
 }
 
 impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
-    type Item = Result<Token, TokenError>;
+    type Item = Result<Lexeme, LexError>;
 
-    fn next(&mut self) -> Option<Result<Token, TokenError>> {
+    fn next(&mut self) -> Option<Result<Lexeme, LexError>> {
         if let Some((chr, start)) = self.next_char() {
             let mut end = None;
             let value = match chr {
@@ -137,12 +137,12 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     }
 
                     match word.as_str() {
-                        "if" => TokenValue::If,
-                        "while" => TokenValue::While,
-                        "true" => TokenValue::True,
-                        "false" => TokenValue::False,
-                        "let" => TokenValue::Let,
-                        _ => TokenValue::Word(word),
+                        "if" => LexemeValue::If,
+                        "while" => LexemeValue::While,
+                        "true" => LexemeValue::True,
+                        "false" => LexemeValue::False,
+                        "let" => LexemeValue::Let,
+                        _ => LexemeValue::Word(word),
                     }
                 }
                 digit @ '0'..='9' => {
@@ -161,24 +161,24 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         end = Some(p);
                     }
 
-                    TokenValue::Int(number)
+                    LexemeValue::Int(number)
                 }
-                '+' => TokenValue::Plus,
-                '-' => TokenValue::Minus,
-                '=' => TokenValue::Equals,
-                ';' => TokenValue::Semicolon,
-                '.' => TokenValue::Period,
-                '(' => TokenValue::OpenParen,
-                ')' => TokenValue::CloseParen,
-                '{' => TokenValue::OpenBracket,
-                '}' => TokenValue::CloseBracket,
-                '<' => TokenValue::LessThan,
-                '>' => TokenValue::GreaterThan,
+                '+' => LexemeValue::Plus,
+                '-' => LexemeValue::Minus,
+                '=' => LexemeValue::Equals,
+                ';' => LexemeValue::Semicolon,
+                '.' => LexemeValue::Period,
+                '(' => LexemeValue::OpenParen,
+                ')' => LexemeValue::CloseParen,
+                '{' => LexemeValue::OpenBracket,
+                '}' => LexemeValue::CloseBracket,
+                '<' => LexemeValue::LessThan,
+                '>' => LexemeValue::GreaterThan,
                 ch if ch.is_whitespace() => return self.next(),
-                ch => return Some(Err(TokenError::UnexpectedStart(ch, start))),
+                ch => return Some(Err(LexError::UnexpectedStart(ch, start))),
             };
 
-            Some(Ok(Token {
+            Some(Ok(Lexeme {
                 value,
                 start: start.clone(),
                 end: end.unwrap_or(start),
@@ -192,11 +192,11 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use TokenValue::*;
+    use LexemeValue::*;
 
     #[test]
     fn reserved_words() {
-        let result = tokenize("test", "if let true false word".to_string())
+        let result = lex("test", "if let true false word".to_string())
             .map(|token| token.map(|token| token.value))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();

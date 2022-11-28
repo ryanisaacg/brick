@@ -1,6 +1,6 @@
 pub mod backend;
+pub mod lexer;
 pub mod parser;
 pub mod provenance;
-pub mod tokenizer;
 pub mod tree;
 pub mod typecheck;

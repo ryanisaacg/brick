@@ -1,13 +1,13 @@
 use brick::{
     backend::compile,
     parser::parse,
-    tokenizer::tokenize,
+    lexer::lex,
     typecheck::{typecheck, IRContext},
 };
 use std::fs;
 
 fn main() {
-    let tokens = tokenize(
+    let tokens = lex(
         "hardcoded",
         r#"
     let a = 0;

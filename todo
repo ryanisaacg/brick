@@ -1,6 +1,6 @@
 stuff that I can pretty much do in any order:
 - the rest of the math operators
-- booleans and boolean operators
+- the rest of the comparison operators
 - compiler diagnostics
 - test suite
 - integer promotion
