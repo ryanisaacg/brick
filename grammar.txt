@@ -5,7 +5,8 @@ float ::= integer | integer "." integer
 block ::= "{" block_contents "}"
 block_contents = statement | statement block_contents
 
-statement ::= declaration | assignment | function | expression | expression ";"
+statement ::= import | declaration | assignment | function | expression | expression ";"
+import ::= "import" word
 declaration ::= "let" word "=" expression ";"
 assignment ::= word "=" expression ";"
 function ::= "fn" word "(" function_args ")" type_annotation block

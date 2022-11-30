@@ -40,6 +40,7 @@ pub enum LexemeValue {
     True,
     False,
     Function,
+    Import,
 }
 
 impl fmt::Display for LexemeValue {
@@ -67,6 +68,7 @@ impl fmt::Display for LexemeValue {
             True => write!(f, "keyword true"),
             False => write!(f, "keyword false"),
             Function => write!(f, "keyword fn"),
+            Import => write!(f, "keyword import"),
         }
     }
 }
@@ -149,6 +151,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "false" => LexemeValue::False,
                         "let" => LexemeValue::Let,
                         "fn" => LexemeValue::Function,
+                        "import" => LexemeValue::Import,
                         _ => LexemeValue::Word(word),
                     }
                 }

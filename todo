@@ -1,5 +1,4 @@
 stuff that I can pretty much do in any order:
-- "header" parsing that allows you to call functions declared after your call
 - the rest of the math operators
 - the rest of the comparison operators
 - integer promotion
@@ -14,6 +13,7 @@ stuff that requires thinking:
 - constant evaluation
 - external environment declarations
 - nested function declarations
+- namespaceing
 
 stuff that requires learning:
 - closures

@@ -1,14 +1,7 @@
-use brick::compile;
+use brick::compile_file;
 use std::fs;
 
 fn main() {
-    let binary = compile(
-        "hardcoded",
-        r#"
-fn f(a: i64, b: i64): i64 {
-    a + b
-}"#,
-    )
-    .unwrap();
+    let binary = compile_file("main").unwrap();
     fs::write("out.wasm", binary).expect("Unable to write file");
 }

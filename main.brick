@@ -1,0 +1,5 @@
+import example
+
+fn f(c: i64, d: i64): i64 {
+    add_i64(c, d)
+}

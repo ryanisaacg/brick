@@ -24,12 +24,12 @@ fn call_function() {
         -1i64,
         run_test(
             r#"
-fn difference(a: i64, b: i64): i64 {
-    a - b
-}
-
 fn test(): i64 {
     difference(2, 3)
+}
+
+fn difference(a: i64, b: i64): i64 {
+    a - b
 }
 "#,
             ()

@@ -21,6 +21,17 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut current_function_idx = 0;
     let mut function_indices = HashMap::new();
 
+    // TODO: how stable is this order
+
+    for statement in statements.iter() {
+        if let IRStatementValue::FunctionDeclaration(decl) = &statement.value {
+            function_indices.insert(decl.name.clone(), current_function_idx);
+            current_function_idx += 1;
+        }
+    }
+
+    current_function_idx = 0;
+
     for statement in statements {
         if let IRStatementValue::FunctionDeclaration(decl) = statement.value {
             emit_function_types(&decl, &mut types);
@@ -40,8 +51,6 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
             );
             f.instruction(&Instruction::End);
             codes.function(&f);
-
-            function_indices.insert(decl.name, current_function_idx);
 
             current_function_idx += 1;
         }
@@ -171,6 +180,7 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
                 IRExpressionValue::LocalVariable(name) => name,
                 _ => todo!(),
             };
+            println!("{:?}:{:?}", ctx.functions, called_function);
             let function_index = ctx.functions.get(called_function).unwrap();
             ctx.f.instruction(&Instruction::Call(*function_index));
         }

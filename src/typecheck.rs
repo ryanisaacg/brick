@@ -138,7 +138,7 @@ pub enum BinOpComparison {
 
 #[derive(Clone, Debug)]
 pub struct Scope {
-    declarations: HashMap<String, Type>,
+    pub declarations: HashMap<String, Type>,
 }
 
 // TODO: unification of separate IRContexts?
@@ -164,6 +164,10 @@ pub fn typecheck(
             let end = *end;
 
             let value = match value {
+                AstStatementValue::Import(_) => {
+                    // TODO: disallow inside functions?
+                    return Ok(None);
+                }
                 AstStatementValue::Expression(expr) => {
                     let expr = typecheck_expression(
                         parse_context.expression(*expr),
@@ -231,6 +235,7 @@ pub fn typecheck(
                         &local_scope[..],
                     )?;
 
+                    // TODO: verify body actually returns that type
                     IRStatementValue::FunctionDeclaration(FunDecl {
                         name: name.to_string(),
                         params,
@@ -240,8 +245,9 @@ pub fn typecheck(
                 }
             };
 
-            Ok(IRStatement { value, start, end })
+            Ok(Some(IRStatement { value, start, end }))
         })
+        .filter_map(|x| x.transpose())
         .collect::<Result<Vec<IRStatement>, TypecheckError>>()?;
 
     Ok(statements)
@@ -293,6 +299,7 @@ pub fn typecheck_expression(
             }
         }
         Call(function, arguments) => {
+            // TODO: check that the # of arguments matches
             let expr = parse_context.expression(*function);
             let function = typecheck_expression(expr, parse_context, ir_context, local_scope)?;
             let (argument_types, returns) = match &function.kind {
@@ -345,7 +352,10 @@ pub fn typecheck_expression(
                     start,
                     end,
                 },
-                None => todo!(),
+                None => {
+                    println!("{}", name);
+                    todo!();
+                }
             }
         }
         Bool(val) => IRExpression {
@@ -502,7 +512,7 @@ pub fn typecheck_expression(
     })
 }
 
-fn type_name_to_type(name: &str) -> Type {
+pub fn type_name_to_type(name: &str) -> Type {
     use NumericType::*;
     use Type::*;
 

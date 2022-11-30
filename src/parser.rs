@@ -25,6 +25,7 @@ pub enum AstStatementValue {
     },
     Declaration(String, usize),
     Expression(usize),
+    Import(String),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -112,6 +113,15 @@ fn parse_statement(
             let start = *start;
             source.next();
             parse_var_declaration(source, context, start)?
+        }
+        Lexeme {
+            value: LexemeValue::Import,
+            start,
+            ..
+        } => {
+            let start = *start;
+            source.next();
+            parse_import(source, start)?
         }
         Lexeme {
             value: LexemeValue::Function,
@@ -208,6 +218,16 @@ fn parse_function_declaration(
             returns,
             body: context.add_expression(body),
         },
+        start,
+        end,
+    })
+}
+
+fn parse_import(source: &mut TokenIter, start: Provenance) -> Result<AstStatement, ParseError> {
+    let (name, _, end) = next_word(source, start, "expected word after 'import'")?;
+
+    Ok(AstStatement {
+        value: AstStatementValue::Import(name),
         start,
         end,
     })
@@ -736,7 +756,10 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
                 children.push(NodePtr::Statement(*statement));
             }
         }
-        Node::Expression(AstExpression {
+        Node::Statement(AstStatement {
+            value: Import(_), ..
+        })
+        | Node::Expression(AstExpression {
             value: Name(_) | Int(_) | Float(_) | Bool(_),
             ..
         }) => {}
