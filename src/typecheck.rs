@@ -24,7 +24,7 @@ pub enum Type {
     Function {
         parameters: Vec<Type>,
         returns: Box<Type>,
-    }
+    },
 }
 
 impl fmt::Display for Type {
@@ -36,7 +36,10 @@ impl fmt::Display for Type {
             Bool => write!(f, "bool"),
             Number(Int64) => write!(f, "i64"),
             Number(Float64) => write!(f, "f64"),
-            Function { parameters, returns } => {
+            Function {
+                parameters,
+                returns,
+            } => {
                 write!(f, "fn(")?;
                 let mut arg_iter = parameters.iter().peekable();
                 while let Some(arg) = arg_iter.next() {
@@ -66,7 +69,7 @@ pub enum TypecheckError {
         found: Type,
         expected: Type,
         provenance: Provenance,
-    }
+    },
 }
 
 #[derive(Debug)]
@@ -120,7 +123,6 @@ pub enum IRExpressionValue {
     /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
 }
-
 
 #[derive(Debug)]
 pub enum BinOpNumeric {
@@ -202,9 +204,13 @@ pub fn typecheck(
                         .map(|type_name| type_name_to_type(type_name.as_ref()))
                         .unwrap_or(Type::Void);
 
-                    local_scope[0].declarations.insert(name.clone(),
-                    Type::Function { parameters: params.iter().map(|param| param.kind.clone()).collect(),
-                        returns: Box::new(returns.clone()) });
+                    local_scope[0].declarations.insert(
+                        name.clone(),
+                        Type::Function {
+                            parameters: params.iter().map(|param| param.kind.clone()).collect(),
+                            returns: Box::new(returns.clone()),
+                        },
+                    );
 
                     let mut local_scope = local_scope.clone();
                     local_scope.insert(
@@ -259,8 +265,13 @@ pub fn typecheck_expression(
             // TODO: provide more error diagnostics
             // TODO: be able to assign to more things than just words
             let name = match parse_context.expression(*target) {
-                AstExpression { value: AstExpressionValue::Name(name), .. } => name,
-                AstExpression { start, .. } => return Err(TypecheckError::IllegalLeftHandValue(*start)),
+                AstExpression {
+                    value: AstExpressionValue::Name(name),
+                    ..
+                } => name,
+                AstExpression { start, .. } => {
+                    return Err(TypecheckError::IllegalLeftHandValue(*start))
+                }
             };
             let local_type = resolve(local_scope, name);
             let expr = parse_context.expression(*expr);
@@ -285,23 +296,36 @@ pub fn typecheck_expression(
             let expr = parse_context.expression(*function);
             let function = typecheck_expression(expr, parse_context, ir_context, local_scope)?;
             let (argument_types, returns) = match &function.kind {
-                Type::Function { parameters, returns } => (parameters, returns.as_ref().clone()),
-                other => return Err(TypecheckError::NonCallableExpression(other.clone(), function.end)),
+                Type::Function {
+                    parameters,
+                    returns,
+                } => (parameters, returns.as_ref().clone()),
+                other => {
+                    return Err(TypecheckError::NonCallableExpression(
+                        other.clone(),
+                        function.end,
+                    ))
+                }
             };
 
-            let arguments = arguments.iter().enumerate().map(|(index, argument)| {
-                let argument = parse_context.expression(*argument);
-                let argument = typecheck_expression(argument, parse_context, ir_context, local_scope)?;
-                if argument.kind != argument_types[index] {
-                    Err(TypecheckError::UnexpectedType {
-                        found: argument.kind.clone(),
-                        expected: argument_types[index].clone(),
-                        provenance: argument.start,
-                    })
-                } else {
-                    Ok(ir_context.add_expression(argument))
-                }
-            }).collect::<Result<Vec<_>, _>>()?;
+            let arguments = arguments
+                .iter()
+                .enumerate()
+                .map(|(index, argument)| {
+                    let argument = parse_context.expression(*argument);
+                    let argument =
+                        typecheck_expression(argument, parse_context, ir_context, local_scope)?;
+                    if argument.kind != argument_types[index] {
+                        Err(TypecheckError::UnexpectedType {
+                            found: argument.kind.clone(),
+                            expected: argument_types[index].clone(),
+                            provenance: argument.start,
+                        })
+                    } else {
+                        Ok(ir_context.add_expression(argument))
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
             let function = ir_context.add_expression(function);
 

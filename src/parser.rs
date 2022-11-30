@@ -390,7 +390,11 @@ fn call_step(
 ) -> Result<AstExpression, ParseError> {
     let mut root = comparison_step(source, context, provenance)?;
 
-    while let Some(Lexeme { value: LexemeValue::OpenParen, .. }) = peek_token_optional(source)? {
+    while let Some(Lexeme {
+        value: LexemeValue::OpenParen,
+        ..
+    }) = peek_token_optional(source)?
+    {
         let mut arguments = Vec::new();
         let mut end;
         source.next(); // remove the peeked token
@@ -400,11 +404,15 @@ fn call_step(
             end = argument.end;
             arguments.push(context.add_expression(argument));
 
-            if let LexemeValue::Comma = peek_token(source, end, "expected comma or ) to end function call")?.value {
+            if let LexemeValue::Comma =
+                peek_token(source, end, "expected comma or ) to end function call")?.value
+            {
                 source.next();
             }
 
-            if let LexemeValue::CloseParen = peek_token(source, end, "expected ) or next argument")?.value {
+            if let LexemeValue::CloseParen =
+                peek_token(source, end, "expected ) or next argument")?.value
+            {
                 source.next();
                 break;
             }
@@ -416,7 +424,7 @@ fn call_step(
         root = AstExpression {
             value: AstExpressionValue::Call(function, arguments),
             start,
-            end
+            end,
         }
     }
 
@@ -513,7 +521,6 @@ fn span(context: &mut ParseTree, left: AstExpression, right: AstExpression) -> S
         end,
     }
 }
-
 
 fn paren_step(
     source: &mut TokenIter,

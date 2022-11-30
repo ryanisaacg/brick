@@ -29,13 +29,15 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
             exports.export(decl.name.as_ref(), ExportKind::Func, current_function_idx);
             let (locals, function_locals) = analyze_locals(&decl, arena);
             let mut f = Function::new(function_locals);
-            emit_expression(&mut EmitContext {
-                f: &mut f,
-                arena,
-                locals: &locals,
-                functions: &function_indices,
-            },
-            arena.expression(decl.body));
+            emit_expression(
+                &mut EmitContext {
+                    f: &mut f,
+                    arena,
+                    locals: &locals,
+                    functions: &function_indices,
+                },
+                arena.expression(decl.body),
+            );
             f.instruction(&Instruction::End);
             codes.function(&f);
 
@@ -114,11 +116,7 @@ struct EmitContext<'a> {
     functions: &'a HashMap<String, u32>,
 }
 
-
-fn emit_statement<'a>(
-    ctx: &mut EmitContext<'a>,
-    statement: &IRStatement,
-) {
+fn emit_statement<'a>(ctx: &mut EmitContext<'a>, statement: &IRStatement) {
     match &statement.value {
         IRStatementValue::FunctionDeclaration(_) => {
             unreachable!(); // TODO
@@ -137,10 +135,7 @@ fn emit_statement<'a>(
     }
 }
 
-fn emit_expression<'a>(
-    ctx: &mut EmitContext<'a>,
-    expr: &IRExpression,
-) {
+fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
     match &expr.value {
         IRExpressionValue::Bool(val) => {
             if *val {
