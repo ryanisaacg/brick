@@ -5,14 +5,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-itertools = "0.10.5"
-matches = "0.1.9"
 thiserror = "1.0"
 wasm-encoder = "0.20.0"
 
 [dev-dependencies]
 anyhow = "1.0"
 wasmtime = "3.0.0"
+matches = "0.1.9"
 
 [lib]
 name = "brick"

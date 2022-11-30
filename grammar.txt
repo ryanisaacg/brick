@@ -17,7 +17,9 @@ type_annotation ::= ":" type
 type ::= word
 
 expression ::= if_expr | while_expr | block_expr | assignment_expr
-assignment_expr ::= compare_expr | atom "=" compare_expr
+assignment_expr ::= call_expr | call_expr "=" call_expr
+call_expr ::= compare_expr | compare_expr "(" call_param_expr ")" | compare_expr "(" call_param_expr ")" call_expr
+call_param_expr ::= expression | expression "," | expression "," call_param_expr
 compare_expr ::= sum_expr | sum_expr ">" compare_expr | sum_expr "<" compare_expr
 sum_expr ::= paren_expr | paren_expr "+" sum_expr | paren_expr "-" sum_expr
 paren_expr ::= atom | "(" expression ")"

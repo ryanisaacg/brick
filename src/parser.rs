@@ -1,4 +1,5 @@
-use itertools::PeekNth;
+use std::iter::Peekable;
+
 use thiserror::Error;
 
 use crate::{
@@ -41,7 +42,7 @@ pub struct AstExpression {
 
 #[derive(Debug, PartialEq)]
 pub enum AstExpressionValue {
-    Assignment(String, usize),
+    Assignment(usize, usize),
     Name(String),
     Int(i64),
     Float(f64),
@@ -49,6 +50,7 @@ pub enum AstExpressionValue {
     BinExpr(BinOp, usize, usize),
     If(usize, usize),
     While(usize, usize),
+    Call(usize, Vec<usize>),
     /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
 }
@@ -74,14 +76,14 @@ pub enum ParseError {
 }
 
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Lexeme, LexError>>;
-type TokenIter<'a> = PeekNth<TokenIterInner<'a>>;
+type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
 pub type ParseTree = SourceTree<AstStatement, AstExpression>;
 
 pub fn parse(
     mut source: impl Iterator<Item = Result<Lexeme, LexError>>,
 ) -> Result<(Vec<usize>, ParseTree), ParseError> {
-    let mut source = itertools::peek_nth(&mut source as TokenIterInner<'_>);
+    let mut source = (&mut source as TokenIterInner<'_>).peekable();
     let mut context = ParseTree::new(Box::new(traverse));
 
     let mut statements = Vec::new();
@@ -109,7 +111,7 @@ fn parse_statement(
         } => {
             let start = *start;
             source.next();
-            parse_declaration(source, context, start)?
+            parse_var_declaration(source, context, start)?
         }
         Lexeme {
             value: LexemeValue::Function,
@@ -211,7 +213,7 @@ fn parse_function_declaration(
     })
 }
 
-fn parse_declaration(
+fn parse_var_declaration(
     source: &mut TokenIter,
     context: &mut ParseTree,
     start: Provenance,
@@ -281,7 +283,7 @@ fn parse_expr(
             let start = *start;
             next_block(source, context, start)
         }
-        _ => parse_assignment(source, context, provenance),
+        _ => assignment_step(source, context, provenance),
     }
 }
 
@@ -347,58 +349,86 @@ fn next_block(
     }
 }
 
-fn parse_assignment(
+fn assignment_step(
     source: &mut TokenIter,
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    // TODO: actually determine assignments
-    match source.peek_nth(1) {
-        Some(Ok(Lexeme {
-            value: LexemeValue::Equals,
-            start,
-            ..
-        })) => {
-            let start = *start;
-            let (name, start) = match next_token(source, start, "TODO")? {
-                Lexeme {
-                    value: LexemeValue::Word(name),
-                    start,
-                    ..
-                } => (name, start),
-                other => {
-                    return Err(ParseError::UnexpectedLexeme(
-                        Box::new(other),
-                        "expected word on left side of =",
-                    ))
-                }
-            };
-            assert_next_lexeme_eq(
-                source.next(),
-                LexemeValue::Equals,
-                start,
-                "expected equals in assignment",
-            )?;
-            let value = parse_expr(source, context, start)?;
-            let end = value.end;
-            let value = context.add_expression(value);
+    let mut root = call_step(source, context, provenance)?;
 
-            Ok(AstExpression {
-                value: AstExpressionValue::Assignment(name, value),
-                start,
-                end,
-            })
-        }
-        _ => next_compare_expr(source, context, provenance),
+    while let Some(Lexeme {
+        value: LexemeValue::Equals,
+        start,
+        ..
+    }) = peek_token_optional(source)?
+    {
+        let start = *start;
+        source.next(); // remove the peeked token
+        let right = assignment_step(source, context, start)?;
+
+        let Span {
+            left,
+            right,
+            start,
+            end,
+        } = span(context, root, right);
+
+        root = AstExpression {
+            value: AstExpressionValue::Assignment(left, right),
+            start,
+            end,
+        };
     }
+
+    Ok(root)
 }
 
-fn next_compare_expr(
+fn call_step(
     source: &mut TokenIter,
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    let mut left = next_addition_expr(source, context, provenance)?;
+    let mut root = comparison_step(source, context, provenance)?;
+
+    while let Some(Lexeme { value: LexemeValue::OpenParen, .. }) = peek_token_optional(source)? {
+        let mut arguments = Vec::new();
+        let mut end;
+        source.next(); // remove the peeked token
+
+        loop {
+            let argument = parse_expr(source, context, provenance)?;
+            end = argument.end;
+            arguments.push(context.add_expression(argument));
+
+            if let LexemeValue::Comma = peek_token(source, end, "expected comma or ) to end function call")?.value {
+                source.next();
+            }
+
+            if let LexemeValue::CloseParen = peek_token(source, end, "expected ) or next argument")?.value {
+                source.next();
+                break;
+            }
+        }
+
+        let start = root.start;
+        let function = context.add_expression(root);
+
+        root = AstExpression {
+            value: AstExpressionValue::Call(function, arguments),
+            start,
+            end
+        }
+    }
+
+    Ok(root)
+}
+
+fn comparison_step(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+    provenance: Provenance,
+) -> Result<AstExpression, ParseError> {
+    let mut left = sum_step(source, context, provenance)?;
 
     while let Some(Lexeme {
         value: token @ (LexemeValue::LessThan | LexemeValue::GreaterThan),
@@ -408,22 +438,22 @@ fn next_compare_expr(
         let operator = match token {
             LexemeValue::LessThan => BinOp::LessThan,
             LexemeValue::GreaterThan => BinOp::GreaterThan,
-            _ => unimplemented!(),
+            _ => unreachable!(),
         };
         source.next();
-        let right = next_compare_expr(source, context, provenance)?;
+        let right = comparison_step(source, context, provenance)?;
         left = make_bin_expr(context, operator, left, right);
     }
 
     Ok(left)
 }
 
-fn next_addition_expr(
+fn sum_step(
     source: &mut TokenIter,
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    let mut left = next_paren_expr(source, context, provenance)?;
+    let mut left = paren_step(source, context, provenance)?;
 
     while let Some(Lexeme {
         value: token @ (LexemeValue::Plus | LexemeValue::Minus),
@@ -436,7 +466,7 @@ fn next_addition_expr(
             _ => unimplemented!(),
         };
         source.next();
-        let right = next_paren_expr(source, context, provenance)?;
+        let right = paren_step(source, context, provenance)?;
         left = make_bin_expr(context, operator, left, right);
     }
 
@@ -463,7 +493,29 @@ fn make_bin_expr(
     }
 }
 
-fn next_paren_expr(
+struct Span {
+    left: usize,
+    right: usize,
+    start: Provenance,
+    end: Provenance,
+}
+
+fn span(context: &mut ParseTree, left: AstExpression, right: AstExpression) -> Span {
+    let start = left.start;
+    let end = right.end;
+    let left = context.add_expression(left);
+    let right = context.add_expression(right);
+
+    Span {
+        left,
+        right,
+        start,
+        end,
+    }
+}
+
+
+fn paren_step(
     source: &mut TokenIter,
     context: &mut ParseTree,
     provenance: Provenance,
@@ -659,6 +711,15 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
         }) => {
             children.push(NodePtr::Expression(*right));
             children.push(NodePtr::Expression(*left));
+        }
+        Node::Expression(AstExpression {
+            value: Call(function, parameters),
+            ..
+        }) => {
+            children.push(NodePtr::Expression(*function));
+            for expression in parameters {
+                children.push(NodePtr::Expression(*expression));
+            }
         }
         Node::Expression(AstExpression {
             value: Block(statements),

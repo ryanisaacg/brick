@@ -9,6 +9,8 @@ use crate::{
 };
 use wasm_encoder::*;
 
+// TODO: initial header-file like parse
+
 pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
@@ -16,20 +18,30 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut exports = ExportSection::new();
     let mut codes = CodeSection::new();
 
-    let mut function_index = 0;
+    let mut current_function_idx = 0;
+    let mut function_indices = HashMap::new();
+
     for statement in statements {
         if let IRStatementValue::FunctionDeclaration(decl) = statement.value {
             emit_function_types(&decl, &mut types);
-            functions.function(function_index);
+            functions.function(current_function_idx);
             // TODO: should we export function
-            exports.export(decl.name.as_ref(), ExportKind::Func, function_index);
+            exports.export(decl.name.as_ref(), ExportKind::Func, current_function_idx);
             let (locals, function_locals) = analyze_locals(&decl, arena);
             let mut f = Function::new(function_locals);
-            emit_expression(&mut f, arena.expression(decl.body), arena, &locals);
+            emit_expression(&mut EmitContext {
+                f: &mut f,
+                arena,
+                locals: &locals,
+                functions: &function_indices,
+            },
+            arena.expression(decl.body));
             f.instruction(&Instruction::End);
             codes.function(&f);
 
-            function_index += 1;
+            function_indices.insert(decl.name, current_function_idx);
+
+            current_function_idx += 1;
         }
     }
 
@@ -95,78 +107,97 @@ fn analyze_locals(
     (local_mapping, locals)
 }
 
-fn emit_statement(
-    f: &mut Function,
+struct EmitContext<'a> {
+    f: &'a mut Function,
+    arena: &'a IRContext,
+    locals: &'a HashMap<String, u32>,
+    functions: &'a HashMap<String, u32>,
+}
+
+
+fn emit_statement<'a>(
+    ctx: &mut EmitContext<'a>,
     statement: &IRStatement,
-    arena: &IRContext,
-    locals: &HashMap<String, u32>,
 ) {
     match &statement.value {
         IRStatementValue::FunctionDeclaration(_) => {
             unreachable!(); // TODO
         }
         IRStatementValue::Expression(expr) => {
-            emit_expression(f, arena.expression(*expr), arena, locals);
+            let expr = ctx.arena.expression(*expr);
+            emit_expression(ctx, expr);
         }
-        IRStatementValue::Declaration(name, expr) => match locals.get(name) {
+        IRStatementValue::Declaration(name, expr) => match ctx.locals.get(name) {
             Some(offset) => {
-                emit_expression(f, arena.expression(*expr), arena, locals);
-                f.instruction(&Instruction::LocalSet(*offset));
+                emit_expression(ctx, ctx.arena.expression(*expr));
+                ctx.f.instruction(&Instruction::LocalSet(*offset));
             }
             None => todo!(),
         },
     }
 }
 
-fn emit_expression(
-    f: &mut Function,
+fn emit_expression<'a>(
+    ctx: &mut EmitContext<'a>,
     expr: &IRExpression,
-    arena: &IRContext,
-    locals: &HashMap<String, u32>,
 ) {
     match &expr.value {
         IRExpressionValue::Bool(val) => {
             if *val {
-                f.instruction(&Instruction::I32Const(1));
+                ctx.f.instruction(&Instruction::I32Const(1));
             } else {
-                f.instruction(&Instruction::I32Const(0));
+                ctx.f.instruction(&Instruction::I32Const(0));
             }
         }
         IRExpressionValue::Int(constant) => {
-            f.instruction(&Instruction::I64Const(*constant));
+            ctx.f.instruction(&Instruction::I64Const(*constant));
         }
         IRExpressionValue::Float(constant) => {
-            f.instruction(&Instruction::F64Const(*constant));
+            ctx.f.instruction(&Instruction::F64Const(*constant));
         }
         IRExpressionValue::Assignment(name, expr) => {
             // TODO de-dupe with declaration
-            emit_expression(f, arena.expression(*expr), arena, locals);
-            match locals.get(name) {
+            emit_expression(ctx, ctx.arena.expression(*expr));
+            match ctx.locals.get(name) {
                 Some(offset) => {
-                    f.instruction(&Instruction::LocalSet(*offset));
+                    ctx.f.instruction(&Instruction::LocalSet(*offset));
                 }
                 None => todo!(),
             }
         }
-        IRExpressionValue::LocalVariable(name) => match locals.get(name) {
+        IRExpressionValue::Call(function, arguments) => {
+            for arg in arguments.iter() {
+                let arg = ctx.arena.expression(*arg);
+                emit_expression(ctx, arg);
+            }
+            let function = ctx.arena.expression(*function);
+            // TODO: be able to emit other functions?
+            let called_function = match &function.value {
+                IRExpressionValue::LocalVariable(name) => name,
+                _ => todo!(),
+            };
+            let function_index = ctx.functions.get(called_function).unwrap();
+            ctx.f.instruction(&Instruction::Call(*function_index));
+        }
+        IRExpressionValue::LocalVariable(name) => match ctx.locals.get(name) {
             Some(offset) => {
-                f.instruction(&Instruction::LocalGet(*offset));
+                ctx.f.instruction(&Instruction::LocalGet(*offset));
             }
             None => todo!(),
         },
         IRExpressionValue::BinaryNumeric(operator, left, right) => {
-            emit_expression(f, arena.expression(*left), arena, locals);
-            emit_expression(f, arena.expression(*right), arena, locals);
+            emit_expression(ctx, ctx.arena.expression(*left));
+            emit_expression(ctx, ctx.arena.expression(*right));
             match operator {
                 BinOpNumeric::Add => {
-                    f.instruction(&match expr.kind {
+                    ctx.f.instruction(&match expr.kind {
                         Type::Number(NumericType::Int64) => Instruction::I64Add,
                         Type::Number(NumericType::Float64) => Instruction::F64Add,
                         _ => unreachable!(),
                     });
                 }
                 BinOpNumeric::Subtract => {
-                    f.instruction(&match expr.kind {
+                    ctx.f.instruction(&match expr.kind {
                         Type::Number(NumericType::Int64) => Instruction::I64Sub,
                         Type::Number(NumericType::Float64) => Instruction::F64Sub,
                         _ => unreachable!(),
@@ -175,19 +206,19 @@ fn emit_expression(
             }
         }
         IRExpressionValue::Comparison(operator, left, right) => {
-            let left = arena.expression(*left);
-            emit_expression(f, left, arena, locals);
-            emit_expression(f, arena.expression(*right), arena, locals);
+            let left = ctx.arena.expression(*left);
+            emit_expression(ctx, left);
+            emit_expression(ctx, ctx.arena.expression(*right));
             match operator {
                 BinOpComparison::GreaterThan => {
-                    f.instruction(&match left.kind {
+                    ctx.f.instruction(&match left.kind {
                         Type::Number(NumericType::Int64) => Instruction::I64GtS,
                         Type::Number(NumericType::Float64) => Instruction::F64Gt,
                         _ => unreachable!(),
                     });
                 }
                 BinOpComparison::LessThan => {
-                    f.instruction(&match left.kind {
+                    ctx.f.instruction(&match left.kind {
                         Type::Number(NumericType::Int64) => Instruction::I64LtS,
                         Type::Number(NumericType::Float64) => Instruction::F64Lt,
                         _ => unreachable!(),
@@ -196,23 +227,23 @@ fn emit_expression(
             }
         }
         IRExpressionValue::If(predicate, block) => {
-            emit_expression(f, arena.expression(*predicate), arena, locals);
-            f.instruction(&Instruction::If(BlockType::Empty)); // TODO
-            emit_expression(f, arena.expression(*block), arena, locals);
-            f.instruction(&Instruction::End); // TODO
+            emit_expression(ctx, ctx.arena.expression(*predicate));
+            ctx.f.instruction(&Instruction::If(BlockType::Empty)); // TODO
+            emit_expression(ctx, ctx.arena.expression(*block));
+            ctx.f.instruction(&Instruction::End); // TODO
         }
         IRExpressionValue::While(predicate, block) => {
-            f.instruction(&Instruction::Loop(BlockType::Empty));
-            emit_expression(f, arena.expression(*predicate), arena, locals);
-            f.instruction(&Instruction::If(BlockType::Empty)); // TODO
-            emit_expression(f, arena.expression(*block), arena, locals);
-            f.instruction(&Instruction::Br(1)); // TODO: does this work
-            f.instruction(&Instruction::End); // TODO
-            f.instruction(&Instruction::End);
+            ctx.f.instruction(&Instruction::Loop(BlockType::Empty));
+            emit_expression(ctx, ctx.arena.expression(*predicate));
+            ctx.f.instruction(&Instruction::If(BlockType::Empty)); // TODO
+            emit_expression(ctx, ctx.arena.expression(*block));
+            ctx.f.instruction(&Instruction::Br(1)); // TODO: does this work
+            ctx.f.instruction(&Instruction::End); // TODO
+            ctx.f.instruction(&Instruction::End);
         }
         IRExpressionValue::Block(statements) => {
             for statement in statements {
-                emit_statement(f, arena.statement(*statement), arena, locals);
+                emit_statement(ctx, ctx.arena.statement(*statement));
             }
         }
     }
@@ -223,6 +254,7 @@ fn represented_by(kind: &Type) -> Option<ValType> {
         Type::Bool => Some(ValType::I32),
         Type::Number(NumericType::Int64) => Some(ValType::I64),
         Type::Number(NumericType::Float64) => Some(ValType::F64),
+        Type::Function { .. } => None,
         Type::Void => None,
     }
 }

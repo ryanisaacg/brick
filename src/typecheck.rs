@@ -20,6 +20,11 @@ pub enum Type {
     Void,
     Bool,
     Number(NumericType),
+    // TODO: arena-allocate types?
+    Function {
+        parameters: Vec<Type>,
+        returns: Box<Type>,
+    }
 }
 
 impl fmt::Display for Type {
@@ -31,6 +36,17 @@ impl fmt::Display for Type {
             Bool => write!(f, "bool"),
             Number(Int64) => write!(f, "i64"),
             Number(Float64) => write!(f, "f64"),
+            Function { parameters, returns } => {
+                write!(f, "fn(")?;
+                let mut arg_iter = parameters.iter().peekable();
+                while let Some(arg) = arg_iter.next() {
+                    write!(f, "{}", arg)?;
+                    if arg_iter.peek().is_some() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, ": {}", returns)
+            }
         }
     }
 }
@@ -41,6 +57,16 @@ pub type IRContext = SourceTree<IRStatement, IRExpression>;
 pub enum TypecheckError {
     #[error("Operands types {0} and {1} don't match at {2}")]
     BinaryOperandMismatch(Type, Type, Provenance),
+    #[error("Attempted to assign to an illegal value at {0}")]
+    IllegalLeftHandValue(Provenance),
+    #[error("Attempted to call a non-callable expression (type {0} at {1}")]
+    NonCallableExpression(Type, Provenance),
+    #[error("Found {found}, expected {expected} at {provenance}")]
+    UnexpectedType {
+        found: Type,
+        expected: Type,
+        provenance: Provenance,
+    }
 }
 
 #[derive(Debug)]
@@ -82,6 +108,7 @@ pub struct IRExpression {
 #[derive(Debug)]
 pub enum IRExpressionValue {
     Assignment(String, usize),
+    Call(usize, Vec<usize>),
     Bool(bool),
     Int(i64),
     Float(f64),
@@ -94,7 +121,6 @@ pub enum IRExpressionValue {
     Block(Vec<usize>),
 }
 
-// TODO: add a generic arena allocator to the top-level
 
 #[derive(Debug)]
 pub enum BinOpNumeric {
@@ -114,6 +140,7 @@ pub struct Scope {
 }
 
 // TODO: unification of separate IRContexts?
+// TODO: initial header-file like parse
 
 pub fn typecheck(
     statements: impl Iterator<Item = usize>,
@@ -169,6 +196,16 @@ pub fn typecheck(
                             kind: type_name_to_type(param.kind.as_ref()),
                         })
                         .collect::<Vec<_>>();
+
+                    let returns = returns
+                        .as_ref()
+                        .map(|type_name| type_name_to_type(type_name.as_ref()))
+                        .unwrap_or(Type::Void);
+
+                    local_scope[0].declarations.insert(name.clone(),
+                    Type::Function { parameters: params.iter().map(|param| param.kind.clone()).collect(),
+                        returns: Box::new(returns.clone()) });
+
                     let mut local_scope = local_scope.clone();
                     local_scope.insert(
                         0,
@@ -187,10 +224,6 @@ pub fn typecheck(
                         ir_context,
                         &local_scope[..],
                     )?;
-                    let returns = returns
-                        .as_ref()
-                        .map(|type_name| type_name_to_type(type_name.as_ref()))
-                        .unwrap_or(Type::Void);
 
                     IRStatementValue::FunctionDeclaration(FunDecl {
                         name: name.to_string(),
@@ -222,7 +255,13 @@ pub fn typecheck_expression(
 
     // TODO: analyze if, block
     Ok(match value {
-        Assignment(name, expr) => {
+        Assignment(target, expr) => {
+            // TODO: provide more error diagnostics
+            // TODO: be able to assign to more things than just words
+            let name = match parse_context.expression(*target) {
+                AstExpression { value: AstExpressionValue::Name(name), .. } => name,
+                AstExpression { start, .. } => return Err(TypecheckError::IllegalLeftHandValue(*start)),
+            };
             let local_type = resolve(local_scope, name);
             let expr = parse_context.expression(*expr);
             let expr = typecheck_expression(expr, parse_context, ir_context, local_scope)?;
@@ -238,6 +277,37 @@ pub fn typecheck_expression(
             IRExpression {
                 value: IRExpressionValue::Assignment(name.clone(), expr),
                 kind: Type::Void,
+                start,
+                end,
+            }
+        }
+        Call(function, arguments) => {
+            let expr = parse_context.expression(*function);
+            let function = typecheck_expression(expr, parse_context, ir_context, local_scope)?;
+            let (argument_types, returns) = match &function.kind {
+                Type::Function { parameters, returns } => (parameters, returns.as_ref().clone()),
+                other => return Err(TypecheckError::NonCallableExpression(other.clone(), function.end)),
+            };
+
+            let arguments = arguments.iter().enumerate().map(|(index, argument)| {
+                let argument = parse_context.expression(*argument);
+                let argument = typecheck_expression(argument, parse_context, ir_context, local_scope)?;
+                if argument.kind != argument_types[index] {
+                    Err(TypecheckError::UnexpectedType {
+                        found: argument.kind.clone(),
+                        expected: argument_types[index].clone(),
+                        provenance: argument.start,
+                    })
+                } else {
+                    Ok(ir_context.add_expression(argument))
+                }
+            }).collect::<Result<Vec<_>, _>>()?;
+
+            let function = ir_context.add_expression(function);
+
+            IRExpression {
+                value: IRExpressionValue::Call(function, arguments),
+                kind: returns,
                 start,
                 end,
             }
@@ -459,6 +529,15 @@ pub fn traverse(root: Node<&IRStatement, &IRExpression>, children: &mut Vec<Node
         }) => {
             children.push(NodePtr::Expression(*right));
             children.push(NodePtr::Expression(*left));
+        }
+        Node::Expression(IRExpression {
+            value: Call(function, arguments),
+            ..
+        }) => {
+            children.push(NodePtr::Expression(*function));
+            for arg in arguments {
+                children.push(NodePtr::Expression(*arg));
+            }
         }
         Node::Expression(IRExpression {
             value: Block(statements),
