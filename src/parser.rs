@@ -71,6 +71,7 @@ pub struct AstType {
 pub enum AstTypeValue {
     Name(String),
     Unique(usize),
+    Shared(usize),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -349,12 +350,16 @@ fn parse_type(
 ) -> Result<AstType, ParseError> {
     let next = next_token(source, start, "expected type")?;
     match next.value {
-        LexemeValue::Unique => {
+        ptr @ (LexemeValue::Unique | LexemeValue::Shared) => {
             let subtype = parse_type(source, context, next.end)?;
             let end = subtype.end;
             let subtype = context.add_kind(subtype);
             Ok(AstType {
-                value: AstTypeValue::Unique(subtype),
+                value: match ptr {
+                    LexemeValue::Unique => AstTypeValue::Unique(subtype),
+                    LexemeValue::Shared => AstTypeValue::Shared(subtype),
+                    _ => unreachable!(),
+                },
                 start: next.start,
                 end,
             })
@@ -801,6 +806,7 @@ fn peek_token_optional<'a>(source: &'a mut TokenIter) -> Result<Option<&'a Lexem
 fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut Vec<NodePtr>) {
     use AstExpressionValue::*;
     use AstStatementValue::*;
+    use AstTypeValue::*;
 
     match root {
         Node::Statement(AstStatement {
@@ -839,7 +845,7 @@ fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut 
             }
         }
         Node::Kind(AstType {
-            value: AstTypeValue::Unique(kind),
+            value: Unique(kind) | Shared(kind),
             ..
         }) => {
             children.push(NodePtr::Kind(*kind));
@@ -853,7 +859,7 @@ fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut 
             ..
         })
         | Node::Expression(AstExpression {
-            value: Name(_) | Int(_) | Float(_) | Bool(_),
+            value: AstExpressionValue::Name(_) | Int(_) | Float(_) | Bool(_),
             ..
         }) => {}
     }

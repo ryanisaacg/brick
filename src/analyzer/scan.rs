@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    parser::{AstStatementValue, ParseTree},
-    typecheck::{ast_type_to_ir, IRContext, IRType, TypecheckError},
+    analyzer::{IRContext, IRType, NumericType, TypecheckError},
+    parser::{AstStatementValue, AstType, AstTypeValue, ParseTree},
 };
 
 // TODO: scan for struct declarations
@@ -64,4 +64,37 @@ pub fn scan_top_level(
     }
 
     Ok(ScanResults { imports, exports })
+}
+
+pub fn ast_type_to_ir(
+    ast_type: &AstType,
+    parse_context: &ParseTree,
+    ir_context: &mut IRContext,
+) -> Result<IRType, TypecheckError> {
+    use IRType::*;
+    use NumericType::*;
+
+    Ok(match &ast_type.value {
+        AstTypeValue::Name(string) => match string.as_str() {
+            "void" => Void,
+            "bool" => Bool,
+            "i64" => Number(Int64),
+            "f64" => Number(Float64),
+            _ => todo!(),
+        },
+        AstTypeValue::Unique(inner) => {
+            let inner = parse_context.kind(*inner);
+            let inner = ast_type_to_ir(inner, parse_context, ir_context)?;
+            let inner = ir_context.add_kind(inner);
+
+            IRType::Unique(inner)
+        }
+        AstTypeValue::Shared(inner) => {
+            let inner = parse_context.kind(*inner);
+            let inner = ast_type_to_ir(inner, parse_context, ir_context)?;
+            let inner = ir_context.add_kind(inner);
+
+            IRType::Shared(inner)
+        }
+    })
 }

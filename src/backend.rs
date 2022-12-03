@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
 use crate::{
-    tree::{Node, NodePtr},
-    typecheck::{
+    analyzer::{
         BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRExpression, IRExpressionValue,
         IRStatement, IRStatementValue, IRType, NumericType,
     },
+    tree::{Node, NodePtr},
 };
 use wasm_encoder::*;
 
 // TODO: initial header-file like parse
+
+const MAIN_MEMORY: u32 = 0;
 
 pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut module = Module::new();
@@ -193,6 +195,32 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
                 None => todo!(),
             }
         }
+        IRExpressionValue::Dereference(child) => {
+            emit_expression(ctx, ctx.arena.expression(*child));
+            let intended_type = ctx.arena.kind(expr.kind);
+            let representation = represented_by(intended_type);
+            let mem_arg = MemArg {
+                offset: 0,
+                align: 1,
+                memory_index: MAIN_MEMORY,
+            };
+            match representation {
+                None => todo!(),
+                Some(ValType::I32) => {
+                    ctx.f.instruction(&Instruction::I32Load(mem_arg));
+                }
+                Some(ValType::I64) => {
+                    ctx.f.instruction(&Instruction::I64Load(mem_arg));
+                }
+                Some(ValType::F32) => {
+                    ctx.f.instruction(&Instruction::F32Load(mem_arg));
+                }
+                Some(ValType::F64) => {
+                    ctx.f.instruction(&Instruction::F64Load(mem_arg));
+                }
+                Some(_) => todo!(),
+            }
+        }
         IRExpressionValue::Call(function, arguments) => {
             for arg in arguments.iter() {
                 let arg = ctx.arena.expression(*arg);
@@ -286,5 +314,6 @@ fn represented_by(kind: &IRType) -> Option<ValType> {
         IRType::Function { .. } => None,
         IRType::Void => None,
         IRType::Unique(_) => Some(ValType::I32),
+        IRType::Shared(_) => Some(ValType::I32),
     }
 }

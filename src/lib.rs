@@ -1,18 +1,19 @@
 use std::{collections::HashMap, fs, io};
 
-use scan::{scan_top_level, ScanResults};
 use thiserror::Error;
 
+pub mod analyzer;
 pub mod backend;
 pub mod lexer;
 pub mod parser;
 pub mod provenance;
-mod scan;
 pub mod tree;
-pub mod typecheck;
 
+use analyzer::{
+    scan_top_level, traverse, typecheck, IRContext, IRType, NumericType, ScanResults, Scope,
+    TypecheckError,
+};
 use parser::ParseError;
-use typecheck::{traverse, IRContext, IRType, NumericType, Scope, TypecheckError};
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -28,7 +29,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
     let mut parsed_files = HashMap::new();
     let mut files_to_parse = vec![source_name.to_string()];
     let mut declarations = HashMap::new();
-    let mut ir_context = typecheck::IRContext::new(Box::new(traverse));
+    let mut ir_context = IRContext::new(Box::new(traverse));
     // TODO: parallelize this?
     while let Some(file) = files_to_parse.pop() {
         let mut file_name = String::new();
@@ -56,7 +57,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
     let mut ir = Vec::new();
     let global_scope = [generate_alloca(&mut ir_context), Scope { declarations }];
     for (statements, arena) in parsed_files.values() {
-        let new_ir = typecheck::typecheck(
+        let new_ir = typecheck(
             statements.iter().copied(),
             &mut ir_context,
             arena,
@@ -70,7 +71,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
 pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u8>, CompileError> {
     let tokens = lexer::lex(source_name, contents.to_string());
     let (statements, arena) = parser::parse(tokens)?;
-    let mut ir_context = typecheck::IRContext::new(Box::new(traverse));
+    let mut ir_context = IRContext::new(Box::new(traverse));
     // TODO: support imports?
     let ScanResults {
         imports: _,
@@ -82,7 +83,7 @@ pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u
             declarations: exports,
         },
     ];
-    let ir = typecheck::typecheck(
+    let ir = typecheck(
         statements.into_iter(),
         &mut ir_context,
         &arena,

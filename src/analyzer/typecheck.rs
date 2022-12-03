@@ -1,155 +1,17 @@
-use std::{collections::HashMap, fmt};
+use std::collections::HashMap;
 
 use crate::{
+    analyzer::{BinOpComparison, BinOpNumeric, IRExpression, IRExpressionValue, NumericType},
     parser::{
-        AstExpression, AstExpressionValue, AstStatement, AstStatementValue, AstType, AstTypeValue,
-        BinOp, ParseTree,
+        AstExpression, AstExpressionValue, AstStatement, AstStatementValue, BinOp, ParseTree,
     },
-    provenance::Provenance,
-    tree::{Node, NodePtr, SourceTree},
+    tree::NodePtr,
 };
-use thiserror::Error;
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub enum NumericType {
-    Int64,
-    Float64,
-}
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub enum IRType {
-    Void,
-    Bool,
-    Number(NumericType),
-    Unique(usize),
-    Function {
-        parameters: Vec<usize>,
-        returns: usize,
-    },
-}
-
-// TODO: now that types are arena-allocated, they can't be displayed
-impl fmt::Display for IRType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use IRType::*;
-        use NumericType::*;
-        match self {
-            Void => write!(f, "void"),
-            Bool => write!(f, "bool"),
-            Number(Int64) => write!(f, "i64"),
-            Number(Float64) => write!(f, "f64"),
-            Unique(inner) => write!(f, "unique {}", inner),
-            Function {
-                parameters,
-                returns,
-            } => {
-                write!(f, "fn(")?;
-                let mut arg_iter = parameters.iter().peekable();
-                while let Some(arg) = arg_iter.next() {
-                    write!(f, "{}", arg)?;
-                    if arg_iter.peek().is_some() {
-                        write!(f, ", ")?;
-                    }
-                }
-                write!(f, ": {}", returns)
-            }
-        }
-    }
-}
-
-pub type IRContext = SourceTree<IRStatement, IRExpression, IRType>;
-
-#[derive(Debug, Error)]
-pub enum TypecheckError {
-    #[error("Operands types {0} and {1} don't match at {2}")]
-    BinaryOperandMismatch(IRType, IRType, Provenance),
-    #[error("Attempted to assign to an illegal value at {0}")]
-    IllegalLeftHandValue(Provenance),
-    #[error("Attempted to call a non-callable expression (type {0} at {1}")]
-    NonCallableExpression(IRType, Provenance),
-    #[error("Found {found}, expected {expected} at {provenance}")]
-    UnexpectedType {
-        found: IRType,
-        expected: IRType,
-        provenance: Provenance,
-    },
-    #[error("Found {found} arguments, expected {expected} at {provenance}")]
-    WrongArgumentCount {
-        found: usize,
-        expected: usize,
-        provenance: Provenance,
-    },
-}
-
-#[derive(Debug)]
-pub struct IRStatement {
-    pub value: IRStatementValue,
-    pub start: Provenance,
-    pub end: Provenance,
-}
-
-#[derive(Debug)]
-pub enum IRStatementValue {
-    FunctionDeclaration(FunDecl),
-    Expression(usize),
-    Declaration(String, usize),
-}
-
-#[derive(Debug)]
-pub struct FunDecl {
-    pub name: String,
-    pub params: Vec<FunctionParameter>,
-    pub returns: usize,
-    pub body: usize,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct FunctionParameter {
-    pub name: String,
-    pub kind: usize,
-}
-
-#[derive(Debug)]
-pub struct IRExpression {
-    pub value: IRExpressionValue,
-    pub kind: usize,
-    pub start: Provenance,
-    pub end: Provenance,
-}
-
-#[derive(Debug)]
-pub enum IRExpressionValue {
-    Assignment(String, usize),
-    Call(usize, Vec<usize>),
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    LocalVariable(String),
-    BinaryNumeric(BinOpNumeric, usize, usize),
-    Comparison(BinOpComparison, usize, usize),
-    If(usize, usize),
-    While(usize, usize),
-    /// Importantly, Block references statements, not expressions!
-    Block(Vec<usize>),
-}
-
-#[derive(Debug)]
-pub enum BinOpNumeric {
-    Add,
-    Subtract,
-}
-
-#[derive(Debug)]
-pub enum BinOpComparison {
-    LessThan,
-    GreaterThan,
-}
-
-#[derive(Clone, Debug)]
-pub struct Scope {
-    pub declarations: HashMap<String, usize>,
-}
-
+use super::{
+    scan::ast_type_to_ir, FunDecl, FunctionParameter, IRContext, IRStatement, IRStatementValue,
+    IRType, Scope, TypecheckError,
+};
 // TODO: unification of separate IRContexts?
 // TODO: initial header-file like parse
 
@@ -250,9 +112,7 @@ pub fn typecheck(
                         Scope {
                             declarations: params
                                 .iter()
-                                .map(|FunctionParameter { name, kind }| {
-                                    (name.to_string(), *kind)
-                                })
+                                .map(|FunctionParameter { name, kind }| (name.to_string(), *kind))
                                 .collect(),
                         },
                     );
@@ -282,7 +142,7 @@ pub fn typecheck(
 }
 
 // TODO: allow accessing the local environment
-pub fn typecheck_expression(
+fn typecheck_expression(
     expression: &AstExpression,
     parse_context: &ParseTree,
     ir_context: &mut IRContext,
@@ -336,12 +196,7 @@ pub fn typecheck_expression(
                     parameters,
                     returns,
                 } => (parameters, returns),
-                other => {
-                    return Err(TypecheckError::NonCallableExpression(
-                        other,
-                        function.end,
-                    ))
-                }
+                other => return Err(TypecheckError::NonCallableExpression(other, function.end)),
             };
 
             if arguments.len() != parameter_types.len() {
@@ -357,22 +212,17 @@ pub fn typecheck_expression(
                 .enumerate()
                 .map(|(index, argument)| {
                     let argument = parse_context.expression(*argument);
-                    let argument =
+                    let mut argument =
                         typecheck_expression(argument, parse_context, ir_context, local_scope)?;
                     let argument_kind = ir_context.kind(argument.kind);
                     let parameter_kind = ir_context.kind(parameter_types[index]);
-                    println!(
-                        "{:?}",
-                        ir_context
-                            .iter_from(NodePtr::Kind(argument.kind))
-                            .collect::<Vec<_>>()
-                    );
-                    println!(
-                        "{:?}",
-                        ir_context
-                            .iter_from(NodePtr::Kind(parameter_types[index]))
-                            .collect::<Vec<_>>()
-                    );
+                    let derefs_required =
+                        derefs_for_parity(ir_context, parameter_kind, argument_kind);
+                    for _ in 0..derefs_required {
+                        argument = maybe_dereference(argument, ir_context);
+                    }
+                    let argument_kind = ir_context.kind(argument.kind);
+                    let parameter_kind = ir_context.kind(parameter_types[index]);
                     // TODO: direct comparison of type objects is now problematic, due to the arena
                     if false && argument_kind != parameter_kind {
                         Err(TypecheckError::UnexpectedType {
@@ -429,12 +279,15 @@ pub fn typecheck_expression(
             end,
         },
         If(predicate, block) => {
-            let predicate = typecheck_expression(
+            let mut predicate = typecheck_expression(
                 parse_context.expression(*predicate),
                 parse_context,
                 ir_context,
                 local_scope,
             )?;
+            while is_pointer(&predicate, ir_context) {
+                predicate = maybe_dereference(predicate, ir_context);
+            }
             if ir_context.kind(predicate.kind) != &IRType::Bool {
                 todo!(); // compiler diagnostic
             }
@@ -508,18 +361,24 @@ pub fn typecheck_expression(
             left,
             right,
         ) => {
-            let left = typecheck_expression(
+            let mut left = typecheck_expression(
                 parse_context.expression(*left),
                 parse_context,
                 ir_context,
                 local_scope,
             )?;
-            let right = typecheck_expression(
+            let mut right = typecheck_expression(
                 parse_context.expression(*right),
                 parse_context,
                 ir_context,
                 local_scope,
             )?;
+            while is_pointer(&left, ir_context) {
+                left = maybe_dereference(left, ir_context);
+            }
+            while is_pointer(&right, ir_context) {
+                right = maybe_dereference(right, ir_context);
+            }
             let left_kind = ir_context.kind(left.kind).clone();
             let right_kind = ir_context.kind(right.kind).clone();
             if left_kind != right_kind
@@ -567,30 +426,52 @@ pub fn typecheck_expression(
     })
 }
 
-pub fn ast_type_to_ir(
-    ast_type: &AstType,
-    parse_context: &ParseTree,
-    ir_context: &mut IRContext,
-) -> Result<IRType, TypecheckError> {
-    use IRType::*;
-    use NumericType::*;
-
-    Ok(match &ast_type.value {
-        AstTypeValue::Name(string) => match string.as_str() {
-            "void" => Void,
-            "bool" => Bool,
-            "i64" => Number(Int64),
-            "f64" => Number(Float64),
-            _ => todo!(),
-        },
-        AstTypeValue::Unique(inner) => {
-            let inner = parse_context.kind(*inner);
-            let inner = ast_type_to_ir(inner, parse_context, ir_context)?;
-            let inner = ir_context.add_kind(inner);
-
-            IRType::Unique(inner)
+// TODO: handle needing to reference
+fn derefs_for_parity(ir_context: &IRContext, benchmark: &IRType, argument: &IRType) -> u32 {
+    match (benchmark, argument) {
+        (
+            IRType::Unique(benchmark) | IRType::Shared(benchmark),
+            IRType::Unique(argument) | IRType::Shared(argument),
+        ) => derefs_for_parity(
+            ir_context,
+            ir_context.kind(*benchmark),
+            ir_context.kind(*argument),
+        ),
+        (IRType::Unique(_benchmark) | IRType::Shared(_benchmark), _) => {
+            todo!();
         }
-    })
+        (benchmark, IRType::Unique(argument) | IRType::Shared(argument)) => {
+            derefs_for_parity(ir_context, benchmark, ir_context.kind(*argument)) + 1
+        }
+        (_benchmark, _guardian) => 0,
+    }
+}
+
+/**
+ * Dereference the expression if it is a pointer type
+ */
+fn maybe_dereference(expression: IRExpression, ir_context: &mut IRContext) -> IRExpression {
+    let kind = ir_context.kind(expression.kind);
+    if let IRType::Unique(inner) | IRType::Shared(inner) = kind {
+        let kind = inner.clone();
+        let start = expression.start.clone();
+        let end = expression.end.clone();
+        let child = ir_context.add_expression(expression);
+        IRExpression {
+            value: IRExpressionValue::Dereference(child),
+            kind,
+            start,
+            end,
+        }
+    } else {
+        expression
+    }
+}
+
+fn is_pointer(expression: &IRExpression, ir_context: &IRContext) -> bool {
+    let kind = ir_context.kind(expression.kind);
+
+    matches!(kind, IRType::Unique(_) | IRType::Shared(_))
 }
 
 fn resolve<'a, 'b>(
@@ -605,71 +486,4 @@ fn resolve<'a, 'b>(
     }
 
     None
-}
-
-pub fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut Vec<NodePtr>) {
-    use IRExpressionValue::*;
-    use IRStatementValue::*;
-    use IRType::*;
-
-    match root {
-        Node::Statement(IRStatement {
-            value:
-                Declaration(_, child)
-                | Expression(child)
-                | FunctionDeclaration(FunDecl { body: child, .. }),
-            ..
-        })
-        | Node::Expression(IRExpression {
-            value: Assignment(_, child),
-            ..
-        }) => {
-            children.push(NodePtr::Expression(*child));
-        }
-        Node::Expression(IRExpression {
-            value:
-                BinaryNumeric(_, left, right)
-                | Comparison(_, left, right)
-                | If(left, right)
-                | While(left, right),
-            ..
-        }) => {
-            children.push(NodePtr::Expression(*right));
-            children.push(NodePtr::Expression(*left));
-        }
-        Node::Expression(IRExpression {
-            value: Call(function, arguments),
-            ..
-        }) => {
-            children.push(NodePtr::Expression(*function));
-            for arg in arguments {
-                children.push(NodePtr::Expression(*arg));
-            }
-        }
-        Node::Expression(IRExpression {
-            value: Block(statements),
-            ..
-        }) => {
-            for statement in statements {
-                children.push(NodePtr::Statement(*statement));
-            }
-        }
-        Node::Kind(Function {
-            parameters,
-            returns,
-        }) => {
-            children.push(NodePtr::Kind(*returns));
-            for kind in parameters {
-                children.push(NodePtr::Kind(*kind));
-            }
-        }
-        Node::Kind(Unique(inner)) => {
-            children.push(NodePtr::Kind(*inner));
-        }
-        Node::Kind(Void | IRType::Bool | Number(_))
-        | Node::Expression(IRExpression {
-            value: IRExpressionValue::Bool(_) | Int(_) | Float(_) | LocalVariable(_),
-            ..
-        }) => {}
-    }
 }

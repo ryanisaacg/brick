@@ -43,6 +43,7 @@ pub enum LexemeValue {
     Import,
     Struct,
     Unique,
+    Shared,
 }
 
 impl fmt::Display for LexemeValue {
@@ -73,6 +74,7 @@ impl fmt::Display for LexemeValue {
             Import => write!(f, "keyword import"),
             Struct => write!(f, "keyword struct"),
             Unique => write!(f, "keyword unique"),
+            Shared => write!(f, "keyword shared"),
         }
     }
 }
@@ -158,6 +160,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "import" => LexemeValue::Import,
                         "struct" => LexemeValue::Struct,
                         "unique" => LexemeValue::Unique,
+                        "shared" => LexemeValue::Shared,
                         _ => LexemeValue::Word(word),
                     }
                 }
