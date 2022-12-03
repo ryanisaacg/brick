@@ -13,9 +13,10 @@ function ::= "fn" word "(" function_args ")" type_annotation block
 function_args ::= word type_annotation | 
     word type_annotation "," |
     word type_annotation "," function_args
+struct ::= "struct" word "{" function_args "}"
 
 type_annotation ::= ":" type
-type ::= word
+type ::= word | "unique" type
 
 expression ::= if_expr | while_expr | block_expr | assignment_expr
 assignment_expr ::= call_expr | call_expr "=" call_expr

@@ -2,18 +2,21 @@ use std::collections::HashMap;
 
 use crate::{
     parser::{AstStatementValue, ParseTree},
-    typecheck::{type_name_to_type, Type},
+    typecheck::{ast_type_to_ir, IRContext, IRType, TypecheckError},
 };
+
+// TODO: scan for struct declarations
 
 pub struct ScanResults {
     pub imports: Vec<String>,
-    pub exports: HashMap<String, Type>,
+    pub exports: HashMap<String, usize>,
 }
 
 pub fn scan_top_level(
     statements: impl Iterator<Item = usize>,
     parse_context: &ParseTree,
-) -> ScanResults {
+    ir_context: &mut IRContext,
+) -> Result<ScanResults, TypecheckError> {
     let mut imports = Vec::new();
     let mut exports = HashMap::new();
 
@@ -29,25 +32,36 @@ pub fn scan_top_level(
             } => {
                 let parameters = params
                     .iter()
-                    .map(|param| type_name_to_type(param.kind.as_ref()))
-                    .collect::<Vec<_>>();
+                    .map(|param| {
+                        let kind = ast_type_to_ir(
+                            parse_context.kind(param.kind),
+                            parse_context,
+                            ir_context,
+                        )?;
+                        Ok(ir_context.add_kind(kind))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 let returns = returns
                     .as_ref()
-                    .map(|type_name| type_name_to_type(type_name.as_ref()))
-                    .unwrap_or(Type::Void);
+                    .map(|kind| {
+                        let kind =
+                            ast_type_to_ir(parse_context.kind(*kind), parse_context, ir_context)?;
+                        Ok(ir_context.add_kind(kind))
+                    })
+                    .unwrap_or(Ok(ir_context.add_kind(IRType::Void)))?;
 
                 exports.insert(
                     name.clone(),
-                    Type::Function {
+                    ir_context.add_kind(IRType::Function {
                         parameters,
-                        returns: Box::new(returns.clone()),
-                    },
+                        returns,
+                    }),
                 );
             }
             _ => {}
         }
     }
 
-    ScanResults { imports, exports }
+    Ok(ScanResults { imports, exports })
 }

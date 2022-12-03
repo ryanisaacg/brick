@@ -19,9 +19,13 @@ pub struct AstStatement {
 pub enum AstStatementValue {
     FunctionDeclaration {
         name: String,
-        params: Vec<FunctionParameter>,
-        returns: Option<String>,
+        params: Vec<NameAndType>,
+        returns: Option<usize>,
         body: usize,
+    },
+    StructDeclaration {
+        name: String,
+        fields: Vec<NameAndType>,
     },
     Declaration(String, usize),
     Expression(usize),
@@ -29,9 +33,9 @@ pub enum AstStatementValue {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct FunctionParameter {
+pub struct NameAndType {
     pub name: String,
-    pub kind: String,
+    pub kind: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -54,6 +58,19 @@ pub enum AstExpressionValue {
     Call(usize, Vec<usize>),
     /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AstType {
+    pub value: AstTypeValue,
+    pub start: Provenance,
+    pub end: Provenance,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AstTypeValue {
+    Name(String),
+    Unique(usize),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -79,7 +96,7 @@ pub enum ParseError {
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Lexeme, LexError>>;
 type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
-pub type ParseTree = SourceTree<AstStatement, AstExpression>;
+pub type ParseTree = SourceTree<AstStatement, AstExpression, AstType>;
 
 pub fn parse(
     mut source: impl Iterator<Item = Result<Lexeme, LexError>>,
@@ -106,31 +123,24 @@ fn parse_statement(
 ) -> Result<AstStatement, ParseError> {
     let statement = match peek_token(source, start, "expected let, fn, or expression")? {
         Lexeme {
-            value: LexemeValue::Let,
+            value:
+                value @ (LexemeValue::Let
+                | LexemeValue::Import
+                | LexemeValue::Function
+                | LexemeValue::Struct),
             start,
             ..
         } => {
             let start = *start;
+            let value = value.clone();
             source.next();
-            parse_var_declaration(source, context, start)?
-        }
-        Lexeme {
-            value: LexemeValue::Import,
-            start,
-            ..
-        } => {
-            let start = *start;
-            source.next();
-            parse_import(source, start)?
-        }
-        Lexeme {
-            value: LexemeValue::Function,
-            start,
-            ..
-        } => {
-            let start = *start;
-            source.next();
-            parse_function_declaration(source, context, start)?
+            match value {
+                LexemeValue::Let => parse_var_declaration(source, context, start)?,
+                LexemeValue::Import => parse_import(source, start)?,
+                LexemeValue::Function => parse_function_declaration(source, context, start)?,
+                LexemeValue::Struct => parse_struct(source, context, start)?,
+                _ => unreachable!(),
+            }
         }
         _ => {
             let expr = parse_expr(source, context, start)?;
@@ -153,23 +163,71 @@ fn parse_statement(
     Ok(statement)
 }
 
+fn parse_struct(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+    start: Provenance,
+) -> Result<AstStatement, ParseError> {
+    let (name, _, end) = next_word(source, start, "expected name after 'struct'")?;
+    assert_next_lexeme_eq(
+        source.next(),
+        LexemeValue::OpenBracket,
+        end,
+        "expected open parenthesis to start parameters",
+    )?;
+
+    let mut params = Vec::new();
+    let mut pos = end;
+    loop {
+        let token = peek_token(source, pos, "expected either parameters or close paren")?;
+        pos = token.start;
+        match token.value {
+            LexemeValue::CloseBracket => break,
+            LexemeValue::Comma => {
+                source.next();
+            }
+            _ => {
+                let (name, end, type_hint) =
+                    parse_name_and_type_hint(source, context, pos, "expected parameter")?;
+                let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
+                let kind = context.add_kind(kind);
+                pos = end;
+                params.push(NameAndType { name, kind });
+            }
+        }
+    }
+    assert_next_lexeme_eq(
+        source.next(),
+        LexemeValue::CloseBracket,
+        start,
+        "expected closing bracket to end struct declaration",
+    )?;
+
+    Ok(AstStatement {
+        value: AstStatementValue::StructDeclaration {
+            name,
+            fields: Vec::new(),
+        },
+        start,
+        end,
+    })
+}
+
 fn parse_function_declaration(
     source: &mut TokenIter,
     context: &mut ParseTree,
     start: Provenance,
 ) -> Result<AstStatement, ParseError> {
-    let next = next_token(source, start, "expected function name")?;
-    let start = next.start;
-    let name = assert_lexeme_word(next, "expected name after 'fn'")?;
+    let (name, _, end) = next_word(source, start, "expected name after 'fn'")?;
 
-    assert_next_lexeme_eq(
+    let mut pos = assert_next_lexeme_eq(
         source.next(),
         LexemeValue::OpenParen,
-        start,
+        end,
         "expected open parenthesis to start parameters",
-    )?;
+    )?
+    .end;
     let mut params = Vec::new();
-    let mut pos = start;
     loop {
         let token = peek_token(source, pos, "expected either parameters or close paren")?;
         pos = token.start;
@@ -180,18 +238,19 @@ fn parse_function_declaration(
             }
             _ => {
                 let (name, end, type_hint) =
-                    parse_name_and_type_hint(source, pos, "expected parameter")?;
+                    parse_name_and_type_hint(source, context, pos, "expected parameter")?;
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
+                let kind = context.add_kind(kind);
                 pos = end;
-                params.push(FunctionParameter { name, kind });
+                params.push(NameAndType { name, kind });
             }
         }
     }
     assert_next_lexeme_eq(
         source.next(),
         LexemeValue::CloseParen,
-        start,
-        "expected closing parenthesis to start parameters",
+        pos,
+        "expected closing parenthesis to end parameters",
     )?;
     let returns = if let Lexeme {
         value: LexemeValue::Colon,
@@ -201,10 +260,9 @@ fn parse_function_declaration(
     {
         let start = *start;
         source.next();
-        Some(assert_lexeme_word(
-            next_token(source, start, "expected type after colon")?,
-            "",
-        )?)
+        let kind = parse_type(source, context, start)?;
+        let kind = context.add_kind(kind);
+        Some(kind)
     } else {
         None
     };
@@ -239,8 +297,12 @@ fn parse_var_declaration(
     start: Provenance,
 ) -> Result<AstStatement, ParseError> {
     // TODO: store type hint in declarations
-    let (name, start, _) =
-        parse_name_and_type_hint(source, start, "expected word after 'let' in declaration")?;
+    let (name, start, _) = parse_name_and_type_hint(
+        source,
+        context,
+        start,
+        "expected word after 'let' in declaration",
+    )?;
     assert_next_lexeme_eq(
         source.next(),
         LexemeValue::Equals,
@@ -259,9 +321,10 @@ fn parse_var_declaration(
 
 fn parse_name_and_type_hint(
     source: &mut TokenIter,
+    context: &mut ParseTree,
     start: Provenance,
     reason: &'static str,
-) -> Result<(String, Provenance, Option<String>), ParseError> {
+) -> Result<(String, Provenance, Option<AstType>), ParseError> {
     let (name, _, mut end) = next_word(source, start, reason)?;
     let type_hint = if let Some(Ok(Lexeme {
         value: LexemeValue::Colon,
@@ -269,14 +332,43 @@ fn parse_name_and_type_hint(
     })) = source.peek()
     {
         source.next();
-        let (type_hint, _, new_end) = next_word(source, end, "expected type hint after colon")?;
-        end = new_end;
+        let type_hint = parse_type(source, context, start)?;
+        end = type_hint.end;
         Some(type_hint)
     } else {
         None
     };
 
     Ok((name, end, type_hint))
+}
+
+fn parse_type(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+    start: Provenance,
+) -> Result<AstType, ParseError> {
+    let next = next_token(source, start, "expected type")?;
+    match next.value {
+        LexemeValue::Unique => {
+            let subtype = parse_type(source, context, next.end)?;
+            let end = subtype.end;
+            let subtype = context.add_kind(subtype);
+            Ok(AstType {
+                value: AstTypeValue::Unique(subtype),
+                start: next.start,
+                end,
+            })
+        }
+        LexemeValue::Word(name) => Ok(AstType {
+            value: AstTypeValue::Name(name),
+            start: next.start,
+            end: next.end,
+        }),
+        _ => Err(ParseError::UnexpectedLexeme(
+            Box::new(next),
+            "expected either 'unique' or type name",
+        )),
+    }
 }
 
 fn parse_expr(
@@ -660,16 +752,6 @@ fn try_decimal(
     }
 }
 
-fn assert_lexeme_word(lexeme: Lexeme, reason: &'static str) -> Result<String, ParseError> {
-    match lexeme {
-        Lexeme {
-            value: LexemeValue::Word(word),
-            ..
-        } => Ok(word),
-        other => Err(ParseError::UnexpectedLexeme(Box::new(other), reason)),
-    }
-}
-
 fn next_token(
     source: &mut TokenIter,
     provenance: Provenance,
@@ -716,7 +798,7 @@ fn peek_token_optional<'a>(source: &'a mut TokenIter) -> Result<Option<&'a Lexem
         .transpose()?)
 }
 
-fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePtr>) {
+fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut Vec<NodePtr>) {
     use AstExpressionValue::*;
     use AstStatementValue::*;
 
@@ -756,8 +838,19 @@ fn traverse(root: Node<&AstStatement, &AstExpression>, children: &mut Vec<NodePt
                 children.push(NodePtr::Statement(*statement));
             }
         }
-        Node::Statement(AstStatement {
-            value: Import(_), ..
+        Node::Kind(AstType {
+            value: AstTypeValue::Unique(kind),
+            ..
+        }) => {
+            children.push(NodePtr::Kind(*kind));
+        }
+        Node::Kind(AstType {
+            value: AstTypeValue::Name(_),
+            ..
+        })
+        | Node::Statement(AstStatement {
+            value: Import(_) | StructDeclaration { .. },
+            ..
         })
         | Node::Expression(AstExpression {
             value: Name(_) | Int(_) | Float(_) | Bool(_),

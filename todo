@@ -1,24 +1,30 @@
-stuff that I can pretty much do in any order:
+parallel to "progress":
 - the rest of the math operators
 - the rest of the comparison operators
 - integer promotion
 - integer -> float promotion
 - float -> int casting
 - blocks returning values
+- basic extern types
+- constant evaluation
+- namespacing
+- symbols
 
-stuff that requires thinking:
+data structures:
+- deep testing of equality between two types
+- the ability to stack and heap allocate values
+- the ability to take shared or unique references to those values
 - product types
 - sum types
-- pattern matching
-- constant evaluation
-- external environment declarations
-- nested function declarations
-- namespaceing
 
-stuff that requires learning:
-- closures
-- interesting optimizations
+closures (blocked by data structures):
+- nested function declarations
+- create the capture environment
+- figure out how to make runtime function calls
+
+stuff to learn:
+- pattern matching
 - borrow-checking
 - binary debug info
-
+- optimizations?
 

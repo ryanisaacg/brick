@@ -4,7 +4,7 @@ use crate::{
     tree::{Node, NodePtr},
     typecheck::{
         BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRExpression, IRExpressionValue,
-        IRStatement, IRStatementValue, NumericType, Type,
+        IRStatement, IRStatementValue, IRType, NumericType,
     },
 };
 use wasm_encoder::*;
@@ -18,11 +18,12 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut exports = ExportSection::new();
     let mut codes = CodeSection::new();
 
-    let mut current_function_idx = 0;
     let mut function_indices = HashMap::new();
 
     // TODO: how stable is this order
 
+    function_indices.insert("allocai64".to_string(), 0);
+    let mut current_function_idx = 1;
     for statement in statements.iter() {
         if let IRStatementValue::FunctionDeclaration(decl) = &statement.value {
             function_indices.insert(decl.name.clone(), current_function_idx);
@@ -30,11 +31,26 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
         }
     }
 
-    current_function_idx = 0;
+    types.function(vec![ValType::I64], vec![ValType::I32]);
+    functions.function(0);
+
+    let mut f = Function::new(Vec::new());
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::LocalGet(0));
+    f.instruction(&Instruction::I64Store(MemArg {
+        offset: 0, // TODO: allow more than one
+        align: 1,  // TODO?
+        memory_index: 0,
+    }));
+    f.instruction(&Instruction::I32Const(0));
+    f.instruction(&Instruction::End);
+    codes.function(&f);
+
+    current_function_idx = 1;
 
     for statement in statements {
         if let IRStatementValue::FunctionDeclaration(decl) = statement.value {
-            emit_function_types(&decl, &mut types);
+            emit_function_types(&decl, arena, &mut types);
             functions.function(current_function_idx);
             // TODO: should we export function
             exports.export(decl.name.as_ref(), ExportKind::Func, current_function_idx);
@@ -58,19 +74,27 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
 
     module.section(&types);
     module.section(&functions);
+    let mut memories = MemorySection::new();
+    memories.memory(MemoryType {
+        minimum: 1,
+        maximum: None,
+        memory64: false,
+        shared: false,
+    });
+    module.section(&memories);
     module.section(&exports);
     module.section(&codes);
 
     module.finish()
 }
 
-fn emit_function_types(decl: &FunDecl, types: &mut TypeSection) {
+fn emit_function_types(decl: &FunDecl, ir_context: &IRContext, types: &mut TypeSection) {
     // TODO: param types that can't be represented
     let params = decl
         .params
         .iter()
-        .map(|param| represented_by(&param.kind).unwrap());
-    let results = if let Some(kind) = represented_by(&decl.returns) {
+        .map(|param| represented_by(ir_context.kind(param.kind)).unwrap());
+    let results = if let Some(kind) = represented_by(ir_context.kind(decl.returns)) {
         vec![kind]
     } else {
         // TODO
@@ -90,7 +114,7 @@ fn analyze_locals(
     let mut locals = Vec::new();
 
     for param in decl.params.iter() {
-        let val_type = represented_by(&param.kind).unwrap(); // TODO: params unrepresentable
+        let val_type = represented_by(arena.kind(param.kind)).unwrap(); // TODO: params unrepresentable
         local_mapping.insert(param.name.to_string(), current_offset);
         current_offset += 1;
         locals.push((1, val_type));
@@ -105,7 +129,7 @@ fn analyze_locals(
             }) = node
             {
                 let expr = arena.expression(*expr);
-                if represented_by(&expr.kind) == Some(val_type) {
+                if represented_by(arena.kind(expr.kind)) == Some(val_type) {
                     val_count += 1;
                     local_mapping.insert(name.to_string(), current_offset);
                     current_offset += 1;
@@ -195,16 +219,16 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
             emit_expression(ctx, ctx.arena.expression(*right));
             match operator {
                 BinOpNumeric::Add => {
-                    ctx.f.instruction(&match expr.kind {
-                        Type::Number(NumericType::Int64) => Instruction::I64Add,
-                        Type::Number(NumericType::Float64) => Instruction::F64Add,
+                    ctx.f.instruction(&match ctx.arena.kind(expr.kind) {
+                        IRType::Number(NumericType::Int64) => Instruction::I64Add,
+                        IRType::Number(NumericType::Float64) => Instruction::F64Add,
                         _ => unreachable!(),
                     });
                 }
                 BinOpNumeric::Subtract => {
-                    ctx.f.instruction(&match expr.kind {
-                        Type::Number(NumericType::Int64) => Instruction::I64Sub,
-                        Type::Number(NumericType::Float64) => Instruction::F64Sub,
+                    ctx.f.instruction(&match ctx.arena.kind(expr.kind) {
+                        IRType::Number(NumericType::Int64) => Instruction::I64Sub,
+                        IRType::Number(NumericType::Float64) => Instruction::F64Sub,
                         _ => unreachable!(),
                     });
                 }
@@ -216,16 +240,16 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
             emit_expression(ctx, ctx.arena.expression(*right));
             match operator {
                 BinOpComparison::GreaterThan => {
-                    ctx.f.instruction(&match left.kind {
-                        Type::Number(NumericType::Int64) => Instruction::I64GtS,
-                        Type::Number(NumericType::Float64) => Instruction::F64Gt,
+                    ctx.f.instruction(&match ctx.arena.kind(left.kind) {
+                        IRType::Number(NumericType::Int64) => Instruction::I64GtS,
+                        IRType::Number(NumericType::Float64) => Instruction::F64Gt,
                         _ => unreachable!(),
                     });
                 }
                 BinOpComparison::LessThan => {
-                    ctx.f.instruction(&match left.kind {
-                        Type::Number(NumericType::Int64) => Instruction::I64LtS,
-                        Type::Number(NumericType::Float64) => Instruction::F64Lt,
+                    ctx.f.instruction(&match ctx.arena.kind(left.kind) {
+                        IRType::Number(NumericType::Int64) => Instruction::I64LtS,
+                        IRType::Number(NumericType::Float64) => Instruction::F64Lt,
                         _ => unreachable!(),
                     });
                 }
@@ -254,12 +278,13 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
     }
 }
 
-fn represented_by(kind: &Type) -> Option<ValType> {
+fn represented_by(kind: &IRType) -> Option<ValType> {
     match kind {
-        Type::Bool => Some(ValType::I32),
-        Type::Number(NumericType::Int64) => Some(ValType::I64),
-        Type::Number(NumericType::Float64) => Some(ValType::F64),
-        Type::Function { .. } => None,
-        Type::Void => None,
+        IRType::Bool => Some(ValType::I32),
+        IRType::Number(NumericType::Int64) => Some(ValType::I64),
+        IRType::Number(NumericType::Float64) => Some(ValType::F64),
+        IRType::Function { .. } => None,
+        IRType::Void => None,
+        IRType::Unique(_) => Some(ValType::I32),
     }
 }

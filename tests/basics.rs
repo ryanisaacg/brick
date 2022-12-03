@@ -91,3 +91,17 @@ fn test(): f64 {
         .unwrap()
     );
 }
+
+#[test]
+#[should_panic]
+fn require_declarations() {
+    run_test::<_, ()>(
+        r#"
+    fn test(): void {
+        a = 1
+    }
+    "#,
+        (),
+    )
+    .unwrap();
+}
