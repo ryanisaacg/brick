@@ -84,6 +84,8 @@ pub enum TypecheckError {
         expected: usize,
         provenance: Provenance,
     },
+    #[error("Attempted to reference unknown name {0} at {1}")]
+    UnknownName(String, Provenance),
 }
 
 #[derive(Debug)]

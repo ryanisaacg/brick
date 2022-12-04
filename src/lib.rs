@@ -10,8 +10,7 @@ pub mod provenance;
 pub mod tree;
 
 use analyzer::{
-    scan_top_level, traverse, typecheck, IRContext, IRType, NumericType, ScanResults, Scope,
-    TypecheckError,
+    scan_top_level, traverse, typecheck, IRContext, ScanResults, Scope, TypecheckError,
 };
 use parser::ParseError;
 
@@ -55,7 +54,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
         );
     }
     let mut ir = Vec::new();
-    let global_scope = [generate_alloca(&mut ir_context), Scope { declarations }];
+    let global_scope = [Scope { declarations }];
     for (statements, arena) in parsed_files.values() {
         let new_ir = typecheck(
             statements.iter().copied(),
@@ -77,12 +76,9 @@ pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u
         imports: _,
         exports,
     } = scan_top_level(statements.iter().copied(), &arena, &mut ir_context)?;
-    let global_scope = [
-        generate_alloca(&mut ir_context),
-        Scope {
-            declarations: exports,
-        },
-    ];
+    let global_scope = [Scope {
+        declarations: exports,
+    }];
     let ir = typecheck(
         statements.into_iter(),
         &mut ir_context,
@@ -90,20 +86,4 @@ pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u
         &global_scope,
     )?;
     Ok(backend::emit(ir, &ir_context))
-}
-
-fn generate_alloca(ir_context: &mut IRContext) -> Scope {
-    let mut declarations = HashMap::new();
-    let parameters = vec![ir_context.add_kind(IRType::Number(NumericType::Int64))];
-    let int64 = ir_context.add_kind(IRType::Number(NumericType::Int64));
-    let ptr = ir_context.add_kind(IRType::Unique(int64));
-    declarations.insert(
-        "allocai64".to_string(),
-        ir_context.add_kind(IRType::Function {
-            parameters,
-            returns: ptr,
-        }),
-    );
-
-    Scope { declarations }
 }

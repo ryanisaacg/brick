@@ -5,7 +5,6 @@ use crate::{
     parser::{
         AstExpression, AstExpressionValue, AstStatement, AstStatementValue, BinOp, ParseTree,
     },
-    tree::NodePtr,
 };
 
 use super::{
@@ -255,8 +254,7 @@ fn typecheck_expression(
                     end,
                 },
                 None => {
-                    println!("{}", name);
-                    todo!();
+                    return Err(TypecheckError::UnknownName(name.clone(), start));
                 }
             }
         }
@@ -453,9 +451,9 @@ fn derefs_for_parity(ir_context: &IRContext, benchmark: &IRType, argument: &IRTy
 fn maybe_dereference(expression: IRExpression, ir_context: &mut IRContext) -> IRExpression {
     let kind = ir_context.kind(expression.kind);
     if let IRType::Unique(inner) | IRType::Shared(inner) = kind {
-        let kind = inner.clone();
-        let start = expression.start.clone();
-        let end = expression.end.clone();
+        let kind = *inner;
+        let start = expression.start;
+        let end = expression.end;
         let child = ir_context.add_expression(expression);
         IRExpression {
             value: IRExpressionValue::Dereference(child),

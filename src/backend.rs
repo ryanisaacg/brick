@@ -34,8 +34,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
 
     // TODO: how stable is this order
 
-    function_indices.insert("allocai64".to_string(), 0);
-    let mut current_function_idx = 1;
+    let mut current_function_idx = 0;
     for statement in statements.iter() {
         if let IRStatementValue::FunctionDeclaration(decl) = &statement.value {
             function_indices.insert(decl.name.clone(), current_function_idx);
@@ -43,9 +42,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
         }
     }
 
-    types.function(vec![ValType::I64], vec![ValType::I32]);
-    functions.function(0);
-
+    // Set up the stack pointer
     globals.global(
         GlobalType {
             val_type: ValType::I32,
@@ -54,19 +51,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
         &ConstExpr::i32_const(1),
     );
 
-    let mut f = Function::new(Vec::new());
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::LocalGet(0));
-    f.instruction(&Instruction::I64Store(MemArg {
-        offset: 0, // TODO: allow more than one
-        align: 1,  // TODO?
-        memory_index: 0,
-    }));
-    f.instruction(&Instruction::I32Const(0));
-    f.instruction(&Instruction::End);
-    codes.function(&f);
-
-    current_function_idx = 1;
+    current_function_idx = 0;
 
     for statement in statements {
         if let IRStatementValue::FunctionDeclaration(decl) = statement.value {
@@ -74,17 +59,32 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
             functions.function(current_function_idx);
             // TODO: should we export function
             exports.export(decl.name.as_ref(), ExportKind::Func, current_function_idx);
-            let (locals, function_locals) = analyze_locals(&decl, arena);
-            let mut f = Function::new(function_locals);
-            emit_expression(
-                &mut EmitContext {
-                    f: &mut f,
-                    arena,
-                    locals: &locals,
-                    functions: &function_indices,
-                },
-                arena.expression(decl.body),
-            );
+            let LocalsAnalysis {
+                name_to_offset,
+                wasm_locals,
+                stack_size,
+            } = analyze_locals(&decl, arena);
+            let mut f = Function::new(wasm_locals);
+            let mut ctx = EmitContext {
+                f: &mut f,
+                arena,
+                locals: &name_to_offset,
+                functions: &function_indices,
+            };
+            ctx.f.instruction(&Instruction::GlobalGet(STACK_PTR));
+            ctx.f.instruction(&Instruction::I32Const(stack_size as i32));
+            ctx.f.instruction(&Instruction::I32Add);
+            // TODO: check for stack overflow
+            ctx.f.instruction(&Instruction::GlobalSet(STACK_PTR));
+            for (idx, param) in decl.params.iter().enumerate() {
+                emit_stack_ptr_offset(&mut ctx, param.name.as_str());
+                ctx.f.instruction(&Instruction::LocalGet(idx as u32));
+                let kind = ctx.arena.kind(param.kind);
+                let repr = represented_by(kind);
+                emit_assignment(&mut ctx, repr);
+            }
+            // TODO: push the function arguments onto the stack
+            emit_expression(&mut ctx, arena.expression(decl.body));
             f.instruction(&Instruction::End);
             codes.function(&f);
 
@@ -126,41 +126,44 @@ fn emit_function_types(decl: &FunDecl, ir_context: &IRContext, types: &mut TypeS
 
 // TODO: handle different bind points with the same name
 
-fn analyze_locals(
-    decl: &FunDecl,
-    arena: &IRContext,
-) -> (HashMap<String, u32>, Vec<(u32, ValType)>) {
-    let mut local_mapping = HashMap::new();
-    let mut current_offset = 0;
-    let mut locals = Vec::new();
+struct LocalsAnalysis {
+    name_to_offset: HashMap<String, u32>,
+    wasm_locals: Vec<(u32, ValType)>,
+    stack_size: u32,
+}
+
+fn analyze_locals(decl: &FunDecl, arena: &IRContext) -> LocalsAnalysis {
+    let mut results = LocalsAnalysis {
+        name_to_offset: HashMap::new(),
+        wasm_locals: Vec::new(),
+        stack_size: 0,
+    };
 
     for param in decl.params.iter() {
         let val_type = represented_by(arena.kind(param.kind)).unwrap(); // TODO: params unrepresentable
-        local_mapping.insert(param.name.to_string(), current_offset);
-        current_offset += 1;
-        locals.push((1, val_type));
+        results
+            .name_to_offset
+            .insert(param.name.to_string(), results.stack_size);
+        results.stack_size += size_of_val(&val_type);
+        results.wasm_locals.push((1, val_type));
     }
 
-    for val_type in [ValType::I32, ValType::I64, ValType::F32, ValType::F64] {
-        let mut val_count = 0;
-        for node in arena.iter_from(NodePtr::Expression(decl.body)) {
-            if let Node::Statement(IRStatement {
-                value: IRStatementValue::Declaration(name, expr),
-                ..
-            }) = node
-            {
-                let expr = arena.expression(*expr);
-                if represented_by(arena.kind(expr.kind)) == Some(val_type) {
-                    val_count += 1;
-                    local_mapping.insert(name.to_string(), current_offset);
-                    current_offset += 1;
-                }
-            }
+    for node in arena.iter_from(NodePtr::Expression(decl.body)) {
+        if let Node::Statement(IRStatement {
+            value: IRStatementValue::Declaration(name, expr),
+            ..
+        }) = node
+        {
+            let expr = arena.expression(*expr);
+            results
+                .name_to_offset
+                .insert(name.to_string(), results.stack_size);
+            let repr = represented_by(arena.kind(expr.kind)).unwrap(); // TODO
+            results.stack_size += size_of_val(&repr);
         }
-        locals.push((val_count, val_type));
     }
 
-    (local_mapping, locals)
+    results
 }
 
 struct EmitContext<'a> {
@@ -179,13 +182,14 @@ fn emit_statement<'a>(ctx: &mut EmitContext<'a>, statement: &IRStatement) {
             let expr = ctx.arena.expression(*expr);
             emit_expression(ctx, expr);
         }
-        IRStatementValue::Declaration(name, expr) => match ctx.locals.get(name) {
-            Some(offset) => {
-                emit_expression(ctx, ctx.arena.expression(*expr));
-                ctx.f.instruction(&Instruction::LocalSet(*offset));
-            }
-            None => todo!(),
-        },
+        IRStatementValue::Declaration(name, expr) => {
+            emit_stack_ptr_offset(ctx, name.as_str());
+            let expr = ctx.arena.expression(*expr);
+            emit_expression(ctx, expr);
+            let kind = ctx.arena.kind(expr.kind);
+            let repr = represented_by(kind);
+            emit_assignment(ctx, repr);
+        }
     }
 }
 
@@ -205,40 +209,18 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
             ctx.f.instruction(&Instruction::F64Const(*constant));
         }
         IRExpressionValue::Assignment(name, expr) => {
-            // TODO de-dupe with declaration
-            emit_expression(ctx, ctx.arena.expression(*expr));
-            match ctx.locals.get(name) {
-                Some(offset) => {
-                    ctx.f.instruction(&Instruction::LocalSet(*offset));
-                }
-                None => todo!(),
-            }
+            emit_stack_ptr_offset(ctx, name.as_str());
+            let expr = ctx.arena.expression(*expr);
+            emit_expression(ctx, expr);
+            let kind = ctx.arena.kind(expr.kind);
+            let repr = represented_by(kind);
+            emit_assignment(ctx, repr);
         }
         IRExpressionValue::Dereference(child) => {
             emit_expression(ctx, ctx.arena.expression(*child));
             let intended_type = ctx.arena.kind(expr.kind);
             let representation = represented_by(intended_type);
-            let mem_arg = MemArg {
-                offset: 0,
-                align: 1,
-                memory_index: MAIN_MEMORY,
-            };
-            match representation {
-                None => todo!(),
-                Some(ValType::I32) => {
-                    ctx.f.instruction(&Instruction::I32Load(mem_arg));
-                }
-                Some(ValType::I64) => {
-                    ctx.f.instruction(&Instruction::I64Load(mem_arg));
-                }
-                Some(ValType::F32) => {
-                    ctx.f.instruction(&Instruction::F32Load(mem_arg));
-                }
-                Some(ValType::F64) => {
-                    ctx.f.instruction(&Instruction::F64Load(mem_arg));
-                }
-                Some(_) => todo!(),
-            }
+            emit_dereference(ctx, representation);
         }
         IRExpressionValue::Call(function, arguments) => {
             for arg in arguments.iter() {
@@ -251,16 +233,15 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
                 IRExpressionValue::LocalVariable(name) => name,
                 _ => todo!(),
             };
-            println!("{:?}:{:?}", ctx.functions, called_function);
             let function_index = ctx.functions.get(called_function).unwrap();
             ctx.f.instruction(&Instruction::Call(*function_index));
         }
-        IRExpressionValue::LocalVariable(name) => match ctx.locals.get(name) {
-            Some(offset) => {
-                ctx.f.instruction(&Instruction::LocalGet(*offset));
-            }
-            None => todo!(),
-        },
+        IRExpressionValue::LocalVariable(name) => {
+            let ir_type = ctx.arena.kind(expr.kind);
+            let repr = represented_by(ir_type);
+            emit_stack_ptr_offset(ctx, name.as_str());
+            emit_dereference(ctx, repr);
+        }
         IRExpressionValue::BinaryNumeric(operator, left, right) => {
             emit_expression(ctx, ctx.arena.expression(*left));
             emit_expression(ctx, ctx.arena.expression(*right));
@@ -325,6 +306,67 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
     }
 }
 
+fn emit_stack_ptr_offset<'a>(ctx: &mut EmitContext<'a>, target: &str) {
+    ctx.f.instruction(&Instruction::GlobalGet(STACK_PTR));
+    match ctx.locals.get(target) {
+        Some(offset) => {
+            ctx.f.instruction(&Instruction::I32Const(*offset as i32));
+        }
+        None => todo!(),
+    }
+    ctx.f.instruction(&Instruction::I32Sub);
+}
+
+fn emit_assignment<'a>(ctx: &mut EmitContext<'a>, representation: Option<ValType>) {
+    // TODO: offset & alignment
+    let mem_arg = MemArg {
+        offset: 0,
+        align: 1,
+        memory_index: MAIN_MEMORY,
+    };
+    match representation {
+        None => todo!(),
+        Some(ValType::I32) => {
+            ctx.f.instruction(&Instruction::I32Store(mem_arg));
+        }
+        Some(ValType::I64) => {
+            ctx.f.instruction(&Instruction::I64Store(mem_arg));
+        }
+        Some(ValType::F32) => {
+            ctx.f.instruction(&Instruction::F32Store(mem_arg));
+        }
+        Some(ValType::F64) => {
+            ctx.f.instruction(&Instruction::F64Store(mem_arg));
+        }
+        Some(_) => todo!(),
+    }
+}
+
+fn emit_dereference(ctx: &mut EmitContext<'_>, representation: Option<ValType>) {
+    // TODO: offset & alignment
+    let mem_arg = MemArg {
+        offset: 0,
+        align: 1,
+        memory_index: MAIN_MEMORY,
+    };
+    match representation {
+        None => todo!(),
+        Some(ValType::I32) => {
+            ctx.f.instruction(&Instruction::I32Load(mem_arg));
+        }
+        Some(ValType::I64) => {
+            ctx.f.instruction(&Instruction::I64Load(mem_arg));
+        }
+        Some(ValType::F32) => {
+            ctx.f.instruction(&Instruction::F32Load(mem_arg));
+        }
+        Some(ValType::F64) => {
+            ctx.f.instruction(&Instruction::F64Load(mem_arg));
+        }
+        Some(_) => todo!(),
+    }
+}
+
 fn represented_by(kind: &IRType) -> Option<ValType> {
     match kind {
         IRType::Bool => Some(ValType::I32),
@@ -334,5 +376,15 @@ fn represented_by(kind: &IRType) -> Option<ValType> {
         IRType::Void => None,
         IRType::Unique(_) => Some(ValType::I32),
         IRType::Shared(_) => Some(ValType::I32),
+    }
+}
+
+fn size_of_val(val: &ValType) -> u32 {
+    match val {
+        ValType::I32 => 4,
+        ValType::F32 => 4,
+        ValType::I64 => 8,
+        ValType::F64 => 8,
+        _ => todo!(),
     }
 }
