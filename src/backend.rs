@@ -9,9 +9,18 @@ use crate::{
 };
 use wasm_encoder::*;
 
-// TODO: initial header-file like parse
-
+/**
+ * Note: currently in WASM, there is only a 0-memory. However, the spec is forwards-compatible with
+ * more
+ */
 const MAIN_MEMORY: u32 = 0;
+const STACK_MINIMUM_PAGES: u64 = 16;
+const HEAP_MINIMUM_PAGES: u64 = 48;
+const MEMORY_MINIMUM_PAGES: u64 = STACK_MINIMUM_PAGES + HEAP_MINIMUM_PAGES;
+const MAXIMUM_MEMORY: u64 = 16384;
+
+// TODO: handle stack overflows
+const STACK_PTR: u32 = 0;
 
 pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut module = Module::new();
@@ -19,6 +28,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut functions = FunctionSection::new();
     let mut exports = ExportSection::new();
     let mut codes = CodeSection::new();
+    let mut globals = GlobalSection::new();
 
     let mut function_indices = HashMap::new();
 
@@ -35,6 +45,14 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
 
     types.function(vec![ValType::I64], vec![ValType::I32]);
     functions.function(0);
+
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+        },
+        &ConstExpr::i32_const(1),
+    );
 
     let mut f = Function::new(Vec::new());
     f.instruction(&Instruction::I32Const(0));
@@ -78,12 +96,13 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     module.section(&functions);
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
-        minimum: 1,
-        maximum: None,
+        minimum: MEMORY_MINIMUM_PAGES,
+        maximum: Some(MAXIMUM_MEMORY),
         memory64: false,
         shared: false,
     });
     module.section(&memories);
+    module.section(&globals);
     module.section(&exports);
     module.section(&codes);
 
