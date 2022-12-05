@@ -80,6 +80,8 @@ pub fn ast_type_to_ir(
             "bool" => Bool,
             "i64" => Number(Int64),
             "f64" => Number(Float64),
+            "i32" => Number(Int32),
+            "f32" => Number(Float32),
             _ => todo!(),
         },
         AstTypeValue::Unique(inner) => {

@@ -9,11 +9,14 @@ parallel to "progress":
 - constant evaluation
 - namespacing
 - symbols
+- handle disposing of values from functions that aren't used
+- early return
+- else statements
 
 data structures:
 - deep testing of equality between two types
-- the ability to stack and heap allocate values
-- the ability to take shared or unique references to those values
+- the ability to heap allocate values
+- assigning to references
 - product types
 - sum types
 

@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Debug};
 
 type FindChildren<S, E, K> = Box<dyn Fn(Node<&S, &E, &K>, &mut Vec<NodePtr>)>;
 
@@ -88,6 +88,34 @@ impl<S, E, K> SourceTree<S, E, K> {
             source_tree: self,
             call_stack: vec![root],
         }
+    }
+}
+
+impl<S: Debug, E: Debug, K: Debug> SourceTree<S, E, K> {
+    pub fn pretty_dbg(&self, root: NodePtr) -> String {
+        use Node::*;
+        let mut nodes = vec![(0, root)];
+        let mut string = String::new();
+
+        while let Some((indent, node_ptr)) = nodes.pop() {
+            let node_value = self.node(node_ptr);
+            for _ in 0..indent {
+                string.push(' ');
+            }
+            string.push_str(format!("{:?}: ", node_ptr).as_str());
+            match node_value {
+                Statement(a) => string.push_str(format!("{:?}\n", a).as_str()),
+                Expression(a) => string.push_str(format!("{:?}\n", a).as_str()),
+                Kind(a) => string.push_str(format!("{:?}\n", a).as_str()),
+            }
+            let mut tmp = Vec::new();
+            (self.children_of)(node_value, &mut tmp);
+            for node_ptr in tmp {
+                nodes.push((indent + 1, node_ptr));
+            }
+        }
+
+        string
     }
 }
 

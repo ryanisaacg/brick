@@ -93,6 +93,25 @@ fn test(): f64 {
 }
 
 #[test]
+fn multiple_vars() {
+    assert_eq!(
+        10i64,
+        run_test(
+            r#"
+fn test(): i64 {
+    let a = 1;
+    let b = a + 1;
+    let c = b + 1;
+    let d = c + 1;
+    a + b + c + d
+}"#,
+            ()
+        )
+        .unwrap()
+    );
+}
+
+#[test]
 #[should_panic]
 fn require_declarations() {
     run_test::<_, ()>(

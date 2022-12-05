@@ -39,6 +39,28 @@ fn difference(a: i64, b: i64): i64 {
 }
 
 #[test]
+fn call_and_return() {
+    assert_eq!(
+        2i64,
+        run_test(
+            r#"
+fn test(): i64 {
+    let a = 2
+    let b = difference(2, 3)
+    a
+}
+
+fn difference(a: i64, b: i64): i64 {
+    a - b
+}
+"#,
+            ()
+        )
+        .unwrap()
+    );
+}
+
+#[test]
 #[should_panic]
 fn call_function_with_incorrect_args() {
     assert_eq!(

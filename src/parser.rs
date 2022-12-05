@@ -56,6 +56,8 @@ pub enum AstExpressionValue {
     If(usize, usize),
     While(usize, usize),
     Call(usize, Vec<usize>),
+    TakeUnique(usize),
+    TakeShared(usize),
     /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
 }
@@ -471,7 +473,7 @@ fn assignment_step(
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    let mut root = call_step(source, context, provenance)?;
+    let mut root = reference_step(source, context, provenance)?;
 
     while let Some(Lexeme {
         value: LexemeValue::Equals,
@@ -500,52 +502,32 @@ fn assignment_step(
     Ok(root)
 }
 
-fn call_step(
+fn reference_step(
     source: &mut TokenIter,
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    let mut root = comparison_step(source, context, provenance)?;
-
-    while let Some(Lexeme {
-        value: LexemeValue::OpenParen,
-        ..
-    }) = peek_token_optional(source)?
-    {
-        let mut arguments = Vec::new();
-        let mut end;
-        source.next(); // remove the peeked token
-
-        loop {
-            let argument = parse_expr(source, context, provenance)?;
-            end = argument.end;
-            arguments.push(context.add_expression(argument));
-
-            if let LexemeValue::Comma =
-                peek_token(source, end, "expected comma or ) to end function call")?.value
-            {
-                source.next();
-            }
-
-            if let LexemeValue::CloseParen =
-                peek_token(source, end, "expected ) or next argument")?.value
-            {
-                source.next();
-                break;
-            }
+    let next = peek_token(source, provenance, "expected reference or expression")?;
+    let start = next.start;
+    match &next.value {
+        lex @ (LexemeValue::Shared | LexemeValue::Unique) => {
+            let lex = lex.clone();
+            source.next();
+            let child = reference_step(source, context, start)?;
+            let end = child.end;
+            let child = context.add_expression(child);
+            Ok(AstExpression {
+                value: match lex {
+                    LexemeValue::Shared => AstExpressionValue::TakeShared(child),
+                    LexemeValue::Unique => AstExpressionValue::TakeUnique(child),
+                    _ => unreachable!(),
+                },
+                start,
+                end,
+            })
         }
-
-        let start = root.start;
-        let function = context.add_expression(root);
-
-        root = AstExpression {
-            value: AstExpressionValue::Call(function, arguments),
-            start,
-            end,
-        }
+        _ => comparison_step(source, context, provenance),
     }
-
-    Ok(root)
 }
 
 fn comparison_step(
@@ -578,7 +560,7 @@ fn sum_step(
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    let mut left = paren_step(source, context, provenance)?;
+    let mut left = call_step(source, context, provenance)?;
 
     while let Some(Lexeme {
         value: token @ (LexemeValue::Plus | LexemeValue::Minus),
@@ -591,7 +573,7 @@ fn sum_step(
             _ => unimplemented!(),
         };
         source.next();
-        let right = paren_step(source, context, provenance)?;
+        let right = call_step(source, context, provenance)?;
         left = make_bin_expr(context, operator, left, right);
     }
 
@@ -637,6 +619,54 @@ fn span(context: &mut ParseTree, left: AstExpression, right: AstExpression) -> S
         start,
         end,
     }
+}
+
+fn call_step(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+    provenance: Provenance,
+) -> Result<AstExpression, ParseError> {
+    let mut root = paren_step(source, context, provenance)?;
+
+    while let Some(Lexeme {
+        value: LexemeValue::OpenParen,
+        ..
+    }) = peek_token_optional(source)?
+    {
+        let mut arguments = Vec::new();
+        let mut end;
+        source.next(); // remove the peeked token
+
+        loop {
+            let argument = parse_expr(source, context, provenance)?;
+            end = argument.end;
+            arguments.push(context.add_expression(argument));
+
+            if let LexemeValue::Comma =
+                peek_token(source, end, "expected comma or ) to end function call")?.value
+            {
+                source.next();
+            }
+
+            if let LexemeValue::CloseParen =
+                peek_token(source, end, "expected ) or next argument")?.value
+            {
+                source.next();
+                break;
+            }
+        }
+
+        let start = root.start;
+        let function = context.add_expression(root);
+
+        root = AstExpression {
+            value: AstExpressionValue::Call(function, arguments),
+            start,
+            end,
+        }
+    }
+
+    Ok(root)
 }
 
 fn paren_step(
@@ -815,7 +845,7 @@ fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut 
             ..
         })
         | Node::Expression(AstExpression {
-            value: Assignment(_, child),
+            value: Assignment(_, child) | TakeShared(child) | TakeUnique(child),
             ..
         }) => {
             children.push(NodePtr::Expression(*child));

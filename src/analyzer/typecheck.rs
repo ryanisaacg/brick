@@ -276,6 +276,26 @@ fn typecheck_expression(
             start,
             end,
         },
+        TakeUnique(child) | TakeShared(child) => {
+            let child = parse_context.expression(*child);
+            let child = typecheck_expression(child, parse_context, ir_context, local_scope)?;
+            let kind = ir_context.add_kind(match value {
+                TakeUnique(_) => IRType::Unique(child.kind),
+                TakeShared(_) => IRType::Shared(child.kind),
+                _ => unreachable!(),
+            });
+            let child = ir_context.add_expression(child);
+            IRExpression {
+                value: match value {
+                    TakeUnique(_) => IRExpressionValue::TakeUnique(child),
+                    TakeShared(_) => IRExpressionValue::TakeShared(child),
+                    _ => unreachable!(),
+                },
+                kind,
+                start,
+                end,
+            }
+        }
         If(predicate, block) => {
             let mut predicate = typecheck_expression(
                 parse_context.expression(*predicate),

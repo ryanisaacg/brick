@@ -1,5 +1,6 @@
-import example
 
-fn f(c: i64, d: i64): i64 {
-    add_i64(c, d)
+fn f(): i64 {
+    let a = 1
+    let b = shared a
+    1 + b
 }

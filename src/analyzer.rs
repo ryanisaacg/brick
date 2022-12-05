@@ -15,7 +15,9 @@ pub use typecheck::typecheck;
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum NumericType {
+    Int32,
     Int64,
+    Float32,
     Float64,
 }
 
@@ -40,6 +42,8 @@ impl fmt::Display for IRType {
         match self {
             Void => write!(f, "void"),
             Bool => write!(f, "bool"),
+            Number(Int32) => write!(f, "i32"),
+            Number(Float32) => write!(f, "f32"),
             Number(Int64) => write!(f, "i64"),
             Number(Float64) => write!(f, "f64"),
             Unique(inner) => write!(f, "unique {}", inner),
@@ -137,6 +141,8 @@ pub enum IRExpressionValue {
     Comparison(BinOpComparison, usize, usize),
     If(usize, usize),
     While(usize, usize),
+    TakeUnique(usize),
+    TakeShared(usize),
     /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
 
@@ -175,7 +181,7 @@ pub fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut
             ..
         })
         | Node::Expression(IRExpression {
-            value: Assignment(_, child) | Dereference(child),
+            value: Assignment(_, child) | Dereference(child) | TakeUnique(child) | TakeShared(child),
             ..
         }) => {
             children.push(NodePtr::Expression(*child));
