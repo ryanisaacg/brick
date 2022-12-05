@@ -154,6 +154,8 @@ fn typecheck_expression(
 
     // TODO: analyze if, block
     Ok(match value {
+        StructLiteral { .. } => unimplemented!(),
+        BinExpr(BinOp::Dot, ..) => unimplemented!(),
         Assignment(lvalue, rvalue) => {
             // TODO: provide more error diagnostics
             let mut lvalue = match parse_context.expression(*lvalue) {

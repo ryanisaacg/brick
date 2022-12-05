@@ -10,9 +10,9 @@ import ::= "import" word
 declaration ::= "let" word "=" expression ";"
 assignment ::= word "=" expression ";"
 function ::= "fn" word "(" function_args ")" type_annotation block
-function_args ::= word type_annotation |
-    word type_annotation "," |
-    word type_annotation "," function_args
+    function_args ::= word type_annotation |
+        word type_annotation "," |
+        word type_annotation "," function_args
 struct ::= "struct" word "{" function_args "}"
 
 type_annotation ::= ":" type
@@ -20,15 +20,24 @@ type ::= word | "unique" type | "shared" type
 
 expression ::= if_expr | while_expr | block_expr | assignment_expr
 assignment_expr ::= reference_expr | reference_expr "=" reference_expr
-reference_expr ::= call_expr | "shared" reference_expr | "unique" reference_expr
-call_expr ::= compare_expr | compare_expr "(" call_param_expr ")" | compare_expr "(" call_param_expr ")" call_expr
-call_param_expr ::= expression | expression "," | expression "," call_param_expr
+reference_expr ::= compare_expr | "shared" reference_expr | "unique" reference_expr
 compare_expr ::= sum_expr | sum_expr ">" compare_expr | sum_expr "<" compare_expr
-sum_expr ::= paren_expr | paren_expr "+" sum_expr | paren_expr "-" sum_expr
-paren_expr ::= atom | "(" expression ")"
+sum_expr ::= call_expr | call_expr "+" sum_expr | call_expr "-" sum_expr
+call_expr ::= dot_expr | dot_expr "(" call_param_expr ")" | dot_expr "(" call_param_expr ")" call_expr
+    call_param_expr ::= expression |
+        expression "," |
+        expression "," call_param_expr
+dot_expr ::= paren_expr | paren_expr "." dot_chain
+    dot_chain ::= word | word "." word
+paren_expr ::= struct_literal_expr | "(" expression ")"
+struct_literal_expr ::= atom | word "{" struct_literal_params "}"
+    struct_literal_params ::= word | word "," |
+        word "," struct_literal_params |
+        word ":" expression | word ":" expression "," |
+        word ":" expression "," struct_literal_params
 atom ::= word | integer | "-"integer | float | "-"float
 
 if_expr ::= "if" expression block_expr
 while_expr ::= "while" expression block_expr
 block_expr ::= "{" block_contents "}"
-block_contents ::= statement | statement block_contents
+    block_contents ::= statement | statement block_contents

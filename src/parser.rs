@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use std::{collections::HashMap, iter::Peekable};
 
 use thiserror::Error;
 
@@ -58,6 +58,10 @@ pub enum AstExpressionValue {
     Call(usize, Vec<usize>),
     TakeUnique(usize),
     TakeShared(usize),
+    StructLiteral {
+        name: String,
+        fields: HashMap<String, usize>,
+    },
     /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
 }
@@ -78,6 +82,7 @@ pub enum AstTypeValue {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BinOp {
+    Dot,
     Add,
     Subtract,
     LessThan,
@@ -626,18 +631,26 @@ fn call_step(
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    let mut root = paren_step(source, context, provenance)?;
+    let mut root = dot_step(source, context, provenance)?;
 
     while let Some(Lexeme {
         value: LexemeValue::OpenParen,
+        end,
         ..
     }) = peek_token_optional(source)?
     {
         let mut arguments = Vec::new();
-        let mut end;
+        let mut end = *end;
         source.next(); // remove the peeked token
 
         loop {
+            if let LexemeValue::CloseParen =
+                peek_token(source, end, "expected ) or next argument")?.value
+            {
+                source.next();
+                break;
+            }
+
             let argument = parse_expr(source, context, provenance)?;
             end = argument.end;
             arguments.push(context.add_expression(argument));
@@ -646,12 +659,13 @@ fn call_step(
                 peek_token(source, end, "expected comma or ) to end function call")?.value
             {
                 source.next();
-            }
-
-            if let LexemeValue::CloseParen =
-                peek_token(source, end, "expected ) or next argument")?.value
-            {
-                source.next();
+            } else {
+                assert_next_lexeme_eq(
+                    source.next(),
+                    LexemeValue::CloseParen,
+                    end,
+                    "expected close parenthesis or comma after argument",
+                )?;
                 break;
             }
         }
@@ -664,6 +678,37 @@ fn call_step(
             start,
             end,
         }
+    }
+
+    Ok(root)
+}
+
+fn dot_step(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+    provenance: Provenance,
+) -> Result<AstExpression, ParseError> {
+    let mut root = paren_step(source, context, provenance)?;
+    while let Some(Lexeme {
+        value: LexemeValue::Period,
+        ..
+    }) = peek_token_optional(source)?
+    {
+        source.next();
+        let (name, start, end) =
+            next_word(source, provenance, "expected a name after dot operator")?;
+        let right = context.add_expression(AstExpression {
+            value: AstExpressionValue::Name(name),
+            start,
+            end,
+        });
+        let start = root.start;
+        let left = context.add_expression(root);
+        root = AstExpression {
+            value: AstExpressionValue::BinExpr(BinOp::Dot, left, right),
+            start,
+            end,
+        };
     }
 
     Ok(root)
@@ -692,7 +737,92 @@ fn paren_step(
 
         Ok(expr)
     } else {
-        next_atom(source, provenance, "TODO")
+        struct_literal_step(source, context, provenance)
+    }
+}
+
+fn struct_literal_step(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+    provenance: Provenance,
+) -> Result<AstExpression, ParseError> {
+    let atom = next_atom(source, provenance, "expected a word or atom")?;
+    match (atom, peek_token_optional(source)?) {
+        (
+            AstExpression {
+                value: AstExpressionValue::Name(name),
+                start,
+                ..
+            },
+            Some(Lexeme {
+                value: LexemeValue::OpenBracket,
+                end,
+                ..
+            }),
+        ) => {
+            let name = name;
+            let start = start;
+            let mut end = *end;
+            source.next();
+            let mut fields = HashMap::new();
+
+            loop {
+                if let LexemeValue::CloseBracket =
+                    peek_token(source, end, "expected } or next field")?.value
+                {
+                    source.next();
+                    break;
+                }
+
+                let (field, field_start, field_end) =
+                    next_word(source, end, "expected field in struct literal")?;
+                if let lex @ (LexemeValue::Comma | LexemeValue::CloseBracket) =
+                    &peek_token(source, end, "expected comma or ) to end function call")?.value
+                {
+                    let lex = lex.clone();
+                    source.next();
+                    let argument = AstExpression {
+                        value: AstExpressionValue::Name(field.clone()),
+                        start: field_start,
+                        end: field_end,
+                    };
+                    fields.insert(field, context.add_expression(argument));
+                    if lex == LexemeValue::CloseBracket {
+                        break;
+                    }
+                } else {
+                    assert_next_lexeme_eq(
+                        source.next(),
+                        LexemeValue::Colon,
+                        end,
+                        "expected colon after field name",
+                    )?;
+                    let argument = parse_expr(source, context, provenance)?;
+                    end = argument.end;
+                    fields.insert(field, context.add_expression(argument));
+
+                    if let LexemeValue::Comma =
+                        peek_token(source, end, "expected comma or ) to end function call")?.value
+                    {
+                        source.next();
+                    } else {
+                        assert_next_lexeme_eq(
+                            source.next(),
+                            LexemeValue::CloseBracket,
+                            end,
+                            "expected close parenthesis or comma after argument",
+                        )?;
+                        break;
+                    }
+                }
+            }
+            Ok(AstExpression {
+                value: AstExpressionValue::StructLiteral { name, fields },
+                start,
+                end,
+            })
+        }
+        (atom, _) => Ok(atom),
     }
 }
 
@@ -734,7 +864,10 @@ fn next_atom(
                 )),
             }
         }
-        value => panic!("{:?}", value), //Err(ParseError::UnexpectedToken(Token { value, start, end })),
+        value => Err(ParseError::UnexpectedLexeme(
+            Box::new(Lexeme { value, start, end }),
+            reason,
+        )),
     }
 }
 
@@ -873,6 +1006,14 @@ fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut 
         }) => {
             for statement in statements {
                 children.push(NodePtr::Statement(*statement));
+            }
+        }
+        Node::Expression(AstExpression {
+            value: StructLiteral { fields, .. },
+            ..
+        }) => {
+            for expression in fields.values() {
+                children.push(NodePtr::Expression(*expression));
             }
         }
         Node::Kind(AstType {

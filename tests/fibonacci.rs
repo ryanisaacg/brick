@@ -22,7 +22,7 @@ fn fib(n: i64): i64 {
 }
 
 #[test]
-fn arguments() {
+fn test_fibonacci() {
     assert_eq!(fibonacci(0), 1);
     assert_eq!(fibonacci(1), 1);
     assert_eq!(fibonacci(2), 2);
