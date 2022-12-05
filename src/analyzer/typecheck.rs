@@ -173,8 +173,8 @@ fn typecheck_expression(
                 None => todo!(),
                 Some(local_type) => {
                     let expr_type = ir_context.kind(expr.kind);
-                    if &local_type != expr_type {
-                        todo!();
+                    if !are_types_equal(ir_context, &local_type, expr_type) {
+                        todo!("elegant handling of type inequality in assignments");
                     }
                 }
             }
@@ -187,7 +187,6 @@ fn typecheck_expression(
             }
         }
         Call(function, arguments) => {
-            // TODO: check that the # of arguments matches
             let expr = parse_context.expression(*function);
             let function = typecheck_expression(expr, parse_context, ir_context, local_scope)?;
             let (parameter_types, returns) = match ir_context.kind(function.kind).clone() {
@@ -222,15 +221,14 @@ fn typecheck_expression(
                     }
                     let argument_kind = ir_context.kind(argument.kind);
                     let parameter_kind = ir_context.kind(parameter_types[index]);
-                    // TODO: direct comparison of type objects is now problematic, due to the arena
-                    if false && argument_kind != parameter_kind {
+                    if are_types_equal(ir_context, argument_kind, parameter_kind) {
+                        Ok(ir_context.add_expression(argument))
+                    } else {
                         Err(TypecheckError::UnexpectedType {
                             found: argument_kind.clone(),
                             expected: parameter_kind.clone(),
                             provenance: argument.start,
                         })
-                    } else {
-                        Ok(ir_context.add_expression(argument))
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -504,4 +502,35 @@ fn resolve<'a, 'b>(
     }
 
     None
+}
+
+fn are_types_equal(ir_context: &IRContext, a: &IRType, b: &IRType) -> bool {
+    use IRType::*;
+    match (a, b) {
+        (Unique(a), Unique(b)) | (Shared(a), Shared(b)) => {
+            are_types_equal(ir_context, ir_context.kind(*a), ir_context.kind(*b))
+        }
+        (
+            Function {
+                parameters: a_param,
+                returns: a_returns,
+            },
+            Function {
+                parameters: b_param,
+                returns: b_returns,
+            },
+        ) => {
+            a_param.len() == b_param.len()
+                && a_param.iter().zip(b_param.iter()).all(|(a, b)| {
+                    are_types_equal(ir_context, ir_context.kind(*a), ir_context.kind(*b))
+                })
+                && are_types_equal(
+                    ir_context,
+                    ir_context.kind(*a_returns),
+                    ir_context.kind(*b_returns),
+                )
+        }
+        (Void | Bool | Number(_), Void | Bool | Number(_)) => a == b,
+        _ => false,
+    }
 }

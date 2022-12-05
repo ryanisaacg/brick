@@ -21,6 +21,7 @@ pub enum NumericType {
     Float64,
 }
 
+// Make sure to update are_types_equal in typecheck
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum IRType {
     Void,
