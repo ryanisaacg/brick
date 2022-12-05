@@ -154,33 +154,51 @@ fn typecheck_expression(
 
     // TODO: analyze if, block
     Ok(match value {
-        Assignment(target, expr) => {
+        Assignment(lvalue, rvalue) => {
             // TODO: provide more error diagnostics
-            // TODO: be able to assign to more things than just words
-            let name = match parse_context.expression(*target) {
-                AstExpression {
-                    value: AstExpressionValue::Name(name),
+            let mut lvalue = match parse_context.expression(*lvalue) {
+                expr @ AstExpression {
+                    value: AstExpressionValue::Name(_),
                     ..
-                } => name,
+                } => typecheck_expression(expr, parse_context, ir_context, local_scope)?,
                 AstExpression { start, .. } => {
                     return Err(TypecheckError::IllegalLeftHandValue(*start))
                 }
             };
-            let local_type = resolve(ir_context, local_scope, name).cloned();
-            let expr = parse_context.expression(*expr);
-            let expr = typecheck_expression(expr, parse_context, ir_context, local_scope)?;
-            match local_type {
-                None => todo!(),
-                Some(local_type) => {
-                    let expr_type = ir_context.kind(expr.kind);
-                    if !are_types_equal(ir_context, &local_type, expr_type) {
-                        todo!("elegant handling of type inequality in assignments");
-                    }
-                }
+            let rvalue = parse_context.expression(*rvalue);
+            let mut rvalue = typecheck_expression(rvalue, parse_context, ir_context, local_scope)?;
+
+            let l_derefs_required = derefs_for_parity(
+                ir_context,
+                ir_context.kind(rvalue.kind),
+                ir_context.kind(lvalue.kind),
+            );
+            for _ in 0..l_derefs_required {
+                lvalue = maybe_dereference(lvalue, ir_context);
             }
-            let expr = ir_context.add_expression(expr);
+            let r_derefs_required = derefs_for_parity(
+                ir_context,
+                ir_context.kind(rvalue.kind),
+                ir_context.kind(lvalue.kind),
+            );
+            for _ in 0..r_derefs_required {
+                rvalue = maybe_dereference(rvalue, ir_context);
+            }
+
+            let l_kind = ir_context.kind(lvalue.kind);
+            let r_kind = ir_context.kind(rvalue.kind);
+            if !are_types_equal(ir_context, l_kind, r_kind) {
+                return Err(TypecheckError::UnexpectedType {
+                    found: r_kind.clone(),
+                    expected: l_kind.clone(),
+                    provenance: start,
+                });
+            }
+
+            let lvalue = ir_context.add_expression(lvalue);
+            let rvalue = ir_context.add_expression(rvalue);
             IRExpression {
-                value: IRExpressionValue::Assignment(name.clone(), expr),
+                value: IRExpressionValue::Assignment(lvalue, rvalue),
                 kind: ir_context.add_kind(IRType::Void),
                 start,
                 end,
@@ -454,7 +472,7 @@ fn derefs_for_parity(ir_context: &IRContext, benchmark: &IRType, argument: &IRTy
             ir_context.kind(*argument),
         ),
         (IRType::Unique(_benchmark) | IRType::Shared(_benchmark), _) => {
-            todo!();
+            0 // TODO: should this indicate an error state?
         }
         (benchmark, IRType::Unique(argument) | IRType::Shared(argument)) => {
             derefs_for_parity(ir_context, benchmark, ir_context.kind(*argument)) + 1

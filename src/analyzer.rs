@@ -132,7 +132,7 @@ pub struct IRExpression {
 #[derive(Debug)]
 pub enum IRExpressionValue {
     // More-or-less direct translation from the AST
-    Assignment(String, usize),
+    Assignment(usize, usize),
     Call(usize, Vec<usize>),
     Bool(bool),
     Int(i64),
@@ -182,7 +182,7 @@ pub fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut
             ..
         })
         | Node::Expression(IRExpression {
-            value: Assignment(_, child) | Dereference(child) | TakeUnique(child) | TakeShared(child),
+            value: Dereference(child) | TakeUnique(child) | TakeShared(child),
             ..
         }) => {
             children.push(NodePtr::Expression(*child));
@@ -192,7 +192,8 @@ pub fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut
                 BinaryNumeric(_, left, right)
                 | Comparison(_, left, right)
                 | If(left, right)
-                | While(left, right),
+                | While(left, right)
+                | Assignment(left, right),
             ..
         }) => {
             children.push(NodePtr::Expression(*right));

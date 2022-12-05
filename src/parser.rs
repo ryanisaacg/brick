@@ -845,13 +845,14 @@ fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut 
             ..
         })
         | Node::Expression(AstExpression {
-            value: Assignment(_, child) | TakeShared(child) | TakeUnique(child),
+            value: TakeShared(child) | TakeUnique(child),
             ..
         }) => {
             children.push(NodePtr::Expression(*child));
         }
         Node::Expression(AstExpression {
-            value: BinExpr(_, left, right) | If(left, right) | While(left, right),
+            value:
+                Assignment(left, right) | BinExpr(_, left, right) | If(left, right) | While(left, right),
             ..
         }) => {
             children.push(NodePtr::Expression(*right));
@@ -1022,6 +1023,7 @@ mod test {
                         value: Assignment(_, _),
                         ..
                     }),
+                    Expr(AstExpression { value: Name(_), .. }),
                     Expr(AstExpression { value: Int(3), .. }),
                 ],
                 &[

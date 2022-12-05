@@ -15,7 +15,6 @@ parallel to "progress":
 
 data structures:
 - the ability to heap allocate values
-- assigning to references
 - product types
 - sum types
 

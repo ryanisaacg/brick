@@ -241,8 +241,8 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
         IRExpressionValue::Float(constant) => {
             ctx.f.instruction(&Instruction::F64Const(*constant));
         }
-        IRExpressionValue::Assignment(name, expr) => {
-            emit_stack_ptr_offset(ctx, name.as_str());
+        IRExpressionValue::Assignment(lvalue, expr) => {
+            emit_lvalue(ctx, *lvalue);
             let expr = ctx.arena.expression(*expr);
             emit_expression(ctx, expr);
             let kind = ctx.arena.kind(expr.kind);
@@ -431,5 +431,24 @@ fn size_of_val(val: &ValType) -> u32 {
         ValType::I64 => 8,
         ValType::F64 => 8,
         _ => todo!(),
+    }
+}
+
+fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) {
+    let expr = ctx.arena.expression(lvalue);
+    match &expr.value {
+        IRExpressionValue::LocalVariable(name) => {
+            emit_stack_ptr_offset(ctx, name.as_str());
+        }
+        IRExpressionValue::Dereference(child) => {
+            emit_lvalue(ctx, *child);
+            let mem_arg = MemArg {
+                offset: 0,
+                align: 1,
+                memory_index: MAIN_MEMORY,
+            };
+            ctx.f.instruction(&Instruction::I32Load(mem_arg));
+        }
+        _ => unreachable!(),
     }
 }

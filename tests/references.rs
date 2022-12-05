@@ -21,10 +21,9 @@ fn test(): i64 {
 }
 
 #[test]
-#[should_panic] // TODO: allow assigning to references
-fn mutation() {
+fn mutation_auto_dereference() {
     assert_eq!(
-        10i64,
+        6i64,
         run_test(
             r#"
 fn test(): i64 {
@@ -34,6 +33,10 @@ fn test(): i64 {
 }
 
 fn increment(val: unique i64): void {
+    double_dip_increment(unique val)
+}
+
+fn double_dip_increment(val: unique unique i64): void {
     val = val + 1
 }
 "#,
