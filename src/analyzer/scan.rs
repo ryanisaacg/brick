@@ -49,7 +49,7 @@ pub fn scan_top_level(
                             ast_type_to_ir(parse_context.kind(*kind), parse_context, ir_context)?;
                         Ok(ir_context.add_kind(kind))
                     })
-                    .unwrap_or(Ok(ir_context.add_kind(IRType::Void)))?;
+                    .unwrap_or_else(|| Ok(ir_context.add_kind(IRType::Void)))?;
 
                 exports.insert(
                     name.clone(),

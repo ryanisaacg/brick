@@ -349,7 +349,7 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
     }
 }
 
-fn emit_stack_ptr_offset<'a>(ctx: &mut EmitContext<'a>, target: &str) {
+fn emit_stack_ptr_offset(ctx: &mut EmitContext<'_>, target: &str) {
     ctx.f.instruction(&Instruction::GlobalGet(BASE_PTR));
     match ctx.locals.get(target) {
         Some(offset) => {
@@ -360,7 +360,7 @@ fn emit_stack_ptr_offset<'a>(ctx: &mut EmitContext<'a>, target: &str) {
     ctx.f.instruction(&Instruction::I32Add);
 }
 
-fn emit_assignment<'a>(ctx: &mut EmitContext<'a>, representation: Option<ValType>) {
+fn emit_assignment(ctx: &mut EmitContext<'_>, representation: Option<ValType>) {
     // TODO: offset & alignment
     let mem_arg = MemArg {
         offset: 0,
