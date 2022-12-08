@@ -13,6 +13,7 @@ parallel to "progress":
 - early return
 - else statements
 - DWARF
+- better type checking for struct fields?
 
 data structures:
 - the ability to heap allocate values

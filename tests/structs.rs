@@ -90,3 +90,45 @@ fn test(): f64 {
         .unwrap()
     );
 }
+
+#[test]
+fn nested_structs() {
+    assert_eq!(
+        6.0,
+        run_test(
+            r#"
+struct Rectangle {
+    tl: Point,
+    br: Point,
+}
+
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+fn perimeter (rect: Rectangle): f64 {
+    let width = (rect.br.x - rect.tl.x)
+    let height = (rect.br.y - rect.tl.y)
+
+    width + width + height + height
+}
+
+fn test(): f64 {
+   perimeter(Rectangle {
+        tl: Point {
+            x: 1.0,
+            y: 1.0,
+        },
+        br: Point {
+            x: 3.0,
+            y: 2.0,
+        },
+    })
+}
+"#,
+            ()
+        )
+        .unwrap()
+    );
+}
