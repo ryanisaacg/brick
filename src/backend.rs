@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::{
-        BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRExpression, IRExpressionValue,
-        IRStatement, IRStatementValue, IRType, NumericType,
+        BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRExpressionValue, IRStatement,
+        IRStatementValue, IRType, NumericType,
     },
     tree::{Node, NodePtr},
 };
@@ -249,7 +249,7 @@ fn emit_function_declaration(ctx: &mut EmitContext<'_>, stack_size: u32, decl: F
             &ctx.representations[param.kind],
         );
     }
-    emit_expression(ctx, ctx.arena.expression(decl.body));
+    emit_expression(ctx, decl.body);
     // Set the stack pointer back to the base pointer
     ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
     ctx.add_instruction(Instruction::GlobalSet(STACK_PTR));
@@ -270,16 +270,15 @@ fn emit_statement<'a>(ctx: &mut EmitContext<'a>, statement: &IRStatement) {
             unreachable!(); // TODO
         }
         IRStatementValue::Expression(expr) => {
-            let expr = ctx.arena.expression(*expr);
-            emit_expression(ctx, expr);
+            emit_expression(ctx, *expr);
         }
         IRStatementValue::Declaration(name, expr) => {
             // TODO: should this just be an expect
             let Some(offset) = ctx.stack_offsets.get(name.as_str())  else {
                 panic!("internal compiler error: unknown name {}", name);
             };
+            emit_expression(ctx, *expr);
             let expr = ctx.arena.expression(*expr);
-            emit_expression(ctx, expr);
             ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
             ctx.add_instruction(Instruction::GlobalSet(ASSIGNMENT_PTR));
             emit_assignment(
@@ -292,9 +291,48 @@ fn emit_statement<'a>(ctx: &mut EmitContext<'a>, statement: &IRStatement) {
     }
 }
 
-fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
+fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
+    let expr = ctx.arena.expression(expr_index);
     match &expr.value {
-        IRExpressionValue::StructLiteral(..) | IRExpressionValue::Dot(..) => todo!(),
+        IRExpressionValue::LocalVariable(name) => {
+            ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+            emit_dereference(
+                &mut ctx.instructions,
+                *ctx.stack_offsets.get(name.as_str()).unwrap(),
+                &ctx.representations[expr.kind],
+            );
+        }
+        IRExpressionValue::Dot(..) => {
+            let offset = emit_lvalue(ctx, expr_index);
+            emit_dereference(
+                &mut ctx.instructions,
+                offset,
+                &ctx.representations[expr.kind],
+            );
+        }
+        IRExpressionValue::Assignment(lvalue, expr) => {
+            emit_expression(ctx, *expr);
+            let expr = ctx.arena.expression(*expr);
+            let offset = emit_lvalue(ctx, *lvalue);
+            ctx.add_instruction(Instruction::GlobalSet(ASSIGNMENT_PTR));
+            emit_assignment(
+                &mut ctx.instructions,
+                &mut ctx.wasm_locals,
+                offset,
+                &ctx.representations[expr.kind],
+            );
+        }
+        IRExpressionValue::StructLiteral(fields) => {
+            let Representation::Struct { field_order, .. } = &ctx.representations[expr.kind] else {
+                panic!("expected representation of struct to be struct");
+            };
+            for field in field_order {
+                emit_expression(
+                    ctx,
+                    *fields.get(field).expect("expected struct fields to match"),
+                );
+            }
+        }
         IRExpressionValue::Bool(val) => {
             if *val {
                 ctx.add_instruction(Instruction::I32Const(1));
@@ -308,26 +346,13 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
         IRExpressionValue::Float(constant) => {
             ctx.add_instruction(Instruction::F64Const(*constant));
         }
-        IRExpressionValue::Assignment(lvalue, expr) => {
-            let expr = ctx.arena.expression(*expr);
-            emit_expression(ctx, expr);
-            let offset = emit_lvalue(ctx, *lvalue);
-            ctx.add_instruction(Instruction::GlobalSet(ASSIGNMENT_PTR));
-            emit_assignment(
-                &mut ctx.instructions,
-                &mut ctx.wasm_locals,
-                offset,
-                &ctx.representations[expr.kind],
-            );
-        }
         IRExpressionValue::Dereference(child) => {
-            emit_expression(ctx, ctx.arena.expression(*child));
+            emit_expression(ctx, *child);
             emit_dereference(&mut ctx.instructions, 0, &ctx.representations[expr.kind]);
         }
         IRExpressionValue::Call(function, arguments) => {
             for arg in arguments.iter() {
-                let arg = ctx.arena.expression(*arg);
-                emit_expression(ctx, arg);
+                emit_expression(ctx, *arg);
             }
             let function = ctx.arena.expression(*function);
             // TODO: be able to emit other functions?
@@ -351,17 +376,9 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
                 _ => todo!(),
             }
         }
-        IRExpressionValue::LocalVariable(name) => {
-            ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
-            emit_dereference(
-                &mut ctx.instructions,
-                *ctx.stack_offsets.get(name.as_str()).unwrap(),
-                &ctx.representations[expr.kind],
-            );
-        }
         IRExpressionValue::BinaryNumeric(operator, left, right) => {
-            emit_expression(ctx, ctx.arena.expression(*left));
-            emit_expression(ctx, ctx.arena.expression(*right));
+            emit_expression(ctx, *left);
+            emit_expression(ctx, *right);
             match operator {
                 BinOpNumeric::Add => {
                     ctx.add_instruction(match ctx.arena.kind(expr.kind) {
@@ -380,9 +397,9 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
             }
         }
         IRExpressionValue::Comparison(operator, left, right) => {
+            emit_expression(ctx, *left);
+            emit_expression(ctx, *right);
             let left = ctx.arena.expression(*left);
-            emit_expression(ctx, left);
-            emit_expression(ctx, ctx.arena.expression(*right));
             match operator {
                 BinOpComparison::GreaterThan => {
                     ctx.add_instruction(match ctx.arena.kind(left.kind) {
@@ -401,16 +418,16 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
             }
         }
         IRExpressionValue::If(predicate, block) => {
-            emit_expression(ctx, ctx.arena.expression(*predicate));
+            emit_expression(ctx, *predicate);
             ctx.add_instruction(Instruction::If(BlockType::Empty)); // TODO
-            emit_expression(ctx, ctx.arena.expression(*block));
+            emit_expression(ctx, *block);
             ctx.add_instruction(Instruction::End); // TODO
         }
         IRExpressionValue::While(predicate, block) => {
             ctx.add_instruction(Instruction::Loop(BlockType::Empty));
-            emit_expression(ctx, ctx.arena.expression(*predicate));
+            emit_expression(ctx, *predicate);
             ctx.add_instruction(Instruction::If(BlockType::Empty)); // TODO
-            emit_expression(ctx, ctx.arena.expression(*block));
+            emit_expression(ctx, *block);
             ctx.add_instruction(Instruction::Br(1)); // TODO: does this work
             ctx.add_instruction(Instruction::End); // TODO
             ctx.add_instruction(Instruction::End);
@@ -429,9 +446,11 @@ fn emit_parameter(
     offset: u32,
     representation: &Representation,
 ) -> u32 {
+    use Representation::*;
+
     match representation {
-        Representation::Void => local_index,
-        Representation::Scalar(scalar) => {
+        Void => local_index,
+        Scalar(scalar) => {
             instructions.push(Instruction::GlobalGet(BASE_PTR));
             instructions.push(Instruction::LocalGet(local_index as u32));
             // TODO: alignment
@@ -458,7 +477,7 @@ fn emit_parameter(
 
             local_index + 1
         }
-        Representation::Vector(reprs) => {
+        Vector(reprs) | Struct { reprs, .. } => {
             let mut local_index = local_index;
             let mut offset = offset;
             for repr in reprs.iter() {
@@ -511,7 +530,7 @@ fn emit_assignment(
                 _ => todo!("non-simple scalar assignments"),
             }
         }
-        Vector(reprs) => {
+        Vector(reprs) | Struct { reprs, .. } => {
             let mut offset = offset;
             for repr in reprs.iter() {
                 emit_assignment(instructions, locals, offset, repr);
@@ -553,7 +572,7 @@ fn emit_dereference(
                 _ => todo!("non-simple scalar assignments"),
             }
         }
-        Vector(reprs) => {
+        Vector(reprs) | Struct { reprs, .. } => {
             let mut offset = offset;
             for repr in reprs.iter() {
                 emit_dereference(instructions, offset, repr);
@@ -567,7 +586,13 @@ fn emit_dereference(
 enum Representation {
     Void,
     Scalar(ValType),
+    #[allow(dead_code)] // TODO
     Vector(Vec<Representation>),
+    Struct {
+        field_offsets: HashMap<String, u32>,
+        field_order: Vec<String>,
+        reprs: Vec<Representation>,
+    },
 }
 
 fn represented_by(ctx: &IRContext, kind: usize) -> Representation {
@@ -584,12 +609,24 @@ fn represented_by(ctx: &IRContext, kind: usize) -> Representation {
         IRType::Struct { fields } => {
             // TODO: don't constantly re-calculate struct reprs
             // TODO: support re-ordering of fields
-            Vector(
-                fields
-                    .values()
-                    .map(|field| represented_by(ctx, *field))
-                    .collect(),
-            )
+
+            let mut total_size = 0;
+            let mut field_offsets = HashMap::new();
+            let mut reprs = Vec::new();
+            let mut field_order = Vec::new();
+            for (key, field) in fields.iter() {
+                field_order.push(key.clone());
+                field_offsets.insert(key.clone(), total_size);
+                let repr = represented_by(ctx, *field);
+                total_size += size_of_repr(&repr);
+                reprs.push(repr);
+            }
+
+            Struct {
+                field_offsets,
+                reprs,
+                field_order,
+            }
         }
         IRType::Function { .. } => Void,
         IRType::Void => Void,
@@ -598,10 +635,11 @@ fn represented_by(ctx: &IRContext, kind: usize) -> Representation {
 }
 
 fn flatten_repr(repr: &Representation, buffer: &mut Vec<ValType>) {
+    use Representation::*;
     match repr {
-        Representation::Void => {}
-        Representation::Scalar(val) => buffer.push(*val),
-        Representation::Vector(reprs) => {
+        Void => {}
+        Scalar(val) => buffer.push(*val),
+        Vector(reprs) | Struct { reprs, .. } => {
             for repr in reprs.iter() {
                 flatten_repr(repr, buffer);
             }
@@ -610,10 +648,11 @@ fn flatten_repr(repr: &Representation, buffer: &mut Vec<ValType>) {
 }
 
 fn size_of_repr(repr: &Representation) -> u32 {
+    use Representation::*;
     match repr {
-        Representation::Void => 0,
-        Representation::Scalar(val) => value_size(*val),
-        Representation::Vector(reprs) => reprs.iter().map(size_of_repr).sum(),
+        Void => 0,
+        Scalar(val) => value_size(*val),
+        Vector(reprs) | Struct { reprs, .. } => reprs.iter().map(size_of_repr).sum(),
     }
 }
 
@@ -645,6 +684,18 @@ fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) -> u32 {
             ctx.add_instruction(Instruction::I32Load(mem_arg));
 
             0
+        }
+        IRExpressionValue::Dot(left, name) => {
+            let expr = ctx.arena.expression(*left);
+            let Representation::Struct { field_offsets, .. } = &ctx.representations[expr.kind] else {
+                panic!("expected left hand of dot operator to be a struct");
+            };
+            let field_offset = field_offsets
+                .get(name)
+                .expect("expected right hand of dot operator to be present in left");
+            let offset = emit_lvalue(ctx, *left);
+
+            offset + field_offset
         }
         _ => unreachable!(),
     }
