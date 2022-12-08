@@ -204,12 +204,15 @@ fn typecheck_expression(
             }
         }
         BinExpr(BinOp::Dot, left, right) => {
-            let left = typecheck_expression(
+            let mut left = typecheck_expression(
                 parse_context.expression(*left),
                 parse_context,
                 ir_context,
                 local_scope,
             )?;
+            while is_pointer(&left, ir_context) {
+                left = maybe_dereference(left, ir_context);
+            }
             let left_kind = ir_context.kind(left.kind);
             let IRType::Struct { fields } = left_kind else {
                 return Err(TypecheckError::IllegalLeftDotOperand(left_kind.clone(), start));

@@ -65,7 +65,6 @@ fn doubling() {
 }
 
 #[test]
-#[should_panic] // TODO: references and structs don't mix rn
 fn references() {
     assert_eq!(
         5.0,
