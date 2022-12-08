@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use crate::{
     analyzer::{BinOpComparison, BinOpNumeric, IRExpression, IRExpressionValue, NumericType},
     parser::{
-        AstExpression, AstExpressionValue, AstStatement, AstStatementValue, BinOp, ParseTree,
+        AstExpression, AstExpressionValue, AstStatement, AstStatementValue, AstType, AstTypeValue,
+        BinOp, ParseTree,
     },
 };
 
 use super::{
-    scan::ast_type_to_ir, FunDecl, FunctionParameter, IRContext, IRStatement, IRStatementValue,
-    IRType, Scope, TypecheckError,
+    FunDecl, FunctionParameter, IRContext, IRStatement, IRStatementValue, IRType, Scope,
+    TypecheckError, BOOL_KIND, F32_KIND, F64_KIND, I32_KIND, I64_KIND, VOID_KIND,
 };
 // TODO: unification of separate IRContexts?
 // TODO: initial header-file like parse
@@ -72,12 +73,12 @@ pub fn typecheck(
                     let params = params
                         .iter()
                         .map(|param| {
-                            let kind = ast_type_to_ir(
+                            let kind = resolve_ast_type(
                                 parse_context.kind(param.kind),
                                 parse_context,
                                 ir_context,
+                                &local_scope[..],
                             )?;
-                            let kind = ir_context.add_kind(kind);
                             Ok(FunctionParameter {
                                 name: param.name.to_string(),
                                 kind,
@@ -88,14 +89,14 @@ pub fn typecheck(
                     let returns = returns
                         .as_ref()
                         .map(|type_name| {
-                            ast_type_to_ir(
+                            resolve_ast_type(
                                 parse_context.kind(*type_name),
                                 parse_context,
                                 ir_context,
+                                &local_scope[..],
                             )
                         })
-                        .unwrap_or(Ok(IRType::Void))?;
-                    let returns = ir_context.add_kind(returns);
+                        .unwrap_or(Ok(VOID_KIND))?;
                     let function_type = ir_context.add_kind(IRType::Function {
                         parameters: params.iter().map(|param| param.kind).collect(),
                         returns,
@@ -154,13 +155,85 @@ fn typecheck_expression(
 
     // TODO: analyze if, block
     Ok(match value {
-        StructLiteral { .. } => unimplemented!(),
-        BinExpr(BinOp::Dot, ..) => unimplemented!(),
+        StructLiteral { name, fields } => {
+            let struct_type_idx = resolve(local_scope, name.as_str());
+            let struct_type = struct_type_idx.map(|idx| ir_context.kind(idx));
+            if let Some(IRType::Struct {
+                fields: type_fields,
+            }) = struct_type
+            {
+                let type_fields = type_fields.clone();
+                let mut expr_fields = HashMap::new();
+                let mut missing_fields = Vec::new();
+                for (field, expected_type) in type_fields.iter() {
+                    if let Some(provided_value) = fields.get(field) {
+                        let mut provided_value = typecheck_expression(
+                            parse_context.expression(*provided_value),
+                            parse_context,
+                            ir_context,
+                            local_scope,
+                        )?;
+                        let expected_type = ir_context.kind(*expected_type);
+                        let provided_type = ir_context.kind(provided_value.kind);
+                        let derefs = derefs_for_parity(ir_context, expected_type, provided_type);
+                        for _ in 0..derefs {
+                            provided_value = maybe_dereference(provided_value, ir_context);
+                        }
+                        let provided_value = ir_context.add_expression(provided_value);
+                        expr_fields.insert(field.clone(), provided_value);
+                    } else {
+                        missing_fields.push(field.clone());
+                    }
+                }
+
+                let mut extra_fields = Vec::new();
+                for field in fields.keys() {
+                    if let None = type_fields.get(field) {
+                        extra_fields.push(field.clone());
+                    }
+                }
+
+                IRExpression {
+                    value: IRExpressionValue::StructLiteral(expr_fields),
+                    kind: struct_type_idx.unwrap(),
+                    start,
+                    end,
+                }
+            } else {
+                return Err(TypecheckError::UnknownName(name.clone(), start));
+            }
+        }
+        BinExpr(BinOp::Dot, left, right) => {
+            let left = typecheck_expression(
+                parse_context.expression(*left),
+                parse_context,
+                ir_context,
+                local_scope,
+            )?;
+            let left_kind = ir_context.kind(left.kind);
+            let IRType::Struct { fields } = left_kind else {
+                return Err(TypecheckError::IllegalLeftDotOperand(left_kind.clone(), start));
+            };
+            let AstExpression{ value: Name(name), .. } = parse_context.expression(*right) else {
+                return Err(TypecheckError::IllegalRightHandDotOperand(start));
+            };
+            let Some(field) = fields.get(name) else {
+                return Err(TypecheckError::FieldNotFound(name.clone(), left_kind.clone(), start));
+            };
+            let kind = *field;
+            let left = ir_context.add_expression(left);
+            IRExpression {
+                value: IRExpressionValue::Dot(left, name.clone()),
+                kind,
+                start,
+                end,
+            }
+        }
         Assignment(lvalue, rvalue) => {
             // TODO: provide more error diagnostics
             let mut lvalue = match parse_context.expression(*lvalue) {
                 expr @ AstExpression {
-                    value: AstExpressionValue::Name(_),
+                    value: Name(_) | BinExpr(BinOp::Dot, _, _),
                     ..
                 } => typecheck_expression(expr, parse_context, ir_context, local_scope)?,
                 AstExpression { start, .. } => {
@@ -263,11 +336,11 @@ fn typecheck_expression(
             }
         }
         Name(name) => {
-            let local_type = resolve(ir_context, local_scope, name);
+            let local_type = resolve(local_scope, name);
             match local_type {
                 Some(local_type) => IRExpression {
                     value: IRExpressionValue::LocalVariable(name.clone()),
-                    kind: ir_context.add_kind(local_type.clone()),
+                    kind: local_type,
                     start,
                     end,
                 },
@@ -510,14 +583,42 @@ fn is_pointer(expression: &IRExpression, ir_context: &IRContext) -> bool {
     matches!(kind, IRType::Unique(_) | IRType::Shared(_))
 }
 
-fn resolve<'a, 'b>(
-    ir_context: &'a IRContext,
-    scope: &'a [Scope],
-    name: &'b str,
-) -> Option<&'a IRType> {
+fn resolve_ast_type(
+    ast_type: &AstType,
+    parse_context: &ParseTree,
+    ir_context: &mut IRContext,
+    scope: &[Scope],
+) -> Result<usize, TypecheckError> {
+    Ok(match &ast_type.value {
+        AstTypeValue::Name(string) => match string.as_str() {
+            "void" => VOID_KIND,
+            "bool" => BOOL_KIND,
+            "i64" => I64_KIND,
+            "f64" => F64_KIND,
+            "i32" => I32_KIND,
+            "f32" => F32_KIND,
+            name => resolve(scope, name)
+                .ok_or_else(|| TypecheckError::UnknownName(name.to_string(), ast_type.start))?,
+        },
+        AstTypeValue::Unique(inner) => {
+            let inner = parse_context.kind(*inner);
+            let inner = resolve_ast_type(inner, parse_context, ir_context, scope)?;
+
+            ir_context.add_kind(IRType::Unique(inner))
+        }
+        AstTypeValue::Shared(inner) => {
+            let inner = parse_context.kind(*inner);
+            let inner = resolve_ast_type(inner, parse_context, ir_context, scope)?;
+
+            ir_context.add_kind(IRType::Shared(inner))
+        }
+    })
+}
+
+fn resolve(scope: &[Scope], name: &str) -> Option<usize> {
     for level in scope {
         if let Some(kind) = level.declarations.get(name) {
-            return Some(ir_context.kind(*kind));
+            return Some(*kind);
         }
     }
 
@@ -549,6 +650,29 @@ fn are_types_equal(ir_context: &IRContext, a: &IRType, b: &IRType) -> bool {
                     ir_context.kind(*a_returns),
                     ir_context.kind(*b_returns),
                 )
+        }
+        (Struct { fields: a_fields }, Struct { fields: b_fields }) => {
+            a_fields.iter().all(|(a_key, a_value)| {
+                if let Some(b_value) = b_fields.get(a_key) {
+                    are_types_equal(
+                        ir_context,
+                        ir_context.kind(*a_value),
+                        ir_context.kind(*b_value),
+                    )
+                } else {
+                    false
+                }
+            }) && b_fields.iter().all(|(b_key, b_value)| {
+                if let Some(a_value) = a_fields.get(b_key) {
+                    are_types_equal(
+                        ir_context,
+                        ir_context.kind(*b_value),
+                        ir_context.kind(*a_value),
+                    )
+                } else {
+                    false
+                }
+            })
         }
         (Void | Bool | Number(_), Void | Bool | Number(_)) => a == b,
         _ => false,

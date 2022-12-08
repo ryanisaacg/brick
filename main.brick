@@ -1,6 +1,17 @@
+struct Point {
+    x: f64,
+    y: f64,
+}
 
-fn f(): i64 {
-    let a = 1
-    let b = shared a
-    1 + b
+fn add_points(a: Point, b: Point): Point {
+    Point {
+        x: a.x + b.x,
+        y: a.y + b.y,
+    }
+}
+
+fn test(x: f64, y: f64): f64 {
+    let new_point = add_points(Point { x, y }, Point { x: 1.0, y: 2.0 })
+    new_point.y = new_point.y - 1.0
+    new_point.x + new_point.y
 }

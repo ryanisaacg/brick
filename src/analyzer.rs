@@ -7,9 +7,11 @@ use crate::{
 
 use thiserror::Error;
 
+mod resolve_type_names;
 mod scan;
 mod typecheck;
 
+pub use resolve_type_names::resolve_type_names;
 pub use scan::{scan_top_level, ScanResults};
 pub use typecheck::typecheck;
 
@@ -22,8 +24,9 @@ pub enum NumericType {
 }
 
 // Make sure to update are_types_equal in typecheck
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IRType {
+    Unresolved(String, Provenance),
     Void,
     Bool,
     Number(NumericType),
@@ -33,6 +36,28 @@ pub enum IRType {
         parameters: Vec<usize>,
         returns: usize,
     },
+    Struct {
+        fields: HashMap<String, usize>,
+    },
+}
+
+pub const VOID_KIND: usize = 0;
+pub const BOOL_KIND: usize = 1;
+pub const I32_KIND: usize = 2;
+pub const I64_KIND: usize = 3;
+pub const F32_KIND: usize = 4;
+pub const F64_KIND: usize = 5;
+
+pub fn new_ir_context() -> IRContext {
+    let mut ir_context = IRContext::new(Box::new(traverse));
+    ir_context.add_kind(IRType::Void);
+    ir_context.add_kind(IRType::Bool);
+    ir_context.add_kind(IRType::Number(NumericType::Int32));
+    ir_context.add_kind(IRType::Number(NumericType::Int64));
+    ir_context.add_kind(IRType::Number(NumericType::Float32));
+    ir_context.add_kind(IRType::Number(NumericType::Float64));
+
+    ir_context
 }
 
 // TODO: now that types are arena-allocated, they can't be displayed
@@ -41,6 +66,9 @@ impl fmt::Display for IRType {
         use IRType::*;
         use NumericType::*;
         match self {
+            Unresolved(string, provenance) => {
+                write!(f, "unresolved name {} at {}", string, provenance)
+            }
             Void => write!(f, "void"),
             Bool => write!(f, "bool"),
             Number(Int32) => write!(f, "i32"),
@@ -62,6 +90,17 @@ impl fmt::Display for IRType {
                     }
                 }
                 write!(f, ": {}", returns)
+            }
+            Struct { fields } => {
+                write!(f, "struct {{ ")?;
+                let mut fields_iter = fields.iter().peekable();
+                while let Some((key, value)) = fields_iter.next() {
+                    write!(f, "{}: {},", key, value)?;
+                    if fields_iter.peek().is_some() {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, "}}")
             }
         }
     }
@@ -91,6 +130,12 @@ pub enum TypecheckError {
     },
     #[error("Attempted to reference unknown name {0} at {1}")]
     UnknownName(String, Provenance),
+    #[error("Attempted to reference a field on a non-struct type {0} at {1}")]
+    IllegalLeftDotOperand(IRType, Provenance),
+    #[error("The dot operator must be followed by a name at {0}")]
+    IllegalRightHandDotOperand(Provenance),
+    #[error("Field {0} not found on {1} at {2}")]
+    FieldNotFound(String, IRType, Provenance),
 }
 
 #[derive(Debug)]
@@ -138,6 +183,8 @@ pub enum IRExpressionValue {
     Int(i64),
     Float(f64),
     LocalVariable(String),
+    StructLiteral(HashMap<String, usize>),
+    Dot(usize, String),
     BinaryNumeric(BinOpNumeric, usize, usize),
     Comparison(BinOpComparison, usize, usize),
     If(usize, usize),
@@ -168,7 +215,7 @@ pub struct Scope {
     pub declarations: HashMap<String, usize>,
 }
 
-pub fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut Vec<NodePtr>) {
+fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut Vec<NodePtr>) {
     use IRExpressionValue::*;
     use IRStatementValue::*;
     use IRType::*;
@@ -182,7 +229,7 @@ pub fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut
             ..
         })
         | Node::Expression(IRExpression {
-            value: Dereference(child) | TakeUnique(child) | TakeShared(child),
+            value: Dereference(child) | TakeUnique(child) | TakeShared(child) | Dot(child, _),
             ..
         }) => {
             children.push(NodePtr::Expression(*child));
@@ -225,10 +272,23 @@ pub fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut
                 children.push(NodePtr::Kind(*kind));
             }
         }
+        Node::Expression(IRExpression {
+            value: StructLiteral(fields),
+            ..
+        }) => {
+            for field in fields.values() {
+                children.push(NodePtr::Expression(*field));
+            }
+        }
+        Node::Kind(Struct { fields, .. }) => {
+            for field in fields.values() {
+                children.push(NodePtr::Kind(*field));
+            }
+        }
         Node::Kind(Unique(inner) | Shared(inner)) => {
             children.push(NodePtr::Kind(*inner));
         }
-        Node::Kind(Void | IRType::Bool | Number(_))
+        Node::Kind(Void | Unresolved(..) | IRType::Bool | Number(_))
         | Node::Expression(IRExpression {
             value: IRExpressionValue::Bool(_) | Int(_) | Float(_) | LocalVariable(_),
             ..

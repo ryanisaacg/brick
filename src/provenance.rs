@@ -1,7 +1,7 @@
 use std::fmt;
 
 // TODO: don't include whole-source view in debug
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct Provenance {
     source_name: &'static str,
     #[allow(dead_code)]

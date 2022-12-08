@@ -22,6 +22,7 @@ const MAXIMUM_MEMORY: u64 = 16384;
 // TODO: handle stack overflows
 const STACK_PTR: u32 = 0;
 const BASE_PTR: u32 = 1;
+const ASSIGNMENT_PTR: u32 = 2;
 
 pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     let mut module = Module::new();
@@ -49,7 +50,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
             val_type: ValType::I32,
             mutable: true,
         },
-        &ConstExpr::i32_const(1),
+        &ConstExpr::i32_const(4),
     );
     // Base pointer
     globals.global(
@@ -57,67 +58,56 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
             val_type: ValType::I32,
             mutable: true,
         },
-        &ConstExpr::i32_const(1),
+        &ConstExpr::i32_const(4),
     );
+    // Assignment pointer
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+        },
+        &ConstExpr::i32_const(0x50),
+    );
+
+    let type_representations = arena
+        .kinds()
+        .enumerate()
+        .map(|(idx, _)| represented_by(arena, idx))
+        .collect::<Vec<_>>();
 
     current_function_idx = 0;
 
     for statement in statements {
         if let IRStatementValue::FunctionDeclaration(decl) = statement.value {
-            emit_function_types(&decl, arena, &mut types);
+            emit_function_types(&decl, &type_representations, &mut types);
             functions.function(current_function_idx);
             // TODO: should we export function
             exports.export(decl.name.as_ref(), ExportKind::Func, current_function_idx);
             let LocalsAnalysis {
                 name_to_offset,
-                wasm_locals,
+                parameter_locals,
                 stack_size,
-            } = analyze_locals(&decl, arena);
-            let mut f = Function::new(wasm_locals);
+            } = analyze_locals(&decl, &type_representations, arena);
+            let param_count = parameter_locals.len();
             let mut ctx = EmitContext {
-                f: &mut f,
+                instructions: Vec::new(),
                 arena,
-                locals: &name_to_offset,
+                stack_offsets: &name_to_offset,
                 functions: &function_indices,
+                representations: &type_representations,
+                wasm_locals: parameter_locals,
             };
-            // Write the current base pointer to the base of the stack
-            ctx.f.instruction(&Instruction::GlobalGet(STACK_PTR));
-            ctx.f.instruction(&Instruction::GlobalGet(BASE_PTR));
-            ctx.f.instruction(&Instruction::I32Store(MemArg {
-                offset: 0,
-                align: 1,
-                memory_index: MAIN_MEMORY,
-            }));
-            // Set the base pointer to the stack pointer
-            ctx.f.instruction(&Instruction::GlobalGet(STACK_PTR));
-            ctx.f.instruction(&Instruction::GlobalSet(BASE_PTR));
-            // Set the new stack size
-            ctx.f.instruction(&Instruction::GlobalGet(STACK_PTR));
-            ctx.f.instruction(&Instruction::I32Const(stack_size as i32));
-            ctx.f.instruction(&Instruction::I32Add);
-            // TODO: check for stack overflow
-            ctx.f.instruction(&Instruction::GlobalSet(STACK_PTR));
-            for (idx, param) in decl.params.iter().enumerate() {
-                emit_stack_ptr_offset(&mut ctx, param.name.as_str());
-                ctx.f.instruction(&Instruction::LocalGet(idx as u32));
-                let kind = ctx.arena.kind(param.kind);
-                let repr = represented_by(kind);
-                emit_assignment(&mut ctx, repr);
+            emit_function_declaration(&mut ctx, stack_size, decl);
+            let mut wasm_locals = Vec::new();
+            // TODO: optimize by combining adjacent locals
+            // TODO: is there a bug in wasm-encode?
+            for val_type in ctx.wasm_locals.drain(param_count..) {
+                wasm_locals.push((1, val_type));
             }
-            println!("{}", arena.pretty_dbg(NodePtr::Expression(decl.body)));
-            emit_expression(&mut ctx, arena.expression(decl.body));
-            // Set the stack pointer back to the base pointer
-            ctx.f.instruction(&Instruction::GlobalGet(BASE_PTR));
-            ctx.f.instruction(&Instruction::GlobalSet(STACK_PTR));
-            // Reset the base pointer
-            ctx.f.instruction(&Instruction::GlobalGet(BASE_PTR));
-            ctx.f.instruction(&Instruction::I32Load(MemArg {
-                offset: 0,
-                align: 1,
-                memory_index: MAIN_MEMORY,
-            }));
-            ctx.f.instruction(&Instruction::GlobalSet(BASE_PTR));
-            f.instruction(&Instruction::End);
+            let mut f = Function::new(wasm_locals);
+            for instruction in ctx.instructions.iter() {
+                f.instruction(instruction);
+            }
             codes.function(&f);
 
             current_function_idx += 1;
@@ -142,18 +132,18 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     module.finish()
 }
 
-fn emit_function_types(decl: &FunDecl, ir_context: &IRContext, types: &mut TypeSection) {
-    // TODO: param types that can't be represented
-    let params = decl
-        .params
-        .iter()
-        .map(|param| represented_by(ir_context.kind(param.kind)).unwrap());
-    let results = if let Some(kind) = represented_by(ir_context.kind(decl.returns)) {
-        vec![kind]
-    } else {
-        // TODO
-        vec![]
-    };
+fn emit_function_types(
+    decl: &FunDecl,
+    type_representations: &Vec<Representation>,
+    types: &mut TypeSection,
+) {
+    let mut params = Vec::new();
+    for param in decl.params.iter() {
+        flatten_repr(&type_representations[param.kind], &mut params);
+    }
+    let mut results = Vec::new();
+    flatten_repr(&type_representations[decl.returns], &mut results);
+
     types.function(params, results);
 }
 
@@ -161,24 +151,34 @@ fn emit_function_types(decl: &FunDecl, ir_context: &IRContext, types: &mut TypeS
 
 struct LocalsAnalysis {
     name_to_offset: HashMap<String, u32>,
-    wasm_locals: Vec<(u32, ValType)>,
+    parameter_locals: Vec<ValType>,
     stack_size: u32,
 }
 
-fn analyze_locals(decl: &FunDecl, arena: &IRContext) -> LocalsAnalysis {
+fn analyze_locals(
+    decl: &FunDecl,
+    type_representations: &Vec<Representation>,
+    arena: &IRContext,
+) -> LocalsAnalysis {
     let mut results = LocalsAnalysis {
         name_to_offset: HashMap::new(),
-        wasm_locals: Vec::new(),
+        parameter_locals: Vec::new(),
         stack_size: 4,
     };
 
+    let mut repr_buffer = Vec::new();
+
     for param in decl.params.iter() {
-        let val_type = represented_by(arena.kind(param.kind)).unwrap(); // TODO: params unrepresentable
         results
             .name_to_offset
             .insert(param.name.to_string(), results.stack_size);
-        results.stack_size += size_of_val(&val_type);
-        results.wasm_locals.push((1, val_type));
+        let repr = &type_representations[param.kind];
+        results.stack_size += size_of_repr(repr);
+        flatten_repr(repr, &mut repr_buffer);
+
+        for val_type in repr_buffer.drain(..) {
+            results.parameter_locals.push(val_type);
+        }
     }
 
     for node in arena.iter_from(NodePtr::Expression(decl.body)) {
@@ -191,8 +191,7 @@ fn analyze_locals(decl: &FunDecl, arena: &IRContext) -> LocalsAnalysis {
             results
                 .name_to_offset
                 .insert(name.to_string(), results.stack_size);
-            let repr = represented_by(arena.kind(expr.kind)).unwrap(); // TODO
-            results.stack_size += size_of_val(&repr);
+            results.stack_size += size_of_repr(&type_representations[expr.kind]);
         }
     }
 
@@ -200,10 +199,69 @@ fn analyze_locals(decl: &FunDecl, arena: &IRContext) -> LocalsAnalysis {
 }
 
 struct EmitContext<'a> {
-    f: &'a mut Function,
+    instructions: Vec<Instruction<'a>>,
     arena: &'a IRContext,
-    locals: &'a HashMap<String, u32>,
+    stack_offsets: &'a HashMap<String, u32>,
     functions: &'a HashMap<String, u32>,
+    /**
+     * A mapping from the indices of a type in the IRContext to that type's calculated
+     * representation
+     */
+    representations: &'a Vec<Representation>,
+    wasm_locals: Vec<ValType>,
+}
+
+impl<'a> EmitContext<'a> {
+    fn add_instruction(&mut self, instruction: Instruction<'a>) {
+        self.instructions.push(instruction);
+    }
+}
+
+// TODO: consider dynamically-sized stack frames?
+
+fn emit_function_declaration(ctx: &mut EmitContext<'_>, stack_size: u32, decl: FunDecl) {
+    // Write the current base pointer to the base of the stack
+    ctx.add_instruction(Instruction::GlobalGet(STACK_PTR));
+    ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+    ctx.add_instruction(Instruction::I32Store(MemArg {
+        offset: 0,
+        align: 1,
+        memory_index: MAIN_MEMORY,
+    }));
+    // Set the base pointer to the stack pointer
+    ctx.add_instruction(Instruction::GlobalGet(STACK_PTR));
+    ctx.add_instruction(Instruction::GlobalSet(BASE_PTR));
+    // Set the new stack size
+    ctx.add_instruction(Instruction::GlobalGet(STACK_PTR));
+    ctx.add_instruction(Instruction::I32Const(stack_size as i32));
+    ctx.add_instruction(Instruction::I32Add);
+    // TODO: check for stack overflow
+    ctx.add_instruction(Instruction::GlobalSet(STACK_PTR));
+    let mut local_index = 0;
+    for param in decl.params.iter() {
+        let Some(offset) = ctx.stack_offsets.get(param.name.as_str())  else {
+            panic!("internal compiler error: unknown name {}", param.name);
+        };
+        local_index = emit_parameter(
+            &mut ctx.instructions,
+            local_index,
+            *offset,
+            &ctx.representations[param.kind],
+        );
+    }
+    emit_expression(ctx, ctx.arena.expression(decl.body));
+    // Set the stack pointer back to the base pointer
+    ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+    ctx.add_instruction(Instruction::GlobalSet(STACK_PTR));
+    // Reset the base pointer
+    ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+    ctx.add_instruction(Instruction::I32Load(MemArg {
+        offset: 0,
+        align: 1,
+        memory_index: MAIN_MEMORY,
+    }));
+    ctx.add_instruction(Instruction::GlobalSet(BASE_PTR));
+    ctx.add_instruction(Instruction::End);
 }
 
 fn emit_statement<'a>(ctx: &mut EmitContext<'a>, statement: &IRStatement) {
@@ -216,44 +274,55 @@ fn emit_statement<'a>(ctx: &mut EmitContext<'a>, statement: &IRStatement) {
             emit_expression(ctx, expr);
         }
         IRStatementValue::Declaration(name, expr) => {
-            emit_stack_ptr_offset(ctx, name.as_str());
+            // TODO: should this just be an expect
+            let Some(offset) = ctx.stack_offsets.get(name.as_str())  else {
+                panic!("internal compiler error: unknown name {}", name);
+            };
             let expr = ctx.arena.expression(*expr);
             emit_expression(ctx, expr);
-            let kind = ctx.arena.kind(expr.kind);
-            let repr = represented_by(kind);
-            emit_assignment(ctx, repr);
+            ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+            ctx.add_instruction(Instruction::GlobalSet(ASSIGNMENT_PTR));
+            emit_assignment(
+                &mut ctx.instructions,
+                &mut ctx.wasm_locals,
+                *offset,
+                &ctx.representations[expr.kind],
+            );
         }
     }
 }
 
 fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
     match &expr.value {
+        IRExpressionValue::StructLiteral(..) | IRExpressionValue::Dot(..) => todo!(),
         IRExpressionValue::Bool(val) => {
             if *val {
-                ctx.f.instruction(&Instruction::I32Const(1));
+                ctx.add_instruction(Instruction::I32Const(1));
             } else {
-                ctx.f.instruction(&Instruction::I32Const(0));
+                ctx.add_instruction(Instruction::I32Const(0));
             }
         }
         IRExpressionValue::Int(constant) => {
-            ctx.f.instruction(&Instruction::I64Const(*constant));
+            ctx.add_instruction(Instruction::I64Const(*constant));
         }
         IRExpressionValue::Float(constant) => {
-            ctx.f.instruction(&Instruction::F64Const(*constant));
+            ctx.add_instruction(Instruction::F64Const(*constant));
         }
         IRExpressionValue::Assignment(lvalue, expr) => {
-            emit_lvalue(ctx, *lvalue);
             let expr = ctx.arena.expression(*expr);
             emit_expression(ctx, expr);
-            let kind = ctx.arena.kind(expr.kind);
-            let repr = represented_by(kind);
-            emit_assignment(ctx, repr);
+            let offset = emit_lvalue(ctx, *lvalue);
+            ctx.add_instruction(Instruction::GlobalSet(ASSIGNMENT_PTR));
+            emit_assignment(
+                &mut ctx.instructions,
+                &mut ctx.wasm_locals,
+                offset,
+                &ctx.representations[expr.kind],
+            );
         }
         IRExpressionValue::Dereference(child) => {
             emit_expression(ctx, ctx.arena.expression(*child));
-            let intended_type = ctx.arena.kind(expr.kind);
-            let representation = represented_by(intended_type);
-            emit_dereference(ctx, representation);
+            emit_dereference(&mut ctx.instructions, 0, &ctx.representations[expr.kind]);
         }
         IRExpressionValue::Call(function, arguments) => {
             for arg in arguments.iter() {
@@ -267,37 +336,42 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
                 _ => todo!(),
             };
             let function_index = ctx.functions.get(called_function).unwrap();
-            ctx.f.instruction(&Instruction::Call(*function_index));
+            ctx.add_instruction(Instruction::Call(*function_index));
         }
         IRExpressionValue::TakeShared(child) | IRExpressionValue::TakeUnique(child) => {
             let child = ctx.arena.expression(*child);
             // TODO: support non-variable references?
             match &child.value {
                 IRExpressionValue::LocalVariable(name) => {
-                    emit_stack_ptr_offset(ctx, name.as_str());
+                    ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+                    let offset = ctx.stack_offsets.get(name.as_str()).unwrap();
+                    ctx.add_instruction(Instruction::I32Const(*offset as i32));
+                    ctx.add_instruction(Instruction::I32Add);
                 }
                 _ => todo!(),
             }
         }
         IRExpressionValue::LocalVariable(name) => {
-            let ir_type = ctx.arena.kind(expr.kind);
-            let repr = represented_by(ir_type);
-            emit_stack_ptr_offset(ctx, name.as_str());
-            emit_dereference(ctx, repr);
+            ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+            emit_dereference(
+                &mut ctx.instructions,
+                *ctx.stack_offsets.get(name.as_str()).unwrap(),
+                &ctx.representations[expr.kind],
+            );
         }
         IRExpressionValue::BinaryNumeric(operator, left, right) => {
             emit_expression(ctx, ctx.arena.expression(*left));
             emit_expression(ctx, ctx.arena.expression(*right));
             match operator {
                 BinOpNumeric::Add => {
-                    ctx.f.instruction(&match ctx.arena.kind(expr.kind) {
+                    ctx.add_instruction(match ctx.arena.kind(expr.kind) {
                         IRType::Number(NumericType::Int64) => Instruction::I64Add,
                         IRType::Number(NumericType::Float64) => Instruction::F64Add,
                         _ => unreachable!(),
                     });
                 }
                 BinOpNumeric::Subtract => {
-                    ctx.f.instruction(&match ctx.arena.kind(expr.kind) {
+                    ctx.add_instruction(match ctx.arena.kind(expr.kind) {
                         IRType::Number(NumericType::Int64) => Instruction::I64Sub,
                         IRType::Number(NumericType::Float64) => Instruction::F64Sub,
                         _ => unreachable!(),
@@ -311,14 +385,14 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
             emit_expression(ctx, ctx.arena.expression(*right));
             match operator {
                 BinOpComparison::GreaterThan => {
-                    ctx.f.instruction(&match ctx.arena.kind(left.kind) {
+                    ctx.add_instruction(match ctx.arena.kind(left.kind) {
                         IRType::Number(NumericType::Int64) => Instruction::I64GtS,
                         IRType::Number(NumericType::Float64) => Instruction::F64Gt,
                         _ => unreachable!(),
                     });
                 }
                 BinOpComparison::LessThan => {
-                    ctx.f.instruction(&match ctx.arena.kind(left.kind) {
+                    ctx.add_instruction(match ctx.arena.kind(left.kind) {
                         IRType::Number(NumericType::Int64) => Instruction::I64LtS,
                         IRType::Number(NumericType::Float64) => Instruction::F64Lt,
                         _ => unreachable!(),
@@ -328,18 +402,18 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
         }
         IRExpressionValue::If(predicate, block) => {
             emit_expression(ctx, ctx.arena.expression(*predicate));
-            ctx.f.instruction(&Instruction::If(BlockType::Empty)); // TODO
+            ctx.add_instruction(Instruction::If(BlockType::Empty)); // TODO
             emit_expression(ctx, ctx.arena.expression(*block));
-            ctx.f.instruction(&Instruction::End); // TODO
+            ctx.add_instruction(Instruction::End); // TODO
         }
         IRExpressionValue::While(predicate, block) => {
-            ctx.f.instruction(&Instruction::Loop(BlockType::Empty));
+            ctx.add_instruction(Instruction::Loop(BlockType::Empty));
             emit_expression(ctx, ctx.arena.expression(*predicate));
-            ctx.f.instruction(&Instruction::If(BlockType::Empty)); // TODO
+            ctx.add_instruction(Instruction::If(BlockType::Empty)); // TODO
             emit_expression(ctx, ctx.arena.expression(*block));
-            ctx.f.instruction(&Instruction::Br(1)); // TODO: does this work
-            ctx.f.instruction(&Instruction::End); // TODO
-            ctx.f.instruction(&Instruction::End);
+            ctx.add_instruction(Instruction::Br(1)); // TODO: does this work
+            ctx.add_instruction(Instruction::End); // TODO
+            ctx.add_instruction(Instruction::End);
         }
         IRExpressionValue::Block(statements) => {
             for statement in statements {
@@ -349,82 +423,201 @@ fn emit_expression<'a>(ctx: &mut EmitContext<'a>, expr: &IRExpression) {
     }
 }
 
-fn emit_stack_ptr_offset(ctx: &mut EmitContext<'_>, target: &str) {
-    ctx.f.instruction(&Instruction::GlobalGet(BASE_PTR));
-    match ctx.locals.get(target) {
-        Some(offset) => {
-            ctx.f.instruction(&Instruction::I32Const(*offset as i32));
-        }
-        None => todo!(),
-    }
-    ctx.f.instruction(&Instruction::I32Add);
-}
-
-fn emit_assignment(ctx: &mut EmitContext<'_>, representation: Option<ValType>) {
-    // TODO: offset & alignment
-    let mem_arg = MemArg {
-        offset: 0,
-        align: 1,
-        memory_index: MAIN_MEMORY,
-    };
+fn emit_parameter(
+    instructions: &mut Vec<Instruction<'_>>,
+    local_index: u32,
+    offset: u32,
+    representation: &Representation,
+) -> u32 {
     match representation {
-        None => todo!(),
-        Some(ValType::I32) => {
-            ctx.f.instruction(&Instruction::I32Store(mem_arg));
+        Representation::Void => local_index,
+        Representation::Scalar(scalar) => {
+            instructions.push(Instruction::GlobalGet(BASE_PTR));
+            instructions.push(Instruction::LocalGet(local_index as u32));
+            // TODO: alignment
+            let mem_arg = MemArg {
+                offset: offset.into(),
+                align: 1,
+                memory_index: MAIN_MEMORY,
+            };
+            match scalar {
+                ValType::I32 => {
+                    instructions.push(Instruction::I32Store(mem_arg));
+                }
+                ValType::I64 => {
+                    instructions.push(Instruction::I64Store(mem_arg));
+                }
+                ValType::F32 => {
+                    instructions.push(Instruction::F32Store(mem_arg));
+                }
+                ValType::F64 => {
+                    instructions.push(Instruction::F64Store(mem_arg));
+                }
+                _ => todo!(),
+            }
+
+            local_index + 1
         }
-        Some(ValType::I64) => {
-            ctx.f.instruction(&Instruction::I64Store(mem_arg));
+        Representation::Vector(reprs) => {
+            let mut local_index = local_index;
+            let mut offset = offset;
+            for repr in reprs.iter() {
+                local_index = emit_parameter(instructions, local_index, offset, repr);
+                offset += size_of_repr(repr);
+            }
+
+            local_index
         }
-        Some(ValType::F32) => {
-            ctx.f.instruction(&Instruction::F32Store(mem_arg));
-        }
-        Some(ValType::F64) => {
-            ctx.f.instruction(&Instruction::F64Store(mem_arg));
-        }
-        Some(_) => todo!(),
     }
 }
 
-fn emit_dereference(ctx: &mut EmitContext<'_>, representation: Option<ValType>) {
-    // TODO: offset & alignment
-    let mem_arg = MemArg {
-        offset: 0,
-        align: 1,
-        memory_index: MAIN_MEMORY,
-    };
+// TODO: do not spam this many locals
+fn emit_assignment(
+    instructions: &mut Vec<Instruction<'_>>,
+    locals: &mut Vec<ValType>,
+    offset: u32,
+    representation: &Representation,
+) {
+    use Representation::*;
+
     match representation {
-        None => todo!(),
-        Some(ValType::I32) => {
-            ctx.f.instruction(&Instruction::I32Load(mem_arg));
+        Void => todo!(),
+        Scalar(scalar) => {
+            // TODO: unnecessary overhead for scalar assignments
+            // TODO: alignment
+            let mem_arg = MemArg {
+                offset: offset.into(),
+                align: 1,
+                memory_index: MAIN_MEMORY,
+            };
+            let local_idx = locals.len() as u32;
+            instructions.push(Instruction::LocalSet(local_idx));
+            instructions.push(Instruction::GlobalGet(ASSIGNMENT_PTR));
+            instructions.push(Instruction::LocalGet(local_idx));
+            locals.push(*scalar);
+            match scalar {
+                ValType::I32 => {
+                    instructions.push(Instruction::I32Store(mem_arg));
+                }
+                ValType::I64 => {
+                    instructions.push(Instruction::I64Store(mem_arg));
+                }
+                ValType::F32 => {
+                    instructions.push(Instruction::F32Store(mem_arg));
+                }
+                ValType::F64 => {
+                    instructions.push(Instruction::F64Store(mem_arg));
+                }
+                _ => todo!("non-simple scalar assignments"),
+            }
         }
-        Some(ValType::I64) => {
-            ctx.f.instruction(&Instruction::I64Load(mem_arg));
+        Vector(reprs) => {
+            let mut offset = offset;
+            for repr in reprs.iter() {
+                emit_assignment(instructions, locals, offset, repr);
+                offset += size_of_repr(repr);
+            }
         }
-        Some(ValType::F32) => {
-            ctx.f.instruction(&Instruction::F32Load(mem_arg));
-        }
-        Some(ValType::F64) => {
-            ctx.f.instruction(&Instruction::F64Load(mem_arg));
-        }
-        Some(_) => todo!(),
     }
 }
 
-fn represented_by(kind: &IRType) -> Option<ValType> {
-    match kind {
+fn emit_dereference(
+    instructions: &mut Vec<Instruction<'_>>,
+    offset: u32,
+    representation: &Representation,
+) {
+    use Representation::*;
+
+    match representation {
+        Void => todo!(),
+        Scalar(scalar) => {
+            // TODO: alignment
+            let mem_arg = MemArg {
+                offset: offset.into(),
+                align: 1,
+                memory_index: MAIN_MEMORY,
+            };
+            match scalar {
+                ValType::I32 => {
+                    instructions.push(Instruction::I32Load(mem_arg));
+                }
+                ValType::I64 => {
+                    instructions.push(Instruction::I64Load(mem_arg));
+                }
+                ValType::F32 => {
+                    instructions.push(Instruction::F32Load(mem_arg));
+                }
+                ValType::F64 => {
+                    instructions.push(Instruction::F64Load(mem_arg));
+                }
+                _ => todo!("non-simple scalar assignments"),
+            }
+        }
+        Vector(reprs) => {
+            let mut offset = offset;
+            for repr in reprs.iter() {
+                emit_dereference(instructions, offset, repr);
+                offset += size_of_repr(repr);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+enum Representation {
+    Void,
+    Scalar(ValType),
+    Vector(Vec<Representation>),
+}
+
+fn represented_by(ctx: &IRContext, kind: usize) -> Representation {
+    use Representation::*;
+
+    match ctx.kind(kind) {
         IRType::Bool
         | IRType::Unique(_)
         | IRType::Shared(_)
-        | IRType::Number(NumericType::Int32) => Some(ValType::I32),
-        IRType::Number(NumericType::Float32) => Some(ValType::F32),
-        IRType::Number(NumericType::Int64) => Some(ValType::I64),
-        IRType::Number(NumericType::Float64) => Some(ValType::F64),
-        IRType::Function { .. } => None,
-        IRType::Void => None,
+        | IRType::Number(NumericType::Int32) => Scalar(ValType::I32),
+        IRType::Number(NumericType::Float32) => Scalar(ValType::F32),
+        IRType::Number(NumericType::Int64) => Scalar(ValType::I64),
+        IRType::Number(NumericType::Float64) => Scalar(ValType::F64),
+        IRType::Struct { fields } => {
+            // TODO: don't constantly re-calculate struct reprs
+            // TODO: support re-ordering of fields
+            Vector(
+                fields
+                    .values()
+                    .map(|field| represented_by(ctx, *field))
+                    .collect(),
+            )
+        }
+        IRType::Function { .. } => Void,
+        IRType::Void => Void,
+        IRType::Unresolved(..) => Void,
     }
 }
 
-fn size_of_val(val: &ValType) -> u32 {
+fn flatten_repr(repr: &Representation, buffer: &mut Vec<ValType>) {
+    match repr {
+        Representation::Void => {}
+        Representation::Scalar(val) => buffer.push(*val),
+        Representation::Vector(reprs) => {
+            for repr in reprs.iter() {
+                flatten_repr(repr, buffer);
+            }
+        }
+    }
+}
+
+fn size_of_repr(repr: &Representation) -> u32 {
+    match repr {
+        Representation::Void => 0,
+        Representation::Scalar(val) => value_size(*val),
+        Representation::Vector(reprs) => reprs.iter().map(size_of_repr).sum(),
+    }
+}
+
+fn value_size(val: ValType) -> u32 {
     match val {
         ValType::I32 => 4,
         ValType::F32 => 4,
@@ -434,20 +627,24 @@ fn size_of_val(val: &ValType) -> u32 {
     }
 }
 
-fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) {
+fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) -> u32 {
     let expr = ctx.arena.expression(lvalue);
     match &expr.value {
         IRExpressionValue::LocalVariable(name) => {
-            emit_stack_ptr_offset(ctx, name.as_str());
+            ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+            // TODO: don't unwrap?
+            *ctx.stack_offsets.get(name.as_str()).unwrap()
         }
         IRExpressionValue::Dereference(child) => {
-            emit_lvalue(ctx, *child);
+            let offset = emit_lvalue(ctx, *child) as u64;
             let mem_arg = MemArg {
-                offset: 0,
+                offset,
                 align: 1,
                 memory_index: MAIN_MEMORY,
             };
-            ctx.f.instruction(&Instruction::I32Load(mem_arg));
+            ctx.add_instruction(Instruction::I32Load(mem_arg));
+
+            0
         }
         _ => unreachable!(),
     }

@@ -33,12 +33,9 @@ fn test(): i64 {
 }
 
 fn increment(val: unique i64): void {
-    double_dip_increment(unique val)
-}
-
-fn double_dip_increment(val: unique unique i64): void {
     val = val + 1
 }
+
 "#,
             ()
         )

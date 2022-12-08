@@ -12,7 +12,8 @@ pub mod provenance;
 pub mod tree;
 
 use analyzer::{
-    scan_top_level, traverse, typecheck, IRContext, ScanResults, Scope, TypecheckError,
+    new_ir_context, resolve_type_names, scan_top_level, typecheck, ScanResults, Scope,
+    TypecheckError,
 };
 use parser::ParseError;
 
@@ -30,7 +31,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
     let mut parsed_files = HashMap::new();
     let mut files_to_parse = vec![source_name.to_string()];
     let mut declarations = HashMap::new();
-    let mut ir_context = IRContext::new(Box::new(traverse));
+    let mut ir_context = new_ir_context();
     // TODO: parallelize this?
     while let Some(file) = files_to_parse.pop() {
         let mut file_name = String::new();
@@ -41,10 +42,12 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
         let file = Box::leak(file.into_boxed_str());
         let tokens = lexer::lex(file, contents.to_string());
         let (statements, arena) = parser::parse(tokens)?;
-        let ScanResults { imports, exports } =
-            scan_top_level(statements.iter().copied(), &arena, &mut ir_context)?;
+        let ScanResults {
+            imports,
+            declarations: local_declarations,
+        } = scan_top_level(statements.iter().copied(), &arena, &mut ir_context)?;
         parsed_files.insert(file_name, (statements, arena));
-        for (export_name, export_type) in exports {
+        for (export_name, export_type) in local_declarations {
             // TODO: handle collisions?
             declarations.insert(export_name, export_type);
         }
@@ -55,8 +58,10 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
                 .cloned(),
         );
     }
+    resolve_type_names(&mut ir_context, &declarations)?;
     let mut ir = Vec::new();
     let global_scope = [Scope { declarations }];
+    // TODO: also, parallelize this?
     for (statements, arena) in parsed_files.values() {
         let new_ir = typecheck(
             statements.iter().copied(),
@@ -72,15 +77,14 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
 pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u8>, CompileError> {
     let tokens = lexer::lex(source_name, contents.to_string());
     let (statements, arena) = parser::parse(tokens)?;
-    let mut ir_context = IRContext::new(Box::new(traverse));
+    let mut ir_context = new_ir_context();
     // TODO: support imports?
     let ScanResults {
         imports: _,
-        exports,
+        declarations,
     } = scan_top_level(statements.iter().copied(), &arena, &mut ir_context)?;
-    let global_scope = [Scope {
-        declarations: exports,
-    }];
+    resolve_type_names(&mut ir_context, &declarations)?;
+    let global_scope = [Scope { declarations }];
     let ir = typecheck(
         statements.into_iter(),
         &mut ir_context,

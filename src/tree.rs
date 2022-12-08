@@ -7,7 +7,7 @@ type FindChildren<S, E, K> = Box<dyn Fn(Node<&S, &E, &K>, &mut Vec<NodePtr>)>;
 pub struct SourceTree<Statement, Expression, Kind> {
     expressions: Vec<Expression>,
     statements: Vec<Statement>,
-    kinds: Vec<Kind>,
+    pub kinds: Vec<Kind>,
     children_of: FindChildren<Statement, Expression, Kind>,
 }
 
@@ -77,10 +77,29 @@ impl<S, E, K> SourceTree<S, E, K> {
         &self.kinds[index]
     }
 
+    pub fn kind_mut(&mut self, index: usize) -> &mut K {
+        &mut self.kinds[index]
+    }
+
     pub fn add_kind(&mut self, kind: K) -> usize {
         let index = self.kinds.len();
         self.kinds.push(kind);
         index
+    }
+
+    pub fn replace_kind(&mut self, index: usize, kind: K) {
+        self.kinds[index] = kind;
+    }
+
+    pub fn kinds(&self) -> impl Iterator<Item = &K> {
+        self.kinds.iter()
+    }
+
+    pub fn iter_ptr_from(&self, root: NodePtr) -> NodePtrIterator<'_, S, E, K> {
+        NodePtrIterator {
+            source_tree: self,
+            call_stack: vec![root],
+        }
     }
 
     pub fn iter_from(&self, root: NodePtr) -> NodeIterator<'_, S, E, K> {
@@ -116,6 +135,29 @@ impl<S: Debug, E: Debug, K: Debug> SourceTree<S, E, K> {
         }
 
         string
+    }
+}
+
+pub struct NodePtrIterator<'a, Statement, Expression, Kind> {
+    source_tree: &'a SourceTree<Statement, Expression, Kind>,
+    call_stack: Vec<NodePtr>,
+}
+
+impl<'a, Statement, Expression, Kind> Iterator
+    for NodePtrIterator<'a, Statement, Expression, Kind>
+{
+    type Item = NodePtr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.call_stack.pop() {
+            Some(node) => {
+                let node_value = self.source_tree.node(node);
+                (self.source_tree.children_of)(node_value, &mut self.call_stack);
+
+                Some(node)
+            }
+            None => None,
+        }
     }
 }
 

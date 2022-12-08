@@ -66,14 +66,14 @@ pub enum AstExpressionValue {
     Block(Vec<usize>),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct AstType {
     pub value: AstTypeValue,
     pub start: Provenance,
     pub end: Provenance,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub enum AstTypeValue {
     Name(String),
     Unique(usize),
@@ -184,7 +184,7 @@ fn parse_struct(
         "expected open parenthesis to start parameters",
     )?;
 
-    let mut params = Vec::new();
+    let mut fields = Vec::new();
     let mut pos = end;
     loop {
         let token = peek_token(source, pos, "expected either parameters or close paren")?;
@@ -200,7 +200,7 @@ fn parse_struct(
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
                 let kind = context.add_kind(kind);
                 pos = end;
-                params.push(NameAndType { name, kind });
+                fields.push(NameAndType { name, kind });
             }
         }
     }
@@ -212,10 +212,7 @@ fn parse_struct(
     )?;
 
     Ok(AstStatement {
-        value: AstStatementValue::StructDeclaration {
-            name,
-            fields: Vec::new(),
-        },
+        value: AstStatementValue::StructDeclaration { name, fields },
         start,
         end,
     })

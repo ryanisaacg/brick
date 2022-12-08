@@ -2,14 +2,14 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::{IRContext, IRType, NumericType, TypecheckError},
-    parser::{AstStatementValue, AstType, AstTypeValue, ParseTree},
+    parser::{AstStatementValue, AstType, AstTypeValue, NameAndType, ParseTree},
 };
 
 // TODO: scan for struct declarations
 
 pub struct ScanResults {
     pub imports: Vec<String>,
-    pub exports: HashMap<String, usize>,
+    pub declarations: HashMap<String, usize>,
 }
 
 pub fn scan_top_level(
@@ -18,7 +18,7 @@ pub fn scan_top_level(
     ir_context: &mut IRContext,
 ) -> Result<ScanResults, TypecheckError> {
     let mut imports = Vec::new();
-    let mut exports = HashMap::new();
+    let mut declarations = HashMap::new();
 
     for statement in statements {
         let statement = parse_context.statement(statement);
@@ -51,7 +51,7 @@ pub fn scan_top_level(
                     })
                     .unwrap_or_else(|| Ok(ir_context.add_kind(IRType::Void)))?;
 
-                exports.insert(
+                declarations.insert(
                     name.clone(),
                     ir_context.add_kind(IRType::Function {
                         parameters,
@@ -59,14 +59,31 @@ pub fn scan_top_level(
                     }),
                 );
             }
+            AstStatementValue::StructDeclaration { name, fields } => {
+                let fields = fields
+                    .iter()
+                    .map(|NameAndType { name, kind }| {
+                        let name = name.clone();
+                        let kind =
+                            ast_type_to_ir(parse_context.kind(*kind), parse_context, ir_context)?;
+                        let kind = ir_context.add_kind(kind);
+                        Ok((name, kind))
+                    })
+                    .collect::<Result<HashMap<_, _>, _>>()?;
+                let struct_kind = ir_context.add_kind(IRType::Struct { fields });
+                declarations.insert(name.clone(), struct_kind);
+            }
             _ => {}
         }
     }
 
-    Ok(ScanResults { imports, exports })
+    Ok(ScanResults {
+        imports,
+        declarations,
+    })
 }
 
-pub fn ast_type_to_ir(
+fn ast_type_to_ir(
     ast_type: &AstType,
     parse_context: &ParseTree,
     ir_context: &mut IRContext,
@@ -82,7 +99,7 @@ pub fn ast_type_to_ir(
             "f64" => Number(Float64),
             "i32" => Number(Int32),
             "f32" => Number(Float32),
-            _ => todo!(),
+            _ => Unresolved(string.clone(), ast_type.start),
         },
         AstTypeValue::Unique(inner) => {
             let inner = parse_context.kind(*inner);
