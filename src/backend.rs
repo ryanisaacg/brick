@@ -134,7 +134,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
 
 fn emit_function_types(
     decl: &FunDecl,
-    type_representations: &Vec<Representation>,
+    type_representations: &[Representation],
     types: &mut TypeSection,
 ) {
     let mut params = Vec::new();
@@ -157,7 +157,7 @@ struct LocalsAnalysis {
 
 fn analyze_locals(
     decl: &FunDecl,
-    type_representations: &Vec<Representation>,
+    type_representations: &[Representation],
     arena: &IRContext,
 ) -> LocalsAnalysis {
     let mut results = LocalsAnalysis {

@@ -14,7 +14,7 @@ pub fn resolve_type_names(
         let Unresolved(name, provenance) = kind else { continue };
         let resolved_declaration = declarations
             .get(name)
-            .ok_or(TypecheckError::UnknownName(name.clone(), *provenance))?;
+            .ok_or_else(|| TypecheckError::UnknownName(name.clone(), *provenance))?;
         resolutions.insert(ptr, *resolved_declaration);
     }
 

@@ -188,7 +188,7 @@ fn typecheck_expression(
 
                 let mut extra_fields = Vec::new();
                 for field in fields.keys() {
-                    if let None = type_fields.get(field) {
+                    if type_fields.get(field).is_none() {
                         extra_fields.push(field.clone());
                     }
                 }
