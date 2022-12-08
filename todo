@@ -12,10 +12,10 @@ parallel to "progress":
 - handle disposing of values from functions that aren't used
 - early return
 - else statements
+- DWARF
 
 data structures:
 - the ability to heap allocate values
-- product types
 - sum types
 
 closures (blocked by data structures):
