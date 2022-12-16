@@ -7,7 +7,12 @@ use crate::{
     },
     tree::{Node, NodePtr},
 };
+use gimli::write::{EndianVec, Sections};
 use wasm_encoder::*;
+
+use self::debug::DebugInfo;
+
+mod debug;
 
 /**
  * Note: currently in WASM, there is only a 0-memory. However, the spec is forwards-compatible with
@@ -24,7 +29,7 @@ const STACK_PTR: u32 = 0;
 const BASE_PTR: u32 = 1;
 const ASSIGNMENT_PTR: u32 = 2;
 
-pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
+pub fn emit(statements: Vec<IRStatement>, arena: &IRContext, with_debug: bool) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     let mut functions = FunctionSection::new();
@@ -69,11 +74,37 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
         &ConstExpr::i32_const(0x50),
     );
 
-    let type_representations = arena
-        .kinds()
-        .enumerate()
-        .map(|(idx, _)| represented_by(arena, idx))
-        .collect::<Vec<_>>();
+    let mut debug_info = DebugInfo::new();
+    let mut type_representations = Vec::new();
+    let mut debug_representations = Vec::new();
+    // TODO: deref programs fail to generate debug representations
+    for (idx, kind) in arena.kinds().enumerate() {
+        println!("{:?}", arena.pretty_dbg(NodePtr::Kind(idx)));
+        let repr = represented_by(arena, idx);
+        type_representations.push(repr);
+        match kind {
+            IRType::Void => debug_representations.push(None),
+            IRType::Bool => debug_representations.push(Some(debug_info.bool_id)),
+            IRType::Number(num) => match num {
+                NumericType::Int32 => debug_representations.push(Some(debug_info.i32_id)),
+                NumericType::Int64 => debug_representations.push(Some(debug_info.i64_id)),
+                NumericType::Float32 => debug_representations.push(Some(debug_info.f32_id)),
+                NumericType::Float64 => debug_representations.push(Some(debug_info.f64_id)),
+            },
+            IRType::Unique(child) | IRType::Shared(child) => {
+                // TODO: maybe throw if type doesn't exist?
+                let kind = debug_representations[*child]
+                    .map(|child_type_id| debug_info.pointer_type(child_type_id));
+                debug_representations.push(kind);
+            }
+            IRType::Function { .. } | IRType::Struct { .. } => {
+                debug_representations.push(None); // TODO
+            }
+            IRType::Unresolved(..) => {
+                debug_representations.push(None);
+            }
+        }
+    }
 
     current_function_idx = 0;
 
@@ -97,7 +128,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
                 representations: &type_representations,
                 wasm_locals: parameter_locals,
             };
-            emit_function_declaration(&mut ctx, stack_size, decl);
+            emit_function_declaration(&mut ctx, stack_size, &decl);
             let mut wasm_locals = Vec::new();
             // TODO: optimize by combining adjacent locals
             // TODO: is there a bug in wasm-encode?
@@ -108,11 +139,23 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
             for instruction in ctx.instructions.iter() {
                 f.instruction(instruction);
             }
+
+            // TODO: will I need to adjust for the header?
+            let low_addr = codes.byte_len();
             codes.function(&f);
+            let high_addr = codes.byte_len();
+
+            debug_info.function_declaration(
+                &decl,
+                &debug_representations[..],
+                Some((low_addr, high_addr)),
+            );
 
             current_function_idx += 1;
         }
     }
+
+    debug_info.set_unit_range(0, codes.byte_len());
 
     module.section(&types);
     module.section(&functions);
@@ -128,6 +171,22 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext) -> Vec<u8> {
     module.section(&globals);
     module.section(&exports);
     module.section(&codes);
+
+    if with_debug {
+        let mut sections = Sections::new(EndianVec::new(gimli::LittleEndian));
+        debug_info.dwarf.write(&mut sections).unwrap();
+        sections
+            .for_each(|id, data| {
+                let name = id.name();
+                module.section(&CustomSection {
+                    name,
+                    data: data.slice(),
+                });
+
+                Ok::<(), ()>(())
+            })
+            .unwrap()
+    }
 
     module.finish()
 }
@@ -219,7 +278,7 @@ impl<'a> EmitContext<'a> {
 
 // TODO: consider dynamically-sized stack frames?
 
-fn emit_function_declaration(ctx: &mut EmitContext<'_>, stack_size: u32, decl: FunDecl) {
+fn emit_function_declaration(ctx: &mut EmitContext<'_>, stack_size: u32, decl: &FunDecl) {
     // Write the current base pointer to the base of the stack
     ctx.add_instruction(Instruction::GlobalGet(STACK_PTR));
     ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));

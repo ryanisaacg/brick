@@ -12,8 +12,8 @@ parallel to "progress":
 - handle disposing of values from functions that aren't used
 - early return
 - else statements
-- DWARF
 - better type checking for struct fields?
+- Reject null bytes in the lexer
 
 data structures:
 - the ability to heap allocate values
@@ -24,9 +24,14 @@ closures (blocked by data structures):
 - create the capture environment
 - figure out how to make runtime function calls
 
+source debugging:
+- actually generate a line program that represents the source
+- generate info for variables
+- generate function preludes and epilogues
+- generate info for computations
+
 stuff to learn:
 - pattern matching
 - borrow-checking
-- binary debug info
 - optimizations?
 

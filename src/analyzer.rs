@@ -27,6 +27,8 @@ pub enum NumericType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IRType {
     Unresolved(String, Provenance),
+    // TODO: should Void be represented differently, possibly as a None branch on an
+    // Option<IRType>?
     Void,
     Bool,
     Number(NumericType),

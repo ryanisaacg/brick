@@ -71,7 +71,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
         )?;
         ir.extend(new_ir.into_iter());
     }
-    Ok(backend::emit(ir, &ir_context))
+    Ok(backend::emit(ir, &ir_context, true))
 }
 
 pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u8>, CompileError> {
@@ -91,5 +91,5 @@ pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u
         &arena,
         &global_scope,
     )?;
-    Ok(backend::emit(ir, &ir_context))
+    Ok(backend::emit(ir, &ir_context, true))
 }
