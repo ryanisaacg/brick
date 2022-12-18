@@ -19,22 +19,26 @@ type_annotation ::= ":" type
 type ::= word | "unique" type | "shared" type
 
 expression ::= if_expr | while_expr | block_expr | assignment_expr
-assignment_expr ::= reference_expr | reference_expr "=" reference_expr
-reference_expr ::= compare_expr | "shared" reference_expr | "unique" reference_expr
-compare_expr ::= sum_expr | sum_expr ">" compare_expr | sum_expr "<" compare_expr
-sum_expr ::= call_expr | call_expr "+" sum_expr | call_expr "-" sum_expr
-call_expr ::= dot_expr | dot_expr "(" call_param_expr ")" | dot_expr "(" call_param_expr ")" call_expr
-    call_param_expr ::= expression |
+assignment ::= reference | reference "=" reference
+reference ::= compare | "shared" reference | "unique" reference
+compare ::= sum | sum ">" compare | sum "<" compare
+sum ::= call | call "+" sum | call "-" sum
+call ::= dot |
+    dot "(" call_param ")" | dot "(" call_param ")" call |
+    dot "[" expression "]" | dot "[" expression "]" call
+    call_param ::= expression |
         expression "," |
-        expression "," call_param_expr
-dot_expr ::= paren_expr | paren_expr "." dot_chain
+        expression "," call_param
+dot ::= paren | paren "." dot_chain
     dot_chain ::= word | word "." word
-paren_expr ::= struct_literal_expr | "(" expression ")"
-struct_literal_expr ::= atom | word "{" struct_literal_params "}"
-    struct_literal_params ::= word | word "," |
-        word "," struct_literal_params |
-        word ":" expression | word ":" expression "," |
-        word ":" expression "," struct_literal_params
+paren ::= array_literal | struct_literal | "(" expression ")"
+    array_literal ::= "[" expression ";" integer "]" | "[" array_literal_items "]"
+        array_literal_items = expression | expression "," | expression "," array_literal_items
+    struct_literal ::= atom | word "{" struct_literal_params "}"
+        struct_literal_params ::= word | word "," |
+            word "," struct_literal_params |
+            word ":" expression | word ":" expression "," |
+            word ":" expression "," struct_literal_params
 atom ::= word | integer | "-"integer | float | "-"float
 
 if_expr ::= "if" expression block_expr

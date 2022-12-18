@@ -155,6 +155,7 @@ fn typecheck_expression(
 
     // TODO: analyze if, block
     Ok(match value {
+        ArrayLiteral(..) | ArrayLiteralLength(..) => todo!(),
         StructLiteral { name, fields } => {
             let struct_type_idx = resolve(local_scope, name.as_str());
             let struct_type = struct_type_idx.map(|idx| ir_context.kind(idx));

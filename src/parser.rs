@@ -62,6 +62,8 @@ pub enum AstExpressionValue {
         name: String,
         fields: HashMap<String, usize>,
     },
+    ArrayLiteral(Vec<usize>),
+    ArrayLiteralLength(usize, u64),
     /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
 }
@@ -186,30 +188,30 @@ fn struct_declaration(
 
     let mut fields = Vec::new();
     let mut pos = end;
-    loop {
-        let token = peek_token(source, pos, "expected either parameters or close paren")?;
-        pos = token.start;
-        match token.value {
-            LexemeValue::CloseBracket => break,
-            LexemeValue::Comma => {
-                source.next();
-            }
-            _ => {
-                let (name, end, type_hint) =
-                    name_and_type_hint(source, context, pos, "expected parameter")?;
-                let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
-                let kind = context.add_kind(kind);
-                pos = end;
-                fields.push(NameAndType { name, kind });
-            }
-        }
-    }
-    assert_next_lexeme_eq(
-        source.next(),
+    let mut closed = peek_for_closed(
+        source,
         LexemeValue::CloseBracket,
-        start,
-        "expected closing bracket to end struct declaration",
+        pos,
+        "expected either fields or close bracket",
     )?;
+
+    while !closed {
+        let (name, end, type_hint) =
+            name_and_type_hint(source, context, pos, "expected parameter")?;
+        let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
+        let kind = context.add_kind(kind);
+        pos = end;
+        fields.push(NameAndType { name, kind });
+
+        let (should_end, end) = comma_or_end_list(
+            source,
+            LexemeValue::CloseBracket,
+            pos,
+            "expected either fields or close bracket",
+        )?;
+        closed = should_end;
+        pos = end;
+    }
 
     Ok(AstStatement {
         value: AstStatementValue::StructDeclaration { name, fields },
@@ -286,7 +288,10 @@ fn function_declaration(
     })
 }
 
-fn import_declaration(source: &mut TokenIter, start: Provenance) -> Result<AstStatement, ParseError> {
+fn import_declaration(
+    source: &mut TokenIter,
+    start: Provenance,
+) -> Result<AstStatement, ParseError> {
     let (name, _, end) = word(source, start, "expected word after 'import'")?;
 
     Ok(AstStatement {
@@ -640,31 +645,26 @@ fn call_step(
         let mut end = *end;
         source.next(); // remove the peeked token
 
-        loop {
-            if let LexemeValue::CloseParen =
-                peek_token(source, end, "expected ) or next argument")?.value
-            {
-                source.next();
-                break;
-            }
+        let mut closed = peek_for_closed(
+            source,
+            LexemeValue::CloseParen,
+            end,
+            "expected ) or next argument",
+        )?;
 
+        while !closed {
             let argument = expression(source, context, provenance)?;
             end = argument.end;
             arguments.push(context.add_expression(argument));
 
-            if let LexemeValue::Comma =
-                peek_token(source, end, "expected comma or ) to end function call")?.value
-            {
-                source.next();
-            } else {
-                assert_next_lexeme_eq(
-                    source.next(),
-                    LexemeValue::CloseParen,
-                    end,
-                    "expected close parenthesis or comma after argument",
-                )?;
-                break;
-            }
+            let (should_break, new_end) = comma_or_end_list(
+                source,
+                LexemeValue::CloseParen,
+                end,
+                "expected comma or ) to end function call",
+            )?;
+            end = new_end;
+            closed = should_break;
         }
 
         let start = root.start;
@@ -692,8 +692,7 @@ fn dot_step(
     }) = peek_token_optional(source)?
     {
         source.next();
-        let (name, start, end) =
-            word(source, provenance, "expected a name after dot operator")?;
+        let (name, start, end) = word(source, provenance, "expected a name after dot operator")?;
         let right = context.add_expression(AstExpression {
             value: AstExpressionValue::Name(name),
             start,
@@ -716,25 +715,111 @@ fn paren_step(
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    if let Some(Ok(Lexeme {
-        value: LexemeValue::OpenParen,
-        start,
-        ..
-    })) = source.peek()
-    {
-        let start = *start;
-        source.next();
-        let expr = expression(source, context, start)?;
-        assert_next_lexeme_eq(
-            source.next(),
-            LexemeValue::CloseParen,
-            expr.start,
-            "parenthesized expressions must end with a )",
-        )?;
+    let peeked = peek_token(source, provenance, "expected (, [, or expression")?;
+    match peeked.value {
+        LexemeValue::OpenParen => {
+            let start = peeked.start;
+            source.next();
+            paren(source, context, start)
+        }
+        LexemeValue::OpenSquare => {
+            let start = peeked.start;
+            source.next();
+            array_literal(source, context, start)
+        }
+        _ => struct_literal_step(source, context, provenance),
+    }
+}
 
-        Ok(expr)
-    } else {
-        struct_literal_step(source, context, provenance)
+fn paren(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+    provenance: Provenance,
+) -> Result<AstExpression, ParseError> {
+    let expr = expression(source, context, provenance)?;
+    assert_next_lexeme_eq(
+        source.next(),
+        LexemeValue::CloseParen,
+        expr.start,
+        "parenthesized expressions must end with a )",
+    )?;
+
+    Ok(expr)
+}
+
+fn array_literal(
+    source: &mut TokenIter,
+    context: &mut ParseTree,
+    start: Provenance,
+) -> Result<AstExpression, ParseError> {
+    let expr = expression(source, context, start)?;
+    let separator = token(source, start, "expected comma, semicolon or ]")?;
+    match separator.value {
+        LexemeValue::Comma => {
+            let mut end = separator.end;
+            let mut children = vec![context.add_expression(expr)];
+
+            let mut closed = peek_for_closed(
+                source,
+                LexemeValue::CloseSquare,
+                end,
+                "expected ] or next argument",
+            )?;
+
+            while !closed {
+                let peeked = peek_token(source, end, "expected , or ]")?;
+                if LexemeValue::CloseSquare == peeked.value {
+                    source.next();
+                    break;
+                }
+                end = peeked.end;
+                let expr = expression(source, context, end)?;
+                end = expr.end;
+                children.push(context.add_expression(expr));
+
+                let (should_break, new_end) = comma_or_end_list(
+                    source,
+                    LexemeValue::CloseSquare,
+                    end,
+                    "expected comma or ] to end array literal",
+                )?;
+                end = new_end;
+                closed = should_break;
+            }
+            Ok(AstExpression {
+                value: AstExpressionValue::ArrayLiteral(children),
+                start,
+                end,
+            })
+        }
+        LexemeValue::Semicolon => {
+            let (length, _, end) =
+                integer(source, start, "expected number after ; in array literal")?;
+            let close = assert_next_lexeme_eq(
+                source.next(),
+                LexemeValue::CloseSquare,
+                end,
+                "expected ] after array length in array literal",
+            )?;
+            let expr = context.add_expression(expr);
+            Ok(AstExpression {
+                value: AstExpressionValue::ArrayLiteralLength(expr, length),
+                start,
+                end: close.end,
+            })
+        }
+        LexemeValue::CloseSquare => {
+            let expr = context.add_expression(expr);
+            Ok(AstExpression {
+                value: AstExpressionValue::ArrayLiteral(vec![expr]),
+                start,
+                end: separator.end,
+            })
+        }
+        _ => Err(ParseError::UnexpectedLexeme(
+            Box::new(separator),
+            "expected comma, semicolon or ]",
+        )),
     }
 }
 
@@ -764,8 +849,8 @@ fn struct_literal_step(
             let mut fields = HashMap::new();
 
             loop {
-                if let LexemeValue::CloseBracket =
-                    peek_token(source, end, "expected } or next field")?.value
+                if LexemeValue::CloseBracket
+                    == peek_token(source, end, "expected } or next field")?.value
                 {
                     source.next();
                     break;
@@ -774,7 +859,7 @@ fn struct_literal_step(
                 let (field, field_start, field_end) =
                     word(source, end, "expected field in struct literal")?;
                 if let lex @ (LexemeValue::Comma | LexemeValue::CloseBracket) =
-                    &peek_token(source, end, "expected comma or ) to end function call")?.value
+                    &peek_token(source, end, "expected comma or } to end struct literal")?.value
                 {
                     let lex = lex.clone();
                     source.next();
@@ -849,22 +934,28 @@ fn atom(
         LexemeValue::Int(int) => try_decimal(source, int as i64, start, end),
         // TODO: should this be treated as a unary operator instead?
         LexemeValue::Minus => {
-            match token(source, start, "expected digit after negative sign")? {
-                Lexeme {
-                    value: LexemeValue::Int(int),
-                    end,
-                    ..
-                } => try_decimal(source, -(int as i64), start, end),
-                other => Err(ParseError::UnexpectedLexeme(
-                    Box::new(other),
-                    "expected number after -",
-                )),
-            }
+            let (int, _, end) = integer(source, start, "expected digit after negative sign")?;
+            try_decimal(source, -(int as i64), start, end)
         }
         value => Err(ParseError::UnexpectedLexeme(
             Box::new(Lexeme { value, start, end }),
             reason,
         )),
+    }
+}
+
+fn integer(
+    source: &mut TokenIter,
+    start: Provenance,
+    reason: &'static str,
+) -> Result<(u64, Provenance, Provenance), ParseError> {
+    match token(source, start, reason)? {
+        Lexeme {
+            value: LexemeValue::Int(int),
+            start,
+            end,
+        } => Ok((int, start, end)),
+        other => Err(ParseError::UnexpectedLexeme(Box::new(other), reason)),
     }
 }
 
@@ -975,7 +1066,7 @@ fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut 
             ..
         })
         | Node::Expression(AstExpression {
-            value: TakeShared(child) | TakeUnique(child),
+            value: TakeShared(child) | TakeUnique(child) | ArrayLiteralLength(child, _),
             ..
         }) => {
             children.push(NodePtr::Expression(*child));
@@ -987,6 +1078,14 @@ fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut 
         }) => {
             children.push(NodePtr::Expression(*right));
             children.push(NodePtr::Expression(*left));
+        }
+        Node::Expression(AstExpression {
+            value: ArrayLiteral(values),
+            ..
+        }) => {
+            for value in values {
+                children.push(NodePtr::Expression(*value));
+            }
         }
         Node::Expression(AstExpression {
             value: Call(function, parameters),
@@ -1059,6 +1158,46 @@ fn assert_lexeme_eq(
             reason,
         ))
     }
+}
+
+/**
+ * Returns (did_list_end, end_of_token)
+ */
+fn comma_or_end_list(
+    source: &mut TokenIter,
+    list_end: LexemeValue,
+    start: Provenance,
+    reason: &'static str,
+) -> Result<(bool, Provenance), ParseError> {
+    let next = token(source, start, reason)?;
+    match next.value {
+        LexemeValue::Comma => {
+            match peek_token_optional(source)? {
+                Some(token) if token.value == list_end => {
+                    let end = token.end;
+                    source.next();
+                    Ok((true, end))
+                },
+                _ => Ok((false, next.end)),
+            }
+        }
+        other if other == list_end => Ok((true, next.end)),
+        _ => Err(ParseError::UnexpectedLexeme(Box::new(next), reason)),
+    }
+}
+
+fn peek_for_closed(
+    source: &mut TokenIter,
+    list_end: LexemeValue,
+    provenance: Provenance,
+    reason: &'static str,
+) -> Result<bool, ParseError> {
+    let closed = peek_token(source, provenance, reason)?.value == list_end;
+    if closed {
+        source.next();
+    }
+
+    Ok(closed)
 }
 
 #[cfg(test)]
