@@ -16,8 +16,10 @@ parallel to "progress":
 - Reject null bytes in the lexer
 
 data structures:
+- array types
 - the ability to heap allocate values
 - sum types
+- parametrics polymorphism
 
 closures (blocked by data structures):
 - nested function declarations
