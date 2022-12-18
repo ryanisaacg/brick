@@ -116,7 +116,7 @@ pub fn parse(
 
     while let Some(lexeme) = peek_token_optional(&mut source)? {
         let start = lexeme.start;
-        let statement = parse_statement(&mut source, &mut context, start)?;
+        let statement = statement(&mut source, &mut context, start)?;
         let statement = context.add_statement(statement);
         statements.push(statement);
     }
@@ -124,7 +124,7 @@ pub fn parse(
     Ok((statements, context))
 }
 
-fn parse_statement(
+fn statement(
     source: &mut TokenIter,
     context: &mut ParseTree,
     start: Provenance,
@@ -143,15 +143,15 @@ fn parse_statement(
             let value = value.clone();
             source.next();
             match value {
-                LexemeValue::Let => parse_var_declaration(source, context, start)?,
-                LexemeValue::Import => parse_import(source, start)?,
-                LexemeValue::Function => parse_function_declaration(source, context, start)?,
-                LexemeValue::Struct => parse_struct(source, context, start)?,
+                LexemeValue::Let => variable_declaration(source, context, start)?,
+                LexemeValue::Import => import_declaration(source, start)?,
+                LexemeValue::Function => function_declaration(source, context, start)?,
+                LexemeValue::Struct => struct_declaration(source, context, start)?,
                 _ => unreachable!(),
             }
         }
         _ => {
-            let expr = parse_expr(source, context, start)?;
+            let expr = expression(source, context, start)?;
             let start = expr.start;
             let end = expr.end;
             AstStatement {
@@ -171,12 +171,12 @@ fn parse_statement(
     Ok(statement)
 }
 
-fn parse_struct(
+fn struct_declaration(
     source: &mut TokenIter,
     context: &mut ParseTree,
     start: Provenance,
 ) -> Result<AstStatement, ParseError> {
-    let (name, _, end) = next_word(source, start, "expected name after 'struct'")?;
+    let (name, _, end) = word(source, start, "expected name after 'struct'")?;
     assert_next_lexeme_eq(
         source.next(),
         LexemeValue::OpenBracket,
@@ -196,7 +196,7 @@ fn parse_struct(
             }
             _ => {
                 let (name, end, type_hint) =
-                    parse_name_and_type_hint(source, context, pos, "expected parameter")?;
+                    name_and_type_hint(source, context, pos, "expected parameter")?;
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
                 let kind = context.add_kind(kind);
                 pos = end;
@@ -218,12 +218,12 @@ fn parse_struct(
     })
 }
 
-fn parse_function_declaration(
+fn function_declaration(
     source: &mut TokenIter,
     context: &mut ParseTree,
     start: Provenance,
 ) -> Result<AstStatement, ParseError> {
-    let (name, _, end) = next_word(source, start, "expected name after 'fn'")?;
+    let (name, _, end) = word(source, start, "expected name after 'fn'")?;
 
     let mut pos = assert_next_lexeme_eq(
         source.next(),
@@ -243,7 +243,7 @@ fn parse_function_declaration(
             }
             _ => {
                 let (name, end, type_hint) =
-                    parse_name_and_type_hint(source, context, pos, "expected parameter")?;
+                    name_and_type_hint(source, context, pos, "expected parameter")?;
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
                 let kind = context.add_kind(kind);
                 pos = end;
@@ -265,13 +265,13 @@ fn parse_function_declaration(
     {
         let start = *start;
         source.next();
-        let kind = parse_type(source, context, start)?;
+        let kind = type_expression(source, context, start)?;
         let kind = context.add_kind(kind);
         Some(kind)
     } else {
         None
     };
-    let body = next_block(source, context, start)?;
+    let body = block(source, context, start)?;
     let end = body.end;
 
     Ok(AstStatement {
@@ -286,8 +286,8 @@ fn parse_function_declaration(
     })
 }
 
-fn parse_import(source: &mut TokenIter, start: Provenance) -> Result<AstStatement, ParseError> {
-    let (name, _, end) = next_word(source, start, "expected word after 'import'")?;
+fn import_declaration(source: &mut TokenIter, start: Provenance) -> Result<AstStatement, ParseError> {
+    let (name, _, end) = word(source, start, "expected word after 'import'")?;
 
     Ok(AstStatement {
         value: AstStatementValue::Import(name),
@@ -296,13 +296,13 @@ fn parse_import(source: &mut TokenIter, start: Provenance) -> Result<AstStatemen
     })
 }
 
-fn parse_var_declaration(
+fn variable_declaration(
     source: &mut TokenIter,
     context: &mut ParseTree,
     start: Provenance,
 ) -> Result<AstStatement, ParseError> {
     // TODO: store type hint in declarations
-    let (name, start, _) = parse_name_and_type_hint(
+    let (name, start, _) = name_and_type_hint(
         source,
         context,
         start,
@@ -314,7 +314,7 @@ fn parse_var_declaration(
         start,
         "expected = after let binding target",
     )?;
-    let value = parse_expr(source, context, start)?;
+    let value = expression(source, context, start)?;
     let end = value.end;
 
     Ok(AstStatement {
@@ -324,20 +324,20 @@ fn parse_var_declaration(
     })
 }
 
-fn parse_name_and_type_hint(
+fn name_and_type_hint(
     source: &mut TokenIter,
     context: &mut ParseTree,
     start: Provenance,
     reason: &'static str,
 ) -> Result<(String, Provenance, Option<AstType>), ParseError> {
-    let (name, _, mut end) = next_word(source, start, reason)?;
+    let (name, _, mut end) = word(source, start, reason)?;
     let type_hint = if let Some(Ok(Lexeme {
         value: LexemeValue::Colon,
         ..
     })) = source.peek()
     {
         source.next();
-        let type_hint = parse_type(source, context, start)?;
+        let type_hint = type_expression(source, context, start)?;
         end = type_hint.end;
         Some(type_hint)
     } else {
@@ -347,15 +347,15 @@ fn parse_name_and_type_hint(
     Ok((name, end, type_hint))
 }
 
-fn parse_type(
+fn type_expression(
     source: &mut TokenIter,
     context: &mut ParseTree,
     start: Provenance,
 ) -> Result<AstType, ParseError> {
-    let next = next_token(source, start, "expected type")?;
+    let next = token(source, start, "expected type")?;
     match next.value {
         ptr @ (LexemeValue::Unique | LexemeValue::Shared) => {
-            let subtype = parse_type(source, context, next.end)?;
+            let subtype = type_expression(source, context, next.end)?;
             let end = subtype.end;
             let subtype = context.add_kind(subtype);
             Ok(AstType {
@@ -380,7 +380,7 @@ fn parse_type(
     }
 }
 
-fn parse_expr(
+fn expression(
     source: &mut TokenIter,
     context: &mut ParseTree,
     provenance: Provenance,
@@ -394,7 +394,7 @@ fn parse_expr(
             let start = *start;
             let token = token.clone();
             source.next();
-            next_branch(source, context, token, start)
+            branch(source, context, token, start)
         }
         Lexeme {
             value: LexemeValue::OpenBracket,
@@ -402,20 +402,20 @@ fn parse_expr(
             ..
         } => {
             let start = *start;
-            next_block(source, context, start)
+            block(source, context, start)
         }
         _ => assignment_step(source, context, provenance),
     }
 }
 
-fn next_branch(
+fn branch(
     source: &mut TokenIter,
     context: &mut ParseTree,
     token: LexemeValue,
     start: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    let predicate = parse_expr(source, context, start)?;
-    let block = next_block(source, context, start)?;
+    let predicate = expression(source, context, start)?;
+    let block = block(source, context, start)?;
 
     let predicate_ptr = context.add_expression(predicate);
     let end = block.end;
@@ -432,7 +432,7 @@ fn next_branch(
     })
 }
 
-fn next_block(
+fn block(
     source: &mut TokenIter,
     context: &mut ParseTree,
     start: Provenance,
@@ -462,7 +462,7 @@ fn next_block(
                 });
             }
             _ => {
-                let statement = parse_statement(source, context, end)?;
+                let statement = statement(source, context, end)?;
                 end = statement.end;
                 statements.push(context.add_statement(statement));
             }
@@ -648,7 +648,7 @@ fn call_step(
                 break;
             }
 
-            let argument = parse_expr(source, context, provenance)?;
+            let argument = expression(source, context, provenance)?;
             end = argument.end;
             arguments.push(context.add_expression(argument));
 
@@ -693,7 +693,7 @@ fn dot_step(
     {
         source.next();
         let (name, start, end) =
-            next_word(source, provenance, "expected a name after dot operator")?;
+            word(source, provenance, "expected a name after dot operator")?;
         let right = context.add_expression(AstExpression {
             value: AstExpressionValue::Name(name),
             start,
@@ -724,7 +724,7 @@ fn paren_step(
     {
         let start = *start;
         source.next();
-        let expr = parse_expr(source, context, start)?;
+        let expr = expression(source, context, start)?;
         assert_next_lexeme_eq(
             source.next(),
             LexemeValue::CloseParen,
@@ -743,7 +743,7 @@ fn struct_literal_step(
     context: &mut ParseTree,
     provenance: Provenance,
 ) -> Result<AstExpression, ParseError> {
-    let atom = next_atom(source, provenance, "expected a word or atom")?;
+    let atom = atom(source, provenance, "expected a word or atom")?;
     match (atom, peek_token_optional(source)?) {
         (
             AstExpression {
@@ -772,7 +772,7 @@ fn struct_literal_step(
                 }
 
                 let (field, field_start, field_end) =
-                    next_word(source, end, "expected field in struct literal")?;
+                    word(source, end, "expected field in struct literal")?;
                 if let lex @ (LexemeValue::Comma | LexemeValue::CloseBracket) =
                     &peek_token(source, end, "expected comma or ) to end function call")?.value
                 {
@@ -794,7 +794,7 @@ fn struct_literal_step(
                         end,
                         "expected colon after field name",
                     )?;
-                    let argument = parse_expr(source, context, provenance)?;
+                    let argument = expression(source, context, provenance)?;
                     end = argument.end;
                     fields.insert(field, context.add_expression(argument));
 
@@ -823,13 +823,13 @@ fn struct_literal_step(
     }
 }
 
-fn next_atom(
+fn atom(
     source: &mut TokenIter,
     provenance: Provenance,
     reason: &'static str,
 ) -> Result<AstExpression, ParseError> {
     // TODO: expectation reasoning
-    let Lexeme { value, start, end } = next_token(source, provenance, reason)?;
+    let Lexeme { value, start, end } = token(source, provenance, reason)?;
     match value {
         LexemeValue::True => Ok(AstExpression {
             value: AstExpressionValue::Bool(true),
@@ -849,7 +849,7 @@ fn next_atom(
         LexemeValue::Int(int) => try_decimal(source, int as i64, start, end),
         // TODO: should this be treated as a unary operator instead?
         LexemeValue::Minus => {
-            match next_token(source, start, "expected digit after negative sign")? {
+            match token(source, start, "expected digit after negative sign")? {
                 Lexeme {
                     value: LexemeValue::Int(int),
                     end,
@@ -917,7 +917,7 @@ fn try_decimal(
     }
 }
 
-fn next_token(
+fn token(
     source: &mut TokenIter,
     provenance: Provenance,
     reason: &'static str,
@@ -928,12 +928,12 @@ fn next_token(
     Ok(lex)
 }
 
-fn next_word(
+fn word(
     source: &mut TokenIter,
     provenance: Provenance,
     reason: &'static str,
 ) -> Result<(String, Provenance, Provenance), ParseError> {
-    match next_token(source, provenance, reason)? {
+    match token(source, provenance, reason)? {
         Lexeme {
             value: LexemeValue::Word(name),
             start,
