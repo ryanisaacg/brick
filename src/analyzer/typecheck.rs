@@ -155,7 +155,7 @@ fn typecheck_expression(
 
     // TODO: analyze if, block
     Ok(match value {
-        ArrayLiteral(..) | ArrayLiteralLength(..) => todo!(),
+        ArrayLiteral(..) | ArrayLiteralLength(..) | BinExpr(BinOp::Index, _, _) => todo!(),
         StructLiteral { name, fields } => {
             let struct_type_idx = resolve(local_scope, name.as_str());
             let struct_type = struct_type_idx.map(|idx| ir_context.kind(idx));
@@ -616,6 +616,7 @@ fn resolve_ast_type(
 
             ir_context.add_kind(IRType::Shared(inner))
         }
+        AstTypeValue::Array(_) => todo!(),
     })
 }
 

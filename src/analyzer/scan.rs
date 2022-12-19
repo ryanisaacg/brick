@@ -115,5 +115,6 @@ fn ast_type_to_ir(
 
             IRType::Shared(inner)
         }
+        AstTypeValue::Array(_) => todo!(),
     })
 }

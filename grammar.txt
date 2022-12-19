@@ -16,7 +16,7 @@ function ::= "fn" word "(" function_args ")" type_annotation block
 struct ::= "struct" word "{" function_args "}"
 
 type_annotation ::= ":" type
-type ::= word | "unique" type | "shared" type
+type ::= word | "unique" type | "shared" type | "[" type "]"
 
 expression ::= if_expr | while_expr | block_expr | assignment_expr
 assignment ::= reference | reference "=" reference

@@ -80,6 +80,7 @@ pub enum AstTypeValue {
     Name(String),
     Unique(usize),
     Shared(usize),
+    Array(usize),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -89,6 +90,7 @@ pub enum BinOp {
     Subtract,
     LessThan,
     GreaterThan,
+    Index,
 }
 
 #[derive(Debug, Error)]
@@ -373,6 +375,22 @@ fn type_expression(
                 end,
             })
         }
+        LexemeValue::OpenSquare => {
+            let subtype = type_expression(source, context, next.end)?;
+            let end = subtype.end;
+            assert_next_lexeme_eq(
+                source.next(),
+                LexemeValue::CloseSquare,
+                end,
+                "expected ] after array type",
+            )?;
+            let subtype = context.add_kind(subtype);
+            Ok(AstType {
+                value: AstTypeValue::Array(subtype),
+                start: next.start,
+                end,
+            })
+        }
         LexemeValue::Word(name) => Ok(AstType {
             value: AstTypeValue::Name(name),
             start: next.start,
@@ -636,44 +654,63 @@ fn call_step(
     let mut root = dot_step(source, context, provenance)?;
 
     while let Some(Lexeme {
-        value: LexemeValue::OpenParen,
+        value: opening @ (LexemeValue::OpenParen | LexemeValue::OpenSquare),
         end,
         ..
     }) = peek_token_optional(source)?
     {
-        let mut arguments = Vec::new();
+        let is_square = opening == &LexemeValue::OpenSquare;
         let mut end = *end;
         source.next(); // remove the peeked token
+        if is_square {
+            let index = expression(source, context, end)?;
+            assert_next_lexeme_eq(
+                source.next(),
+                LexemeValue::CloseSquare,
+                end,
+                "expected ] to follow array index",
+            )?;
+            let index = context.add_expression(index);
+            let start = root.start;
+            let left = context.add_expression(root);
+            root = AstExpression {
+                value: AstExpressionValue::BinExpr(BinOp::Index, left, index),
+                start,
+                end,
+            };
+        } else {
+            let mut arguments = Vec::new();
 
-        let mut closed = peek_for_closed(
-            source,
-            LexemeValue::CloseParen,
-            end,
-            "expected ) or next argument",
-        )?;
-
-        while !closed {
-            let argument = expression(source, context, provenance)?;
-            end = argument.end;
-            arguments.push(context.add_expression(argument));
-
-            let (should_break, new_end) = comma_or_end_list(
+            let mut closed = peek_for_closed(
                 source,
                 LexemeValue::CloseParen,
                 end,
-                "expected comma or ) to end function call",
+                "expected ) or next argument",
             )?;
-            end = new_end;
-            closed = should_break;
-        }
 
-        let start = root.start;
-        let function = context.add_expression(root);
+            while !closed {
+                let argument = expression(source, context, provenance)?;
+                end = argument.end;
+                arguments.push(context.add_expression(argument));
 
-        root = AstExpression {
-            value: AstExpressionValue::Call(function, arguments),
-            start,
-            end,
+                let (should_break, new_end) = comma_or_end_list(
+                    source,
+                    LexemeValue::CloseParen,
+                    end,
+                    "expected comma or ) to end function call",
+                )?;
+                end = new_end;
+                closed = should_break;
+            }
+
+            let start = root.start;
+            let function = context.add_expression(root);
+
+            root = AstExpression {
+                value: AstExpressionValue::Call(function, arguments),
+                start,
+                end,
+            }
         }
     }
 
@@ -1113,7 +1150,7 @@ fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut 
             }
         }
         Node::Kind(AstType {
-            value: Unique(kind) | Shared(kind),
+            value: Unique(kind) | Shared(kind) | Array(kind),
             ..
         }) => {
             children.push(NodePtr::Kind(*kind));
@@ -1171,16 +1208,14 @@ fn comma_or_end_list(
 ) -> Result<(bool, Provenance), ParseError> {
     let next = token(source, start, reason)?;
     match next.value {
-        LexemeValue::Comma => {
-            match peek_token_optional(source)? {
-                Some(token) if token.value == list_end => {
-                    let end = token.end;
-                    source.next();
-                    Ok((true, end))
-                },
-                _ => Ok((false, next.end)),
+        LexemeValue::Comma => match peek_token_optional(source)? {
+            Some(token) if token.value == list_end => {
+                let end = token.end;
+                source.next();
+                Ok((true, end))
             }
-        }
+            _ => Ok((false, next.end)),
+        },
         other if other == list_end => Ok((true, next.end)),
         _ => Err(ParseError::UnexpectedLexeme(Box::new(next), reason)),
     }
