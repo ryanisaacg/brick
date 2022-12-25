@@ -10,7 +10,7 @@ pub fn resolve_type_names(
 
     let mut resolutions = HashMap::new();
 
-    for (ptr, kind) in ir_context.kinds().enumerate() {
+    for (ptr, kind) in ir_context.types.iter().enumerate() {
         let Unresolved(name, provenance) = kind else { continue };
         let resolved_declaration = declarations
             .get(name)
@@ -19,7 +19,7 @@ pub fn resolve_type_names(
     }
 
     for decl in declarations.values() {
-        match ir_context.kind_mut(*decl) {
+        match &mut ir_context.types[*decl] {
             Function {
                 parameters,
                 returns,

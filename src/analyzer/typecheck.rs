@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use crate::{
-    analyzer::{BinOpComparison, BinOpNumeric, IRExpression, IRExpressionValue, NumericType},
+    analyzer::{BinOpComparison, BinOpNumeric, NumericType},
     parser::{AstNode, AstNodeValue, BinOp},
 };
 
 use super::{
-    FunDecl, FunctionParameter, IRContext, IRStatement, IRStatementValue, IRType, Scope,
-    TypecheckError, BOOL_KIND, F32_KIND, F64_KIND, I32_KIND, I64_KIND, VOID_KIND,
+    FunDecl, FunctionParameter, IRContext, IRNode, IRNodeValue, IRType, Scope, TypecheckError,
+    BOOL_KIND, F32_KIND, F64_KIND, I32_KIND, I64_KIND, VOID_KIND,
 };
 // TODO: unification of separate IRContexts?
 // TODO: initial header-file like parse
@@ -17,7 +17,7 @@ pub fn typecheck(
     ir_context: &mut IRContext,
     parse_context: &[AstNode],
     scopes: &[Scope],
-) -> Result<Vec<IRStatement>, TypecheckError> {
+) -> Result<Vec<IRNode>, TypecheckError> {
     // TODO: cons cell instead?
     let mut local_scope = Vec::with_capacity(1 + scopes.len());
     local_scope.push(Scope {
@@ -47,7 +47,7 @@ pub fn typecheck(
                         ir_context,
                         &local_scope[..],
                     )?;
-                    IRStatementValue::Expression(ir_context.add_expression(expr))
+                    IRNodeValue::Expression(ir_context.add_node(expr))
                 }
                 AstNodeValue::Declaration(name, expr) => {
                     let expr = typecheck_expression(
@@ -59,7 +59,7 @@ pub fn typecheck(
                     local_scope[0]
                         .declarations
                         .insert(name.to_string(), expr.kind);
-                    IRStatementValue::Declaration(name.clone(), ir_context.add_expression(expr))
+                    IRNodeValue::Declaration(name.clone(), ir_context.add_node(expr))
                 }
                 AstNodeValue::FunctionDeclaration {
                     name,
@@ -121,20 +121,25 @@ pub fn typecheck(
                     )?;
 
                     // TODO: verify body actually returns that type
-                    IRStatementValue::FunctionDeclaration(FunDecl {
+                    IRNodeValue::FunctionDeclaration(FunDecl {
                         name: name.to_string(),
                         params,
                         returns,
-                        body: ir_context.add_expression(body),
+                        body: ir_context.add_node(body),
                     })
                 }
                 _ => todo!("handle loose statements"),
             };
 
-            Ok(Some(IRStatement { value, start, end }))
+            Ok(Some(IRNode {
+                value,
+                start,
+                end,
+                kind: VOID_KIND,
+            }))
         })
         .filter_map(|x| x.transpose())
-        .collect::<Result<Vec<IRStatement>, TypecheckError>>()?;
+        .collect::<Result<Vec<IRNode>, TypecheckError>>()?;
 
     Ok(statements)
 }
@@ -145,7 +150,7 @@ fn typecheck_expression(
     parse_context: &[AstNode],
     ir_context: &mut IRContext,
     local_scope: &[Scope],
-) -> Result<IRExpression, TypecheckError> {
+) -> Result<IRNode, TypecheckError> {
     use AstNodeValue::*;
     let AstNode { value, start, end } = expression;
     let start = *start;
@@ -162,10 +167,10 @@ fn typecheck_expression(
             )?;
             let kind = IRType::Array(child.kind);
             let kind = ir_context.add_kind(kind);
-            let child = ir_context.add_expression(child);
+            let child = ir_context.add_node(child);
 
-            IRExpression {
-                value: IRExpressionValue::ArrayLiteralLength(child, *length),
+            IRNode {
+                value: IRNodeValue::ArrayLiteralLength(child, *length),
                 kind,
                 start,
                 end,
@@ -204,11 +209,11 @@ fn typecheck_expression(
             }
 
             let kind = *inner;
-            let left = ir_context.add_expression(left);
-            let right = ir_context.add_expression(right);
+            let left = ir_context.add_node(left);
+            let right = ir_context.add_node(right);
 
-            IRExpression {
-                value: IRExpressionValue::ArrayIndex(left, right),
+            IRNode {
+                value: IRNodeValue::ArrayIndex(left, right),
                 kind,
                 start,
                 end,
@@ -238,7 +243,7 @@ fn typecheck_expression(
                         for _ in 0..derefs {
                             provided_value = maybe_dereference(provided_value, ir_context);
                         }
-                        let provided_value = ir_context.add_expression(provided_value);
+                        let provided_value = ir_context.add_node(provided_value);
                         expr_fields.insert(field.clone(), provided_value);
                     } else {
                         missing_fields.push(field.clone());
@@ -252,8 +257,8 @@ fn typecheck_expression(
                     }
                 }
 
-                IRExpression {
-                    value: IRExpressionValue::StructLiteral(expr_fields),
+                IRNode {
+                    value: IRNodeValue::StructLiteral(expr_fields),
                     kind: struct_type_idx.unwrap(),
                     start,
                     end,
@@ -283,9 +288,9 @@ fn typecheck_expression(
                 return Err(TypecheckError::FieldNotFound(name.clone(), left_kind.clone(), start));
             };
             let kind = *field;
-            let left = ir_context.add_expression(left);
-            IRExpression {
-                value: IRExpressionValue::Dot(left, name.clone()),
+            let left = ir_context.add_node(left);
+            IRNode {
+                value: IRNodeValue::Dot(left, name.clone()),
                 kind,
                 start,
                 end,
@@ -330,10 +335,10 @@ fn typecheck_expression(
                 });
             }
 
-            let lvalue = ir_context.add_expression(lvalue);
-            let rvalue = ir_context.add_expression(rvalue);
-            IRExpression {
-                value: IRExpressionValue::Assignment(lvalue, rvalue),
+            let lvalue = ir_context.add_node(lvalue);
+            let rvalue = ir_context.add_node(rvalue);
+            IRNode {
+                value: IRNodeValue::Assignment(lvalue, rvalue),
                 kind: ir_context.add_kind(IRType::Void),
                 start,
                 end,
@@ -375,7 +380,7 @@ fn typecheck_expression(
                     let argument_kind = ir_context.kind(argument.kind);
                     let parameter_kind = ir_context.kind(parameter_types[index]);
                     if are_types_equal(ir_context, argument_kind, parameter_kind) {
-                        Ok(ir_context.add_expression(argument))
+                        Ok(ir_context.add_node(argument))
                     } else {
                         Err(TypecheckError::UnexpectedType {
                             found: argument_kind.clone(),
@@ -386,10 +391,10 @@ fn typecheck_expression(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let function = ir_context.add_expression(function);
+            let function = ir_context.add_node(function);
 
-            IRExpression {
-                value: IRExpressionValue::Call(function, arguments),
+            IRNode {
+                value: IRNodeValue::Call(function, arguments),
                 kind: returns,
                 start,
                 end,
@@ -398,8 +403,8 @@ fn typecheck_expression(
         Name(name) => {
             let local_type = resolve(local_scope, name);
             match local_type {
-                Some(local_type) => IRExpression {
-                    value: IRExpressionValue::LocalVariable(name.clone()),
+                Some(local_type) => IRNode {
+                    value: IRNodeValue::LocalVariable(name.clone()),
                     kind: local_type,
                     start,
                     end,
@@ -409,20 +414,20 @@ fn typecheck_expression(
                 }
             }
         }
-        Bool(val) => IRExpression {
-            value: IRExpressionValue::Bool(*val),
+        Bool(val) => IRNode {
+            value: IRNodeValue::Bool(*val),
             kind: ir_context.add_kind(IRType::Bool),
             start,
             end,
         },
-        Int(val) => IRExpression {
-            value: IRExpressionValue::Int(*val),
+        Int(val) => IRNode {
+            value: IRNodeValue::Int(*val),
             kind: ir_context.add_kind(IRType::Number(NumericType::Int64)),
             start,
             end,
         },
-        Float(val) => IRExpression {
-            value: IRExpressionValue::Float(*val),
+        Float(val) => IRNode {
+            value: IRNodeValue::Float(*val),
             kind: ir_context.add_kind(IRType::Number(NumericType::Float64)),
             start,
             end,
@@ -435,11 +440,11 @@ fn typecheck_expression(
                 TakeShared(_) => IRType::Shared(child.kind),
                 _ => unreachable!(),
             });
-            let child = ir_context.add_expression(child);
-            IRExpression {
+            let child = ir_context.add_node(child);
+            IRNode {
                 value: match value {
-                    TakeUnique(_) => IRExpressionValue::TakeUnique(child),
-                    TakeShared(_) => IRExpressionValue::TakeShared(child),
+                    TakeUnique(_) => IRNodeValue::TakeUnique(child),
+                    TakeShared(_) => IRNodeValue::TakeShared(child),
                     _ => unreachable!(),
                 },
                 kind,
@@ -467,11 +472,8 @@ fn typecheck_expression(
                 local_scope,
             )?;
             // TODO: if-else can return types
-            IRExpression {
-                value: IRExpressionValue::If(
-                    ir_context.add_expression(predicate),
-                    ir_context.add_expression(block),
-                ),
+            IRNode {
+                value: IRNodeValue::If(ir_context.add_node(predicate), ir_context.add_node(block)),
                 kind: ir_context.add_kind(IRType::Void),
                 start,
                 end,
@@ -496,10 +498,10 @@ fn typecheck_expression(
                 local_scope,
             )?;
             // TODO: if-else can return types
-            IRExpression {
-                value: IRExpressionValue::While(
-                    ir_context.add_expression(predicate),
-                    ir_context.add_expression(block),
+            IRNode {
+                value: IRNodeValue::While(
+                    ir_context.add_node(predicate),
+                    ir_context.add_node(block),
                 ),
                 kind: ir_context.add_kind(IRType::Void),
                 start,
@@ -515,11 +517,11 @@ fn typecheck_expression(
             )?;
             let ir_statements = ir_statements
                 .into_iter()
-                .map(|statement| ir_context.add_statement(statement))
+                .map(|statement| ir_context.add_node(statement))
                 .collect();
             // TODO: support returning last element if non-semicolon
-            IRExpression {
-                value: IRExpressionValue::Block(ir_statements),
+            IRNode {
+                value: IRNodeValue::Block(ir_statements),
                 kind: ir_context.add_kind(IRType::Void),
                 start,
                 end,
@@ -562,30 +564,30 @@ fn typecheck_expression(
             } else {
                 let left_type = left.kind;
                 if *op == BinOp::Add || *op == BinOp::Subtract {
-                    IRExpression {
-                        value: IRExpressionValue::BinaryNumeric(
+                    IRNode {
+                        value: IRNodeValue::BinaryNumeric(
                             match op {
                                 BinOp::Add => BinOpNumeric::Add,
                                 BinOp::Subtract => BinOpNumeric::Subtract,
                                 _ => unreachable!(),
                             },
-                            ir_context.add_expression(left),
-                            ir_context.add_expression(right),
+                            ir_context.add_node(left),
+                            ir_context.add_node(right),
                         ),
                         kind: left_type,
                         start,
                         end,
                     }
                 } else {
-                    IRExpression {
-                        value: IRExpressionValue::Comparison(
+                    IRNode {
+                        value: IRNodeValue::Comparison(
                             match op {
                                 BinOp::LessThan => BinOpComparison::LessThan,
                                 BinOp::GreaterThan => BinOpComparison::GreaterThan,
                                 _ => unreachable!(),
                             },
-                            ir_context.add_expression(left),
-                            ir_context.add_expression(right),
+                            ir_context.add_node(left),
+                            ir_context.add_node(right),
                         ),
                         kind: ir_context.add_kind(IRType::Bool),
                         start,
@@ -622,15 +624,15 @@ fn derefs_for_parity(ir_context: &IRContext, benchmark: &IRType, argument: &IRTy
 /**
  * Dereference the expression if it is a pointer type
  */
-fn maybe_dereference(expression: IRExpression, ir_context: &mut IRContext) -> IRExpression {
+fn maybe_dereference(expression: IRNode, ir_context: &mut IRContext) -> IRNode {
     let kind = ir_context.kind(expression.kind);
     if let IRType::Unique(inner) | IRType::Shared(inner) = kind {
         let kind = *inner;
         let start = expression.start;
         let end = expression.end;
-        let child = ir_context.add_expression(expression);
-        IRExpression {
-            value: IRExpressionValue::Dereference(child),
+        let child = ir_context.add_node(expression);
+        IRNode {
+            value: IRNodeValue::Dereference(child),
             kind,
             start,
             end,
@@ -640,7 +642,7 @@ fn maybe_dereference(expression: IRExpression, ir_context: &mut IRContext) -> IR
     }
 }
 
-fn is_pointer(expression: &IRExpression, ir_context: &IRContext) -> bool {
+fn is_pointer(expression: &IRNode, ir_context: &IRContext) -> bool {
     let kind = ir_context.kind(expression.kind);
 
     matches!(kind, IRType::Unique(_) | IRType::Shared(_))

@@ -2,10 +2,9 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::{
-        BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRExpressionValue, IRStatement,
-        IRStatementValue, IRType, NumericType,
+        BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRNode, IRNodeValue, IRType, NumericType,
     },
-    tree::{Node, NodePtr},
+    arena::ArenaIter,
 };
 use gimli::write::{EndianVec, Sections};
 use wasm_encoder::*;
@@ -31,7 +30,7 @@ const BASE_PTR: u32 = 1;
 const REFERENCE_PTR: u32 = 2;
 const HEAP_PTR: u32 = 3;
 
-pub fn emit(statements: Vec<IRStatement>, arena: &IRContext, with_debug: bool) -> Vec<u8> {
+pub fn emit(statements: Vec<IRNode>, arena: &IRContext, with_debug: bool) -> Vec<u8> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     let mut functions = FunctionSection::new();
@@ -45,7 +44,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext, with_debug: bool) -
 
     let mut current_function_idx = 0;
     for statement in statements.iter() {
-        if let IRStatementValue::FunctionDeclaration(decl) = &statement.value {
+        if let IRNodeValue::FunctionDeclaration(decl) = &statement.value {
             function_indices.insert(decl.name.clone(), current_function_idx);
             current_function_idx += 1;
         }
@@ -88,7 +87,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext, with_debug: bool) -
     let mut type_representations = Vec::new();
     let mut debug_representations = Vec::new();
     // TODO: deref programs fail to generate debug representations
-    for (idx, kind) in arena.kinds().enumerate() {
+    for (idx, kind) in arena.types.iter().enumerate() {
         let repr = represented_by(arena, idx);
         type_representations.push(repr);
         match kind {
@@ -124,7 +123,7 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext, with_debug: bool) -
     current_function_idx = 0;
 
     for statement in statements {
-        if let IRStatementValue::FunctionDeclaration(decl) = statement.value {
+        if let IRNodeValue::FunctionDeclaration(decl) = statement.value {
             emit_function_types(&decl, &type_representations, &mut types);
             functions.function(current_function_idx);
             // TODO: should we export function
@@ -255,13 +254,13 @@ fn analyze_locals(
         }
     }
 
-    for node in arena.iter_from(NodePtr::Expression(decl.body)) {
-        if let Node::Statement(IRStatement {
-            value: IRStatementValue::Declaration(name, expr),
+    for (_, node) in ArenaIter::iter_from(&arena.nodes, decl.body) {
+        if let IRNode {
+            value: IRNodeValue::Declaration(name, expr),
             ..
-        }) = node
+        } = node
         {
-            let expr = arena.expression(*expr);
+            let expr = arena.node(*expr);
             results
                 .name_to_offset
                 .insert(name.to_string(), results.stack_size);
@@ -323,7 +322,7 @@ fn emit_function_declaration(ctx: &mut EmitContext<'_>, stack_size: u32, decl: &
             &ctx.representations[param.kind],
         );
     }
-    emit_expression(ctx, decl.body);
+    emit_node(ctx, decl.body);
     // Set the stack pointer back to the base pointer
     ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
     ctx.add_instruction(Instruction::GlobalSet(STACK_PTR));
@@ -338,37 +337,10 @@ fn emit_function_declaration(ctx: &mut EmitContext<'_>, stack_size: u32, decl: &
     ctx.add_instruction(Instruction::End);
 }
 
-fn emit_statement<'a>(ctx: &mut EmitContext<'a>, statement: &IRStatement) {
-    match &statement.value {
-        IRStatementValue::FunctionDeclaration(_) => {
-            unreachable!(); // TODO
-        }
-        IRStatementValue::Expression(expr) => {
-            emit_expression(ctx, *expr);
-        }
-        IRStatementValue::Declaration(name, expr) => {
-            // TODO: should this just be an expect
-            let Some(offset) = ctx.stack_offsets.get(name.as_str())  else {
-                panic!("internal compiler error: unknown name {}", name);
-            };
-            emit_expression(ctx, *expr);
-            let expr = ctx.arena.expression(*expr);
-            ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
-            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
-            emit_assignment(
-                &mut ctx.instructions,
-                &mut ctx.wasm_locals,
-                *offset,
-                &ctx.representations[expr.kind],
-            );
-        }
-    }
-}
-
-fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
-    let expr = ctx.arena.expression(expr_index);
+fn emit_node(ctx: &mut EmitContext<'_>, expr_index: usize) {
+    let expr = ctx.arena.node(expr_index);
     match &expr.value {
-        IRExpressionValue::ArrayIndex(array, index) => {
+        IRNodeValue::ArrayIndex(array, index) => {
             // TODO: is this generally the correct way to handle things? is there a case where
             // there's a non-lvalue-array?
             // it almost seems like there needs to be auto-derefs at a higher IR level for stack
@@ -382,7 +354,7 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
             );
             // TODO: bound check instead of dropping length
             //ctx.add_instruction(Instruction::Drop);
-            emit_expression(ctx, *index);
+            emit_node(ctx, *index);
             let repr = &ctx.representations[expr.kind];
             ctx.add_instruction(Instruction::I32Const(size_of_repr_in_bytes(repr) as i32));
             ctx.add_instruction(Instruction::I32Mul);
@@ -390,11 +362,11 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
             ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(&mut ctx.instructions, 0, repr);
         }
-        IRExpressionValue::ArrayLiteralLength(value, length) => {
+        IRNodeValue::ArrayLiteralLength(value, length) => {
             // TODO: should this logic be lifted into the IR?
-            let repr = &ctx.representations[ctx.arena.expression(*value).kind];
+            let repr = &ctx.representations[ctx.arena.node(*value).kind];
             let size_of = size_of_repr_in_bytes(repr);
-            emit_expression(ctx, *value);
+            emit_node(ctx, *value);
             // Store the current heap value in the reference pointer, because that's
             // where we'll be storing the value
             ctx.add_instruction(Instruction::GlobalGet(HEAP_PTR));
@@ -421,7 +393,7 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
             ctx.add_instruction(Instruction::I32Add);
             ctx.add_instruction(Instruction::GlobalSet(HEAP_PTR));
         }
-        IRExpressionValue::LocalVariable(name) => {
+        IRNodeValue::LocalVariable(name) => {
             ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
             ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(
@@ -430,7 +402,7 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
                 &ctx.representations[expr.kind],
             );
         }
-        IRExpressionValue::Dot(..) => {
+        IRNodeValue::Dot(..) => {
             let offset = emit_lvalue(ctx, expr_index);
             ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(
@@ -439,9 +411,9 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
                 &ctx.representations[expr.kind],
             );
         }
-        IRExpressionValue::Assignment(lvalue, expr) => {
-            emit_expression(ctx, *expr);
-            let expr = ctx.arena.expression(*expr);
+        IRNodeValue::Assignment(lvalue, expr) => {
+            emit_node(ctx, *expr);
+            let expr = ctx.arena.node(*expr);
             let offset = emit_lvalue(ctx, *lvalue);
             ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_assignment(
@@ -451,53 +423,53 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
                 &ctx.representations[expr.kind],
             );
         }
-        IRExpressionValue::StructLiteral(fields) => {
+        IRNodeValue::StructLiteral(fields) => {
             let Representation::Struct { field_order, .. } = &ctx.representations[expr.kind] else {
                 panic!("expected representation of struct to be struct");
             };
             for field in field_order {
-                emit_expression(
+                emit_node(
                     ctx,
                     *fields.get(field).expect("expected struct fields to match"),
                 );
             }
         }
-        IRExpressionValue::Bool(val) => {
+        IRNodeValue::Bool(val) => {
             if *val {
                 ctx.add_instruction(Instruction::I32Const(1));
             } else {
                 ctx.add_instruction(Instruction::I32Const(0));
             }
         }
-        IRExpressionValue::Int(constant) => {
+        IRNodeValue::Int(constant) => {
             ctx.add_instruction(Instruction::I64Const(*constant));
         }
-        IRExpressionValue::Float(constant) => {
+        IRNodeValue::Float(constant) => {
             ctx.add_instruction(Instruction::F64Const(*constant));
         }
-        IRExpressionValue::Dereference(child) => {
-            emit_expression(ctx, *child);
+        IRNodeValue::Dereference(child) => {
+            emit_node(ctx, *child);
             ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(&mut ctx.instructions, 0, &ctx.representations[expr.kind]);
         }
-        IRExpressionValue::Call(function, arguments) => {
+        IRNodeValue::Call(function, arguments) => {
             for arg in arguments.iter() {
-                emit_expression(ctx, *arg);
+                emit_node(ctx, *arg);
             }
-            let function = ctx.arena.expression(*function);
+            let function = ctx.arena.node(*function);
             // TODO: be able to emit other functions?
             let called_function = match &function.value {
-                IRExpressionValue::LocalVariable(name) => name,
+                IRNodeValue::LocalVariable(name) => name,
                 _ => todo!(),
             };
             let function_index = ctx.functions.get(called_function).unwrap();
             ctx.add_instruction(Instruction::Call(*function_index));
         }
-        IRExpressionValue::TakeShared(child) | IRExpressionValue::TakeUnique(child) => {
-            let child = ctx.arena.expression(*child);
+        IRNodeValue::TakeShared(child) | IRNodeValue::TakeUnique(child) => {
+            let child = ctx.arena.node(*child);
             // TODO: support non-variable references?
             match &child.value {
-                IRExpressionValue::LocalVariable(name) => {
+                IRNodeValue::LocalVariable(name) => {
                     ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
                     let offset = ctx.stack_offsets.get(name.as_str()).unwrap();
                     ctx.add_instruction(Instruction::I32Const(*offset as i32));
@@ -506,9 +478,9 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
                 _ => todo!(),
             }
         }
-        IRExpressionValue::BinaryNumeric(operator, left, right) => {
-            emit_expression(ctx, *left);
-            emit_expression(ctx, *right);
+        IRNodeValue::BinaryNumeric(operator, left, right) => {
+            emit_node(ctx, *left);
+            emit_node(ctx, *right);
             match operator {
                 BinOpNumeric::Add => {
                     ctx.add_instruction(match ctx.arena.kind(expr.kind) {
@@ -530,10 +502,10 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
                 }
             }
         }
-        IRExpressionValue::Comparison(operator, left, right) => {
-            emit_expression(ctx, *left);
-            emit_expression(ctx, *right);
-            let left = ctx.arena.expression(*left);
+        IRNodeValue::Comparison(operator, left, right) => {
+            emit_node(ctx, *left);
+            emit_node(ctx, *right);
+            let left = ctx.arena.node(*left);
             match operator {
                 BinOpComparison::GreaterThan => {
                     ctx.add_instruction(match ctx.arena.kind(left.kind) {
@@ -551,25 +523,47 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
                 }
             }
         }
-        IRExpressionValue::If(predicate, block) => {
-            emit_expression(ctx, *predicate);
+        IRNodeValue::If(predicate, block) => {
+            emit_node(ctx, *predicate);
             ctx.add_instruction(Instruction::If(BlockType::Empty)); // TODO
-            emit_expression(ctx, *block);
+            emit_node(ctx, *block);
             ctx.add_instruction(Instruction::End); // TODO
         }
-        IRExpressionValue::While(predicate, block) => {
+        IRNodeValue::While(predicate, block) => {
             ctx.add_instruction(Instruction::Loop(BlockType::Empty));
-            emit_expression(ctx, *predicate);
+            emit_node(ctx, *predicate);
             ctx.add_instruction(Instruction::If(BlockType::Empty)); // TODO
-            emit_expression(ctx, *block);
+            emit_node(ctx, *block);
             ctx.add_instruction(Instruction::Br(1)); // TODO: does this work
             ctx.add_instruction(Instruction::End); // TODO
             ctx.add_instruction(Instruction::End);
         }
-        IRExpressionValue::Block(statements) => {
+        IRNodeValue::Block(statements) => {
             for statement in statements {
-                emit_statement(ctx, ctx.arena.statement(*statement));
+                emit_node(ctx, *statement);
             }
+        }
+        IRNodeValue::FunctionDeclaration(_) => {
+            unreachable!(); // TODO
+        }
+        IRNodeValue::Expression(expr) => {
+            emit_node(ctx, *expr);
+        }
+        IRNodeValue::Declaration(name, expr) => {
+            // TODO: should this just be an expect
+            let Some(offset) = ctx.stack_offsets.get(name.as_str())  else {
+                panic!("internal compiler error: unknown name {}", name);
+            };
+            emit_node(ctx, *expr);
+            let expr = ctx.arena.node(*expr);
+            ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
+            emit_assignment(
+                &mut ctx.instructions,
+                &mut ctx.wasm_locals,
+                *offset,
+                &ctx.representations[expr.kind],
+            );
         }
     }
 }
@@ -811,14 +805,14 @@ fn value_size(val: ValType) -> u32 {
 }
 
 fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) -> u32 {
-    let expr = ctx.arena.expression(lvalue);
+    let expr = ctx.arena.node(lvalue);
     match &expr.value {
-        IRExpressionValue::LocalVariable(name) => {
+        IRNodeValue::LocalVariable(name) => {
             ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
             // TODO: don't unwrap?
             *ctx.stack_offsets.get(name.as_str()).unwrap()
         }
-        IRExpressionValue::Dereference(child) => {
+        IRNodeValue::Dereference(child) => {
             let offset = emit_lvalue(ctx, *child) as u64;
             let mem_arg = MemArg {
                 offset,
@@ -829,8 +823,8 @@ fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) -> u32 {
 
             0
         }
-        IRExpressionValue::Dot(left, name) => {
-            let expr = ctx.arena.expression(*left);
+        IRNodeValue::Dot(left, name) => {
+            let expr = ctx.arena.node(*left);
             let Representation::Struct { field_offsets, .. } = &ctx.representations[expr.kind] else {
                 panic!("expected left hand of dot operator to be a struct");
             };
@@ -841,7 +835,7 @@ fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) -> u32 {
 
             offset + field_offset
         }
-        IRExpressionValue::ArrayIndex(array, index) => {
+        IRNodeValue::ArrayIndex(array, index) => {
             let offset = emit_lvalue(ctx, *array); // TODO
             ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(
@@ -849,7 +843,7 @@ fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) -> u32 {
                 offset,
                 &Representation::Scalar(ValType::I32),
             );
-            emit_expression(ctx, *index);
+            emit_node(ctx, *index);
             let repr = &ctx.representations[expr.kind];
             ctx.add_instruction(Instruction::I32Const(size_of_repr_in_bytes(repr) as i32));
             ctx.add_instruction(Instruction::I32Mul);

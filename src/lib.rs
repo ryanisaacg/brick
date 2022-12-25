@@ -10,11 +10,9 @@ pub mod backend;
 pub mod parser;
 pub mod provenance;
 pub mod tokenizer;
-pub mod tree;
 
 use analyzer::{
-    new_ir_context, resolve_type_names, scan_top_level, typecheck, ScanResults, Scope,
-    TypecheckError,
+    resolve_type_names, scan_top_level, typecheck, IRContext, ScanResults, Scope, TypecheckError,
 };
 use parser::ParseError;
 
@@ -32,7 +30,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
     let mut parsed_files = HashMap::new();
     let mut files_to_parse = vec![source_name.to_string()];
     let mut declarations = HashMap::new();
-    let mut ir_context = new_ir_context();
+    let mut ir_context = IRContext::new();
     // TODO: parallelize this?
     while let Some(file) = files_to_parse.pop() {
         let mut file_name = String::new();
@@ -78,7 +76,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
 pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u8>, CompileError> {
     let tokens = tokenizer::lex(source_name, contents.to_string());
     let (statements, arena) = parser::parse(tokens)?;
-    let mut ir_context = new_ir_context();
+    let mut ir_context = IRContext::new();
     // TODO: support imports?
     let ScanResults {
         imports: _,
