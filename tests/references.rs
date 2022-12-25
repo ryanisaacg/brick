@@ -4,10 +4,10 @@ use common::run_test;
 #[test]
 fn auto_dereference() {
     assert_eq!(
-        10i64,
+        10,
         run_test(
             r#"
-fn test(): i64 {
+fn test(): i32 {
     let a = 5
     let b = shared a
     let c = a + b
@@ -23,16 +23,16 @@ fn test(): i64 {
 #[test]
 fn mutation_auto_dereference() {
     assert_eq!(
-        6i64,
+        6,
         run_test(
             r#"
-fn test(): i64 {
+fn test(): i32 {
     let a = 5
     increment(unique a)
     a
 }
 
-fn increment(val: unique i64): void {
+fn increment(val: unique i32): void {
     val = val + 1
 }
 

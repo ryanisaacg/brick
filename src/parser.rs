@@ -452,7 +452,6 @@ fn expression_pratt(
     can_be_struct: bool,
 ) -> Result<AstNode, ParseError> {
     let Token { value, start, end } = token(source, provenance, "expected expression")?;
-    println!("{:?}", value);
     let mut left = match value {
         // TODO: should this be treated as a unary operator instead?
         TokenValue::Minus => {

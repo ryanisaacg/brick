@@ -6,9 +6,9 @@ use common::run_test;
 fn basic_array() {
     assert_eq!(
         5.0,
-        run_test(
+        run_test::<i32, f32>(
             r#"
-fn test(index: i32): f64 {
+fn test(index: i32): f32 {
     let values = [7.0; 3];
     values[index] = values[index] - 2.0;
     values[index - index] = 4.0;
@@ -26,21 +26,21 @@ fn test(index: i32): f64 {
 #[test]
 fn array_of_structs() {
     assert_eq!(
-        500i64,
+        500,
         run_test(
             r#"
 struct Point {
-    x: i64,
-    y: i64,
+    x: i32,
+    y: i32,
 }
 
-fn test(index: i32): i64 {
+fn test(): i32 {
     let values = [Point { x: 500, y: 2}; 3];
 
-    values[index].x
+    values[2].x
 }
 "#,
-            2,
+            (),
         )
         .unwrap()
     );
@@ -49,18 +49,18 @@ fn test(index: i32): i64 {
 #[test]
 fn multiple_arrays() {
     assert_eq!(
-        120i64,
+        120,
         run_test(
             r#"
-fn test(index: i32): i64 {
+fn test(): i32 {
     let initial = [120; 1];
     let last = [240; 1];
-    last[index] = 6;
+    last[0] = 6;
 
-    initial[index]
+    initial[0]
 }
 "#,
-            0,
+            (),
         )
         .unwrap()
     );
@@ -69,16 +69,16 @@ fn test(index: i32): i64 {
 #[test]
 fn two_d_array() {
     assert_eq!(
-        7i64,
+        7,
         run_test(
             r#"
-fn test(index: i32): i64 {
+fn test(): i32 {
     let two_array = [[7; 100]; 3];
 
-    two_array[index][index]
+    two_array[2][30]
 }
 "#,
-            0,
+            (),
         )
         .unwrap()
     );
@@ -87,16 +87,16 @@ fn test(index: i32): i64 {
 #[test]
 fn three_d_array() {
     assert_eq!(
-        300i64,
+        300,
         run_test(
             r#"
-fn test(index: i32): i64 {
+fn test(): i32 {
     let three_array = [[[300; 100]; 100]; 500];
 
-    three_array[index][index][index]
+    three_array[10][10][10]
 }
 "#,
-            0,
+            (),
         )
         .unwrap()
     );

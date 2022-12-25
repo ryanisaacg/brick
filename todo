@@ -2,9 +2,13 @@ parallel to "progress":
 - the rest of the math operators
 - the rest of the comparison operators
 - += style assignment operators
-- integer promotion
+- integer demotion
 - integer -> float promotion
 - float -> int casting
+- specify literals
+- specify variable types
+- real type inference
+- array bounds checking
 - blocks returning values
 - basic extern types
 - constant evaluation
@@ -20,9 +24,6 @@ parallel to "progress":
 - pretty compiler diagnostics
 
 data structures:
-- array types:
-    - integer promotion & demotion
-    - enforce array indices as i32
 - the ability to heap allocate values
 - sum types
 - parametrics polymorphism

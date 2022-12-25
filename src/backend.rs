@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::{
-        BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRNode, IRNodeValue, IRType, NumericType,
+        BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRNode, IRNodeValue, IRType,
+        NumericType, F32_KIND, I32_KIND,
     },
     arena::ArenaIter,
 };
@@ -442,10 +443,18 @@ fn emit_node(ctx: &mut EmitContext<'_>, expr_index: usize) {
             }
         }
         IRNodeValue::Int(constant) => {
-            ctx.add_instruction(Instruction::I64Const(*constant));
+            if expr.kind == I32_KIND {
+                ctx.add_instruction(Instruction::I32Const(*constant as i32));
+            } else {
+                ctx.add_instruction(Instruction::I64Const(*constant));
+            }
         }
         IRNodeValue::Float(constant) => {
-            ctx.add_instruction(Instruction::F64Const(*constant));
+            if expr.kind == F32_KIND {
+                ctx.add_instruction(Instruction::F32Const(*constant as f32));
+            } else {
+                ctx.add_instruction(Instruction::F64Const(*constant));
+            }
         }
         IRNodeValue::Dereference(child) => {
             emit_node(ctx, *child);
@@ -509,6 +518,8 @@ fn emit_node(ctx: &mut EmitContext<'_>, expr_index: usize) {
             match operator {
                 BinOpComparison::GreaterThan => {
                     ctx.add_instruction(match ctx.arena.kind(left.kind) {
+                        IRType::Number(NumericType::Int32) => Instruction::I32GtS,
+                        IRType::Number(NumericType::Float32) => Instruction::F32Gt,
                         IRType::Number(NumericType::Int64) => Instruction::I64GtS,
                         IRType::Number(NumericType::Float64) => Instruction::F64Gt,
                         _ => unreachable!(),
@@ -516,6 +527,8 @@ fn emit_node(ctx: &mut EmitContext<'_>, expr_index: usize) {
                 }
                 BinOpComparison::LessThan => {
                     ctx.add_instruction(match ctx.arena.kind(left.kind) {
+                        IRType::Number(NumericType::Int32) => Instruction::I32LtS,
+                        IRType::Number(NumericType::Float32) => Instruction::F32Lt,
                         IRType::Number(NumericType::Int64) => Instruction::I64LtS,
                         IRType::Number(NumericType::Float64) => Instruction::F64Lt,
                         _ => unreachable!(),
@@ -564,6 +577,33 @@ fn emit_node(ctx: &mut EmitContext<'_>, expr_index: usize) {
                 *offset,
                 &ctx.representations[expr.kind],
             );
+        }
+        IRNodeValue::Promote(inner) => {
+            emit_node(ctx, *inner);
+            let IRType::Number(promote_from) = ctx.arena.kind(ctx.arena.node(*inner).kind) else {
+                unreachable!("promotion from non-numeric type");
+            };
+            let IRType::Number(promote_to) = ctx.arena.kind(expr.kind) else {
+                unreachable!("promotion to non-numeric type");
+            };
+            match (promote_from, promote_to) {
+                (NumericType::Int32, NumericType::Int64) => {
+                    ctx.add_instruction(Instruction::I64ExtendI32S);
+                }
+                (NumericType::Int32, NumericType::Float32) => {
+                    ctx.add_instruction(Instruction::F32ConvertI32S);
+                }
+                (NumericType::Int32, NumericType::Float64) => {
+                    ctx.add_instruction(Instruction::F64ConvertI32S);
+                }
+                (NumericType::Int64, NumericType::Float64) => {
+                    ctx.add_instruction(Instruction::F64ConvertI64S);
+                }
+                (NumericType::Float32, NumericType::Float64) => {
+                    ctx.add_instruction(Instruction::F64PromoteF32);
+                }
+                (a, b) => unreachable!("illegal promotion from {:?} to {:?}", a, b),
+            }
         }
     }
 }

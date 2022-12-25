@@ -4,10 +4,10 @@ use common::run_test;
 #[test]
 fn arithmetic() {
     assert_eq!(
-        2i64,
+        2,
         run_test(
             r#"
-fn test(): i64 {
+fn test(): i32 {
     1 + 2 + 3 - 4
 }"#,
             ()
@@ -19,10 +19,10 @@ fn test(): i64 {
 #[test]
 fn assignment() {
     assert_eq!(
-        3i64,
+        3,
         run_test(
             r#"
-fn test(): i64 {
+fn test(): i32 {
     let a = 0;
     a = 3;
     a
@@ -37,10 +37,10 @@ fn test(): i64 {
 #[test]
 fn branching() {
     assert_eq!(
-        6i64,
+        6,
         run_test(
             r#"
-fn test(): i64 {
+fn test(): i32 {
     let a = 0;
     if a < 2 {
         a = 6;
@@ -60,10 +60,10 @@ fn test(): i64 {
 #[test]
 fn looping() {
     assert_eq!(
-        5i64,
+        5,
         run_test(
             r#"
-fn test(): i64 {
+fn test(): i32 {
     let a = 0;
     while a < 5 {
         a = a + 1;
@@ -80,10 +80,10 @@ fn test(): i64 {
 #[test]
 fn floating_point() {
     assert_eq!(
-        2.5f64,
-        run_test(
+        2.5,
+        run_test::<(), f32>(
             r#"
-fn test(): f64 {
+fn test(): f32 {
     1.0 + 1.5
 }"#,
             ()
@@ -95,10 +95,10 @@ fn test(): f64 {
 #[test]
 fn multiple_vars() {
     assert_eq!(
-        10i64,
+        10,
         run_test(
             r#"
-fn test(): i64 {
+fn test(): i32 {
     let a = 1;
     let b = a + 1;
     let c = b + 1;

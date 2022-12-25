@@ -198,10 +198,7 @@ fn typecheck_expression(
                 return Err(TypecheckError::IllegalNonArrayIndex(left_kind.clone(), left.end));
             };
             let right_kind = ir_context.kind(right.kind);
-            if !matches!(
-                right_kind,
-                IRType::Number(NumericType::Int32 | NumericType::Int64)
-            ) {
+            if !matches!(right_kind, IRType::Number(NumericType::Int32)) {
                 return Err(TypecheckError::IllegalNonNumericIndex(
                     right_kind.clone(),
                     right.end,
@@ -229,7 +226,7 @@ fn typecheck_expression(
                 let type_fields = type_fields.clone();
                 let mut expr_fields = HashMap::new();
                 let mut missing_fields = Vec::new();
-                for (field, expected_type) in type_fields.iter() {
+                for (field, expected_type_idx) in type_fields.iter() {
                     if let Some(provided_value) = fields.get(field) {
                         let mut provided_value = typecheck_expression(
                             &parse_context[*provided_value],
@@ -237,12 +234,14 @@ fn typecheck_expression(
                             ir_context,
                             local_scope,
                         )?;
-                        let expected_type = ir_context.kind(*expected_type);
+                        let expected_type = ir_context.kind(*expected_type_idx);
                         let provided_type = ir_context.kind(provided_value.kind);
                         let derefs = derefs_for_parity(ir_context, expected_type, provided_type);
                         for _ in 0..derefs {
                             provided_value = maybe_dereference(provided_value, ir_context);
                         }
+                        provided_value =
+                            maybe_promote(ir_context, provided_value, *expected_type_idx);
                         let provided_value = ir_context.add_node(provided_value);
                         expr_fields.insert(field.clone(), provided_value);
                     } else {
@@ -324,6 +323,7 @@ fn typecheck_expression(
             for _ in 0..r_derefs_required {
                 rvalue = maybe_dereference(rvalue, ir_context);
             }
+            rvalue = maybe_promote(ir_context, rvalue, lvalue.kind);
 
             let l_kind = ir_context.kind(lvalue.kind);
             let r_kind = ir_context.kind(rvalue.kind);
@@ -377,6 +377,7 @@ fn typecheck_expression(
                     for _ in 0..derefs_required {
                         argument = maybe_dereference(argument, ir_context);
                     }
+                    argument = maybe_promote(ir_context, argument, parameter_types[index]);
                     let argument_kind = ir_context.kind(argument.kind);
                     let parameter_kind = ir_context.kind(parameter_types[index]);
                     if are_types_equal(ir_context, argument_kind, parameter_kind) {
@@ -420,15 +421,16 @@ fn typecheck_expression(
             start,
             end,
         },
+        // TODO: support bigger-than-32-bit literals
         Int(val) => IRNode {
             value: IRNodeValue::Int(*val),
-            kind: ir_context.add_kind(IRType::Number(NumericType::Int64)),
+            kind: I32_KIND,
             start,
             end,
         },
         Float(val) => IRNode {
             value: IRNodeValue::Float(*val),
-            kind: ir_context.add_kind(IRType::Number(NumericType::Float64)),
+            kind: F32_KIND,
             start,
             end,
         },
@@ -550,49 +552,60 @@ fn typecheck_expression(
             while is_pointer(&right, ir_context) {
                 right = maybe_dereference(right, ir_context);
             }
-            let left_kind = ir_context.kind(left.kind).clone();
-            let right_kind = ir_context.kind(right.kind).clone();
-            if left_kind != right_kind
-                || left_kind != IRType::Number(NumericType::Int64)
-                    && left_kind != IRType::Number(NumericType::Float64)
-                    && left_kind != IRType::Number(NumericType::Int32)
-                    && left_kind != IRType::Number(NumericType::Float32)
-            {
-                return Err(TypecheckError::BinaryOperandMismatch(
-                    left_kind, right_kind, start,
-                ));
+            let left_kind = ir_context.kind(left.kind);
+            let IRType::Number(left_num) = left_kind else {
+                return Err(TypecheckError::BinaryNonNumericOperand(left_kind.clone(), left.start));
+            };
+            let right_kind = ir_context.kind(right.kind);
+            let IRType::Number(right_num) = right_kind else {
+                return Err(TypecheckError::BinaryNonNumericOperand(right_kind.clone(), right.start));
+            };
+            match which_wider(*left_num, *right_num) {
+                Wider::Left => {
+                    right = maybe_promote(ir_context, right, left.kind);
+                }
+                Wider::Right => {
+                    left = maybe_promote(ir_context, left, right.kind);
+                }
+                Wider::Neither => {
+                    return Err(TypecheckError::BinaryOperandMismatch(
+                        left_kind.clone(),
+                        right_kind.clone(),
+                        start,
+                    ));
+                }
+                Wider::Equal => {}
+            }
+            let left_type = left.kind;
+            if *op == BinOp::Add || *op == BinOp::Subtract {
+                IRNode {
+                    value: IRNodeValue::BinaryNumeric(
+                        match op {
+                            BinOp::Add => BinOpNumeric::Add,
+                            BinOp::Subtract => BinOpNumeric::Subtract,
+                            _ => unreachable!(),
+                        },
+                        ir_context.add_node(left),
+                        ir_context.add_node(right),
+                    ),
+                    kind: left_type,
+                    start,
+                    end,
+                }
             } else {
-                let left_type = left.kind;
-                if *op == BinOp::Add || *op == BinOp::Subtract {
-                    IRNode {
-                        value: IRNodeValue::BinaryNumeric(
-                            match op {
-                                BinOp::Add => BinOpNumeric::Add,
-                                BinOp::Subtract => BinOpNumeric::Subtract,
-                                _ => unreachable!(),
-                            },
-                            ir_context.add_node(left),
-                            ir_context.add_node(right),
-                        ),
-                        kind: left_type,
-                        start,
-                        end,
-                    }
-                } else {
-                    IRNode {
-                        value: IRNodeValue::Comparison(
-                            match op {
-                                BinOp::LessThan => BinOpComparison::LessThan,
-                                BinOp::GreaterThan => BinOpComparison::GreaterThan,
-                                _ => unreachable!(),
-                            },
-                            ir_context.add_node(left),
-                            ir_context.add_node(right),
-                        ),
-                        kind: ir_context.add_kind(IRType::Bool),
-                        start,
-                        end,
-                    }
+                IRNode {
+                    value: IRNodeValue::Comparison(
+                        match op {
+                            BinOp::LessThan => BinOpComparison::LessThan,
+                            BinOp::GreaterThan => BinOpComparison::GreaterThan,
+                            _ => unreachable!(),
+                        },
+                        ir_context.add_node(left),
+                        ir_context.add_node(right),
+                    ),
+                    kind: ir_context.add_kind(IRType::Bool),
+                    start,
+                    end,
                 }
             }
         }
@@ -639,6 +652,67 @@ fn maybe_dereference(expression: IRNode, ir_context: &mut IRContext) -> IRNode {
         }
     } else {
         expression
+    }
+}
+
+/**
+ * Promote the numeric type if it would be required
+ */
+fn maybe_promote(ir_context: &mut IRContext, expression: IRNode, target_kind: usize) -> IRNode {
+    let kind = ir_context.kind(expression.kind);
+    let IRType::Number(target) = ir_context.kind(target_kind) else {
+        return expression;
+    };
+    if let IRType::Number(number) = kind {
+        if which_wider(*number, *target) == Wider::Right {
+            // TODO: only promote
+            let start = expression.start;
+            let end = expression.end;
+            let child = ir_context.add_node(expression);
+            return IRNode {
+                value: IRNodeValue::Promote(child),
+                kind: target_kind,
+                start,
+                end,
+            };
+        }
+    }
+
+    expression
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Wider {
+    Left,
+    Right,
+    Equal,
+    Neither,
+}
+
+fn which_wider(a: NumericType, b: NumericType) -> Wider {
+    use NumericType::*;
+    match (a, b) {
+        (Int32, Int64) => Wider::Right,
+        (Float32, Float64) => Wider::Right,
+
+        (Int32, Float32) => Wider::Right,
+        (Int32, Float64) => Wider::Right,
+        (Int64, Float64) => Wider::Right,
+
+        (Int64, Int32) => Wider::Left,
+        (Float64, Float32) => Wider::Left,
+
+        (Float32, Int32) => Wider::Left,
+        (Float64, Int32) => Wider::Left,
+        (Float64, Int64) => Wider::Left,
+
+        (Float32, Int64) => Wider::Neither,
+        (Int64, Float32) => Wider::Neither,
+
+        (Int32, Int32) => Wider::Equal,
+        (Int64, Int64) => Wider::Equal,
+        (Float32, Float32) => Wider::Equal,
+        (Float64, Float64) => Wider::Equal,
     }
 }
 

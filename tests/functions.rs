@@ -41,10 +41,10 @@ fn difference(a: i64, b: i64): i64 {
 #[test]
 fn call_and_return() {
     assert_eq!(
-        2i64,
+        2,
         run_test(
             r#"
-fn test(): i64 {
+fn test(): i32 {
     let a = 2
     let b = difference(2, 3)
     a
@@ -84,16 +84,16 @@ fn test(): i64 {
 #[test]
 fn return_values() {
     assert_eq!(
-        5i64,
+        5,
         run_test(
             r#"
-fn test(): i64 {
+fn test(): i32 {
     let result = 9000
     result = returns_five()
     result
 }
 
-fn returns_five(): i64 {
+fn returns_five(): i32 {
     let x = 5
     x
 }
@@ -104,16 +104,16 @@ fn returns_five(): i64 {
     );
 }
 
-fn recursive_sum(n: i64) -> i64 {
+fn recursive_sum(n: i32) -> i32 {
     run_test(
         r#"
-fn test(n: i64): i64 {
+fn test(n: i32): i32 {
     let result = 9000
     result = sum(n)
     result
 }
 
-fn sum(n: i64): i64 {
+fn sum(n: i32): i32 {
     let result = 0
     if n > 0 {
         result = 1
@@ -132,14 +132,14 @@ fn test_recursive_sum() {
     assert_eq!(recursive_sum(4), 10);
 }
 
-fn fibonacci(n: i64) -> i64 {
+fn fibonacci(n: i32) -> i32 {
     run_test(
         r#"
-fn test(n: i64): i64 {
+fn test(n: i32): i32 {
     fib(n)
 }
 
-fn fib(n: i64): i64 {
+fn fib(n: i32): i32 {
     let result = 1
     if n > 1 {
         result = fib(n - 1) + fib(n - 2)
