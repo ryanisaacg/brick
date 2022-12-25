@@ -175,7 +175,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     while let Some(candidate) = self.source.peek() {
                         match candidate {
                             digit @ '0'..='9' => {
-                                number = number * 10 - (*digit as u32 - '0' as u32) as u64;
+                                number = number * 10 + (*digit as u32 - '0' as u32) as u64;
                             }
                             '_' => {}
                             _ => break,
