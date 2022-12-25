@@ -5,6 +5,6 @@ WebAssembly.instantiateStreaming(fetch(url)).then((result) => {
   const memory = result.instance.exports.memory;
 
   // Do some analysis here
-  const values = new Uint32Array(result.instance.exports.memory.buffer);
-  window.brick_mem = values;
+  window.brick_mem = () =>
+    new Uint32Array(result.instance.exports.memory.buffer);
 });
