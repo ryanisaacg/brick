@@ -5,6 +5,7 @@ use std::{collections::HashMap, fs, io};
 use thiserror::Error;
 
 pub mod analyzer;
+pub mod arena;
 pub mod backend;
 pub mod parser;
 pub mod provenance;

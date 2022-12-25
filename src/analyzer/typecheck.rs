@@ -2,10 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::{BinOpComparison, BinOpNumeric, IRExpression, IRExpressionValue, NumericType},
-    parser::{
-        AstExpression, AstExpressionValue, AstStatement, AstStatementValue, AstType, AstTypeValue,
-        BinOp, ParseTree,
-    },
+    parser::{AstNode, AstNodeValue, BinOp},
 };
 
 use super::{
@@ -18,7 +15,7 @@ use super::{
 pub fn typecheck(
     statements: impl Iterator<Item = usize>,
     ir_context: &mut IRContext,
-    parse_context: &ParseTree,
+    parse_context: &[AstNode],
     scopes: &[Scope],
 ) -> Result<Vec<IRStatement>, TypecheckError> {
     // TODO: cons cell instead?
@@ -30,31 +27,31 @@ pub fn typecheck(
 
     let statements = statements
         .map(|statement| {
-            let AstStatement { value, start, end } = parse_context.statement(statement);
+            let AstNode { value, start, end } = &parse_context[statement];
             let start = *start;
             let end = *end;
 
             let value = match value {
-                AstStatementValue::Import(_) => {
+                AstNodeValue::Import(_) => {
                     // TODO: disallow inside functions?
                     return Ok(None);
                 }
-                AstStatementValue::StructDeclaration { .. } => {
+                AstNodeValue::StructDeclaration { .. } => {
                     // TODO: disallow inside functions?
                     return Ok(None);
                 }
-                AstStatementValue::Expression(expr) => {
+                AstNodeValue::Expression(expr) => {
                     let expr = typecheck_expression(
-                        parse_context.expression(*expr),
+                        &parse_context[*expr],
                         parse_context,
                         ir_context,
                         &local_scope[..],
                     )?;
                     IRStatementValue::Expression(ir_context.add_expression(expr))
                 }
-                AstStatementValue::Declaration(name, expr) => {
+                AstNodeValue::Declaration(name, expr) => {
                     let expr = typecheck_expression(
-                        parse_context.expression(*expr),
+                        &parse_context[*expr],
                         parse_context,
                         ir_context,
                         &local_scope[..],
@@ -64,7 +61,7 @@ pub fn typecheck(
                         .insert(name.to_string(), expr.kind);
                     IRStatementValue::Declaration(name.clone(), ir_context.add_expression(expr))
                 }
-                AstStatementValue::FunctionDeclaration {
+                AstNodeValue::FunctionDeclaration {
                     name,
                     params,
                     returns,
@@ -74,7 +71,7 @@ pub fn typecheck(
                         .iter()
                         .map(|param| {
                             let kind = resolve_ast_type(
-                                parse_context.kind(param.kind),
+                                &parse_context[param.kind],
                                 parse_context,
                                 ir_context,
                                 &local_scope[..],
@@ -90,7 +87,7 @@ pub fn typecheck(
                         .as_ref()
                         .map(|type_name| {
                             resolve_ast_type(
-                                parse_context.kind(*type_name),
+                                &parse_context[*type_name],
                                 parse_context,
                                 ir_context,
                                 &local_scope[..],
@@ -117,7 +114,7 @@ pub fn typecheck(
                         },
                     );
                     let body = typecheck_expression(
-                        parse_context.expression(*body),
+                        &parse_context[*body],
                         parse_context,
                         ir_context,
                         &local_scope[..],
@@ -131,6 +128,7 @@ pub fn typecheck(
                         body: ir_context.add_expression(body),
                     })
                 }
+                _ => todo!("handle loose statements"),
             };
 
             Ok(Some(IRStatement { value, start, end }))
@@ -143,13 +141,13 @@ pub fn typecheck(
 
 // TODO: allow accessing the local environment
 fn typecheck_expression(
-    expression: &AstExpression,
-    parse_context: &ParseTree,
+    expression: &AstNode,
+    parse_context: &[AstNode],
     ir_context: &mut IRContext,
     local_scope: &[Scope],
 ) -> Result<IRExpression, TypecheckError> {
-    use AstExpressionValue::*;
-    let AstExpression { value, start, end } = expression;
+    use AstNodeValue::*;
+    let AstNode { value, start, end } = expression;
     let start = *start;
     let end = *end;
 
@@ -157,7 +155,7 @@ fn typecheck_expression(
     Ok(match value {
         ArrayLiteralLength(child, length) => {
             let child = typecheck_expression(
-                parse_context.expression(*child),
+                &parse_context[*child],
                 parse_context,
                 ir_context,
                 local_scope,
@@ -179,13 +177,13 @@ fn typecheck_expression(
         BinExpr(BinOp::Index, left, right) => {
             // TODO: apply auto-dereferencing
             let left = typecheck_expression(
-                parse_context.expression(*left),
+                &parse_context[*left],
                 parse_context,
                 ir_context,
                 local_scope,
             )?;
             let right = typecheck_expression(
-                parse_context.expression(*right),
+                &parse_context[*right],
                 parse_context,
                 ir_context,
                 local_scope,
@@ -229,7 +227,7 @@ fn typecheck_expression(
                 for (field, expected_type) in type_fields.iter() {
                     if let Some(provided_value) = fields.get(field) {
                         let mut provided_value = typecheck_expression(
-                            parse_context.expression(*provided_value),
+                            &parse_context[*provided_value],
                             parse_context,
                             ir_context,
                             local_scope,
@@ -266,7 +264,7 @@ fn typecheck_expression(
         }
         BinExpr(BinOp::Dot, left, right) => {
             let mut left = typecheck_expression(
-                parse_context.expression(*left),
+                &parse_context[*left],
                 parse_context,
                 ir_context,
                 local_scope,
@@ -278,7 +276,7 @@ fn typecheck_expression(
             let IRType::Struct { fields } = left_kind else {
                 return Err(TypecheckError::IllegalLeftDotOperand(left_kind.clone(), start));
             };
-            let AstExpression{ value: Name(name), .. } = parse_context.expression(*right) else {
+            let AstNode{ value: Name(name), .. } = &parse_context[*right] else {
                 return Err(TypecheckError::IllegalRightHandDotOperand(start));
             };
             let Some(field) = fields.get(name) else {
@@ -295,16 +293,14 @@ fn typecheck_expression(
         }
         Assignment(lvalue, rvalue) => {
             // TODO: provide more error diagnostics
-            let mut lvalue = match parse_context.expression(*lvalue) {
-                expr @ AstExpression {
+            let mut lvalue = match &parse_context[*lvalue] {
+                expr @ AstNode {
                     value: Name(_) | BinExpr(BinOp::Dot, _, _) | BinExpr(BinOp::Index, _, _),
                     ..
                 } => typecheck_expression(expr, parse_context, ir_context, local_scope)?,
-                AstExpression { start, .. } => {
-                    return Err(TypecheckError::IllegalLeftHandValue(*start))
-                }
+                AstNode { start, .. } => return Err(TypecheckError::IllegalLeftHandValue(*start)),
             };
-            let rvalue = parse_context.expression(*rvalue);
+            let rvalue = &parse_context[*rvalue];
             let mut rvalue = typecheck_expression(rvalue, parse_context, ir_context, local_scope)?;
 
             let l_derefs_required = derefs_for_parity(
@@ -344,7 +340,7 @@ fn typecheck_expression(
             }
         }
         Call(function, arguments) => {
-            let expr = parse_context.expression(*function);
+            let expr = &parse_context[*function];
             let function = typecheck_expression(expr, parse_context, ir_context, local_scope)?;
             let (parameter_types, returns) = match ir_context.kind(function.kind).clone() {
                 IRType::Function {
@@ -366,7 +362,7 @@ fn typecheck_expression(
                 .iter()
                 .enumerate()
                 .map(|(index, argument)| {
-                    let argument = parse_context.expression(*argument);
+                    let argument = &parse_context[*argument];
                     let mut argument =
                         typecheck_expression(argument, parse_context, ir_context, local_scope)?;
                     let argument_kind = ir_context.kind(argument.kind);
@@ -432,7 +428,7 @@ fn typecheck_expression(
             end,
         },
         TakeUnique(child) | TakeShared(child) => {
-            let child = parse_context.expression(*child);
+            let child = &parse_context[*child];
             let child = typecheck_expression(child, parse_context, ir_context, local_scope)?;
             let kind = ir_context.add_kind(match value {
                 TakeUnique(_) => IRType::Unique(child.kind),
@@ -453,7 +449,7 @@ fn typecheck_expression(
         }
         If(predicate, block) => {
             let mut predicate = typecheck_expression(
-                parse_context.expression(*predicate),
+                &parse_context[*predicate],
                 parse_context,
                 ir_context,
                 local_scope,
@@ -465,7 +461,7 @@ fn typecheck_expression(
                 todo!(); // compiler diagnostic
             }
             let block = typecheck_expression(
-                parse_context.expression(*block),
+                &parse_context[*block],
                 parse_context,
                 ir_context,
                 local_scope,
@@ -484,7 +480,7 @@ fn typecheck_expression(
         // TODO
         While(predicate, block) => {
             let predicate = typecheck_expression(
-                parse_context.expression(*predicate),
+                &parse_context[*predicate],
                 parse_context,
                 ir_context,
                 local_scope,
@@ -494,7 +490,7 @@ fn typecheck_expression(
                 todo!(); // compiler diagnostic
             }
             let block = typecheck_expression(
-                parse_context.expression(*block),
+                &parse_context[*block],
                 parse_context,
                 ir_context,
                 local_scope,
@@ -535,13 +531,13 @@ fn typecheck_expression(
             right,
         ) => {
             let mut left = typecheck_expression(
-                parse_context.expression(*left),
+                &parse_context[*left],
                 parse_context,
                 ir_context,
                 local_scope,
             )?;
             let mut right = typecheck_expression(
-                parse_context.expression(*right),
+                &parse_context[*right],
                 parse_context,
                 ir_context,
                 local_scope,
@@ -598,6 +594,7 @@ fn typecheck_expression(
                 }
             }
         }
+        _ => todo!("nested top-level declarations"),
     })
 }
 
@@ -650,13 +647,13 @@ fn is_pointer(expression: &IRExpression, ir_context: &IRContext) -> bool {
 }
 
 fn resolve_ast_type(
-    ast_type: &AstType,
-    parse_context: &ParseTree,
+    ast_type: &AstNode,
+    parse_context: &[AstNode],
     ir_context: &mut IRContext,
     scope: &[Scope],
 ) -> Result<usize, TypecheckError> {
     Ok(match &ast_type.value {
-        AstTypeValue::Name(string) => match string.as_str() {
+        AstNodeValue::Name(string) => match string.as_str() {
             "void" => VOID_KIND,
             "bool" => BOOL_KIND,
             "i64" => I64_KIND,
@@ -666,19 +663,20 @@ fn resolve_ast_type(
             name => resolve(scope, name)
                 .ok_or_else(|| TypecheckError::UnknownName(name.to_string(), ast_type.start))?,
         },
-        pointer @ (AstTypeValue::Unique(inner)
-        | AstTypeValue::Shared(inner)
-        | AstTypeValue::Array(inner)) => {
-            let inner = parse_context.kind(*inner);
+        pointer @ (AstNodeValue::Unique(inner)
+        | AstNodeValue::Shared(inner)
+        | AstNodeValue::Array(inner)) => {
+            let inner = &parse_context[*inner];
             let inner = resolve_ast_type(inner, parse_context, ir_context, scope)?;
 
             match pointer {
-                AstTypeValue::Unique(_) => ir_context.add_kind(IRType::Unique(inner)),
-                AstTypeValue::Shared(_) => ir_context.add_kind(IRType::Shared(inner)),
-                AstTypeValue::Array(_) => ir_context.add_kind(IRType::Array(inner)),
+                AstNodeValue::Unique(_) => ir_context.add_kind(IRType::Unique(inner)),
+                AstNodeValue::Shared(_) => ir_context.add_kind(IRType::Shared(inner)),
+                AstNodeValue::Array(_) => ir_context.add_kind(IRType::Array(inner)),
                 _ => unreachable!(),
             }
         }
+        _ => todo!("ast type"),
     })
 }
 

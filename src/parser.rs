@@ -3,20 +3,27 @@ use std::{collections::HashMap, iter::Peekable};
 use thiserror::Error;
 
 use crate::{
+    arena::ArenaNode,
     provenance::Provenance,
     tokenizer::{LexError, Token, TokenValue},
-    tree::{Node, NodePtr, SourceTree},
 };
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct AstStatement {
-    pub value: AstStatementValue,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NameAndType {
+    pub name: String,
+    pub kind: usize,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct AstNode {
+    pub value: AstNodeValue,
     pub start: Provenance,
     pub end: Provenance,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum AstStatementValue {
+#[derive(Clone, Debug, PartialEq)]
+pub enum AstNodeValue {
+    // Statements
     FunctionDeclaration {
         name: String,
         params: Vec<NameAndType>,
@@ -28,27 +35,13 @@ pub enum AstStatementValue {
         fields: Vec<NameAndType>,
     },
     Declaration(String, usize),
-    Expression(usize),
+    Expression(usize), // TODO: should I just remove this wrapper?
     Import(String),
-}
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct NameAndType {
-    pub name: String,
-    pub kind: usize,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct AstExpression {
-    pub value: AstExpressionValue,
-    pub start: Provenance,
-    pub end: Provenance,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum AstExpressionValue {
-    Assignment(usize, usize),
     Name(String),
+
+    // Expressions
+    Assignment(usize, usize),
     Int(i64),
     Float(f64),
     Bool(bool),
@@ -64,23 +57,56 @@ pub enum AstExpressionValue {
     },
     ArrayLiteral(Vec<usize>),
     ArrayLiteralLength(usize, u64),
-    /// Importantly, Block references statements, not expressions!
     Block(Vec<usize>),
-}
 
-#[derive(Debug, Hash, PartialEq, Eq)]
-pub struct AstType {
-    pub value: AstTypeValue,
-    pub start: Provenance,
-    pub end: Provenance,
-}
-
-#[derive(Debug, Hash, PartialEq, Eq)]
-pub enum AstTypeValue {
-    Name(String),
+    // Types
     Unique(usize),
     Shared(usize),
     Array(usize),
+}
+
+impl ArenaNode for AstNode {
+    fn write_children(&self, children: &mut Vec<usize>) {
+        use AstNodeValue::*;
+
+        match &self.value {
+            Declaration(_, child)
+            | Expression(child)
+            | FunctionDeclaration { body: child, .. }
+            | TakeShared(child)
+            | TakeUnique(child)
+            | ArrayLiteralLength(child, _)
+            | Unique(child)
+            | Shared(child)
+            | Array(child) => {
+                children.push(*child);
+            }
+            Assignment(left, right)
+            | BinExpr(_, left, right)
+            | If(left, right)
+            | While(left, right) => {
+                children.push(*right);
+                children.push(*left);
+            }
+            ArrayLiteral(values) | Block(values) => {
+                for value in values {
+                    children.push(*value);
+                }
+            }
+            StructLiteral { fields, .. } => {
+                for expression in fields.values() {
+                    children.push(*expression);
+                }
+            }
+            Call(function, parameters) => {
+                children.push(*function);
+                for expression in parameters {
+                    children.push(*expression);
+                }
+            }
+            Name(_) | Import(_) | StructDeclaration { .. } | Int(_) | Float(_) | Bool(_) => {}
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -108,31 +134,35 @@ pub enum ParseError {
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, LexError>>;
 type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
-pub type ParseTree = SourceTree<AstStatement, AstExpression, AstType>;
-
 pub fn parse(
     mut source: impl Iterator<Item = Result<Token, LexError>>,
-) -> Result<(Vec<usize>, ParseTree), ParseError> {
+) -> Result<(Vec<usize>, Vec<AstNode>), ParseError> {
     let mut source = (&mut source as TokenIterInner<'_>).peekable();
-    let mut context = ParseTree::new(Box::new(traverse));
+    let mut context = Vec::new();
 
-    let mut statements = Vec::new();
+    let mut top_level = Vec::new();
 
     while let Some(lexeme) = peek_token_optional(&mut source)? {
         let start = lexeme.start;
         let statement = statement(&mut source, &mut context, start)?;
-        let statement = context.add_statement(statement);
-        statements.push(statement);
+        top_level.push(add_node(&mut context, statement));
     }
 
-    Ok((statements, context))
+    Ok((top_level, context))
+}
+
+fn add_node(context: &mut Vec<AstNode>, node: AstNode) -> usize {
+    let idx = context.len();
+    context.push(node);
+
+    idx
 }
 
 fn statement(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     start: Provenance,
-) -> Result<AstStatement, ParseError> {
+) -> Result<AstNode, ParseError> {
     let statement = match peek_token(source, start, "expected let, fn, or expression")? {
         Token {
             value:
@@ -158,8 +188,8 @@ fn statement(
             let expr = expression(source, context, start)?;
             let start = expr.start;
             let end = expr.end;
-            AstStatement {
-                value: AstStatementValue::Expression(context.add_expression(expr)),
+            AstNode {
+                value: AstNodeValue::Expression(add_node(context, expr)),
                 start,
                 end,
             }
@@ -177,9 +207,9 @@ fn statement(
 
 fn struct_declaration(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     start: Provenance,
-) -> Result<AstStatement, ParseError> {
+) -> Result<AstNode, ParseError> {
     let (name, _, end) = word(source, start, "expected name after 'struct'")?;
     assert_next_lexeme_eq(
         source.next(),
@@ -201,7 +231,7 @@ fn struct_declaration(
         let (name, end, type_hint) =
             name_and_type_hint(source, context, pos, "expected parameter")?;
         let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
-        let kind = context.add_kind(kind);
+        let kind = add_node(context, kind);
         pos = end;
         fields.push(NameAndType { name, kind });
 
@@ -215,8 +245,8 @@ fn struct_declaration(
         pos = end;
     }
 
-    Ok(AstStatement {
-        value: AstStatementValue::StructDeclaration { name, fields },
+    Ok(AstNode {
+        value: AstNodeValue::StructDeclaration { name, fields },
         start,
         end,
     })
@@ -224,9 +254,9 @@ fn struct_declaration(
 
 fn function_declaration(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     start: Provenance,
-) -> Result<AstStatement, ParseError> {
+) -> Result<AstNode, ParseError> {
     let (name, _, end) = word(source, start, "expected name after 'fn'")?;
 
     let mut pos = assert_next_lexeme_eq(
@@ -249,7 +279,7 @@ fn function_declaration(
                 let (name, end, type_hint) =
                     name_and_type_hint(source, context, pos, "expected parameter")?;
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(end))?;
-                let kind = context.add_kind(kind);
+                let kind = add_node(context, kind);
                 pos = end;
                 params.push(NameAndType { name, kind });
             }
@@ -270,7 +300,7 @@ fn function_declaration(
         let start = *start;
         source.next();
         let kind = type_expression(source, context, start)?;
-        let kind = context.add_kind(kind);
+        let kind = add_node(context, kind);
         Some(kind)
     } else {
         None
@@ -278,26 +308,23 @@ fn function_declaration(
     let body = block(source, context, start)?;
     let end = body.end;
 
-    Ok(AstStatement {
-        value: AstStatementValue::FunctionDeclaration {
+    Ok(AstNode {
+        value: AstNodeValue::FunctionDeclaration {
             name,
             params,
             returns,
-            body: context.add_expression(body),
+            body: add_node(context, body),
         },
         start,
         end,
     })
 }
 
-fn import_declaration(
-    source: &mut TokenIter,
-    start: Provenance,
-) -> Result<AstStatement, ParseError> {
+fn import_declaration(source: &mut TokenIter, start: Provenance) -> Result<AstNode, ParseError> {
     let (name, _, end) = word(source, start, "expected word after 'import'")?;
 
-    Ok(AstStatement {
-        value: AstStatementValue::Import(name),
+    Ok(AstNode {
+        value: AstNodeValue::Import(name),
         start,
         end,
     })
@@ -305,9 +332,9 @@ fn import_declaration(
 
 fn variable_declaration(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     start: Provenance,
-) -> Result<AstStatement, ParseError> {
+) -> Result<AstNode, ParseError> {
     // TODO: store type hint in declarations
     let (name, start, _) = name_and_type_hint(
         source,
@@ -324,8 +351,8 @@ fn variable_declaration(
     let value = expression(source, context, start)?;
     let end = value.end;
 
-    Ok(AstStatement {
-        value: AstStatementValue::Declaration(name, context.add_expression(value)),
+    Ok(AstNode {
+        value: AstNodeValue::Declaration(name, add_node(context, value)),
         start,
         end,
     })
@@ -333,10 +360,10 @@ fn variable_declaration(
 
 fn name_and_type_hint(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     start: Provenance,
     reason: &'static str,
-) -> Result<(String, Provenance, Option<AstType>), ParseError> {
+) -> Result<(String, Provenance, Option<AstNode>), ParseError> {
     let (name, _, mut end) = word(source, start, reason)?;
     let type_hint = if let Some(Ok(Token {
         value: TokenValue::Colon,
@@ -356,19 +383,19 @@ fn name_and_type_hint(
 
 fn type_expression(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     start: Provenance,
-) -> Result<AstType, ParseError> {
+) -> Result<AstNode, ParseError> {
     let next = token(source, start, "expected type")?;
     match next.value {
         ptr @ (TokenValue::Unique | TokenValue::Shared) => {
             let subtype = type_expression(source, context, next.end)?;
             let end = subtype.end;
-            let subtype = context.add_kind(subtype);
-            Ok(AstType {
+            let subtype = add_node(context, subtype);
+            Ok(AstNode {
                 value: match ptr {
-                    TokenValue::Unique => AstTypeValue::Unique(subtype),
-                    TokenValue::Shared => AstTypeValue::Shared(subtype),
+                    TokenValue::Unique => AstNodeValue::Unique(subtype),
+                    TokenValue::Shared => AstNodeValue::Shared(subtype),
                     _ => unreachable!(),
                 },
                 start: next.start,
@@ -384,15 +411,15 @@ fn type_expression(
                 end,
                 "expected ] after array type",
             )?;
-            let subtype = context.add_kind(subtype);
-            Ok(AstType {
-                value: AstTypeValue::Array(subtype),
+            let subtype = add_node(context, subtype);
+            Ok(AstNode {
+                value: AstNodeValue::Array(subtype),
                 start: next.start,
                 end,
             })
         }
-        TokenValue::Word(name) => Ok(AstType {
-            value: AstTypeValue::Name(name),
+        TokenValue::Word(name) => Ok(AstNode {
+            value: AstNodeValue::Name(name),
             start: next.start,
             end: next.end,
         }),
@@ -405,9 +432,9 @@ fn type_expression(
 
 fn expression(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     match peek_token(source, provenance, "expected expression")? {
         Token {
             value: token @ (TokenValue::If | TokenValue::While),
@@ -433,22 +460,22 @@ fn expression(
 
 fn branch(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     token: TokenValue,
     start: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let predicate = expression(source, context, start)?;
     let block = block(source, context, start)?;
 
-    let predicate_ptr = context.add_expression(predicate);
+    let predicate_ptr = add_node(context, predicate);
     let end = block.end;
-    let block_ptr = context.add_expression(block);
+    let block_ptr = add_node(context, block);
 
-    Ok(AstExpression {
+    Ok(AstNode {
         value: if token == TokenValue::If {
-            AstExpressionValue::If(predicate_ptr, block_ptr)
+            AstNodeValue::If(predicate_ptr, block_ptr)
         } else {
-            AstExpressionValue::While(predicate_ptr, block_ptr)
+            AstNodeValue::While(predicate_ptr, block_ptr)
         },
         start,
         end,
@@ -457,9 +484,9 @@ fn branch(
 
 fn block(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     start: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let start = assert_next_lexeme_eq(
         source.next(),
         TokenValue::OpenBracket,
@@ -478,8 +505,8 @@ fn block(
             } => {
                 let end = *end;
                 source.next();
-                return Ok(AstExpression {
-                    value: AstExpressionValue::Block(statements),
+                return Ok(AstNode {
+                    value: AstNodeValue::Block(statements),
                     start,
                     end,
                 });
@@ -487,7 +514,7 @@ fn block(
             _ => {
                 let statement = statement(source, context, end)?;
                 end = statement.end;
-                statements.push(context.add_statement(statement));
+                statements.push(add_node(context, statement));
             }
         }
     }
@@ -495,9 +522,9 @@ fn block(
 
 fn assignment_step(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let mut root = reference_step(source, context, provenance)?;
 
     while let Some(Token {
@@ -517,8 +544,8 @@ fn assignment_step(
             end,
         } = span(context, root, right);
 
-        root = AstExpression {
-            value: AstExpressionValue::Assignment(left, right),
+        root = AstNode {
+            value: AstNodeValue::Assignment(left, right),
             start,
             end,
         };
@@ -529,9 +556,9 @@ fn assignment_step(
 
 fn reference_step(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let next = peek_token(source, provenance, "expected reference or expression")?;
     let start = next.start;
     match &next.value {
@@ -540,11 +567,11 @@ fn reference_step(
             source.next();
             let child = reference_step(source, context, start)?;
             let end = child.end;
-            let child = context.add_expression(child);
-            Ok(AstExpression {
+            let child = add_node(context, child);
+            Ok(AstNode {
                 value: match lex {
-                    TokenValue::Shared => AstExpressionValue::TakeShared(child),
-                    TokenValue::Unique => AstExpressionValue::TakeUnique(child),
+                    TokenValue::Shared => AstNodeValue::TakeShared(child),
+                    TokenValue::Unique => AstNodeValue::TakeUnique(child),
                     _ => unreachable!(),
                 },
                 start,
@@ -557,9 +584,9 @@ fn reference_step(
 
 fn comparison_step(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let mut left = sum_step(source, context, provenance)?;
 
     while let Some(Token {
@@ -582,9 +609,9 @@ fn comparison_step(
 
 fn sum_step(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let mut left = call_step(source, context, provenance)?;
 
     while let Some(Token {
@@ -606,20 +633,16 @@ fn sum_step(
 }
 
 fn make_bin_expr(
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     operator: BinOp,
-    left: AstExpression,
-    right: AstExpression,
-) -> AstExpression {
+    left: AstNode,
+    right: AstNode,
+) -> AstNode {
     let start = left.start;
     let end = right.end;
 
-    AstExpression {
-        value: AstExpressionValue::BinExpr(
-            operator,
-            context.add_expression(left),
-            context.add_expression(right),
-        ),
+    AstNode {
+        value: AstNodeValue::BinExpr(operator, add_node(context, left), add_node(context, right)),
         start,
         end,
     }
@@ -632,11 +655,11 @@ struct Span {
     end: Provenance,
 }
 
-fn span(context: &mut ParseTree, left: AstExpression, right: AstExpression) -> Span {
+fn span(context: &mut Vec<AstNode>, left: AstNode, right: AstNode) -> Span {
     let start = left.start;
     let end = right.end;
-    let left = context.add_expression(left);
-    let right = context.add_expression(right);
+    let left = add_node(context, left);
+    let right = add_node(context, right);
 
     Span {
         left,
@@ -648,9 +671,9 @@ fn span(context: &mut ParseTree, left: AstExpression, right: AstExpression) -> S
 
 fn call_step(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let mut root = dot_step(source, context, provenance)?;
 
     while let Some(Token {
@@ -670,11 +693,11 @@ fn call_step(
                 end,
                 "expected ] to follow array index",
             )?;
-            let index = context.add_expression(index);
+            let index = add_node(context, index);
             let start = root.start;
-            let left = context.add_expression(root);
-            root = AstExpression {
-                value: AstExpressionValue::BinExpr(BinOp::Index, left, index),
+            let left = add_node(context, root);
+            root = AstNode {
+                value: AstNodeValue::BinExpr(BinOp::Index, left, index),
                 start,
                 end,
             };
@@ -691,7 +714,7 @@ fn call_step(
             while !closed {
                 let argument = expression(source, context, provenance)?;
                 end = argument.end;
-                arguments.push(context.add_expression(argument));
+                arguments.push(add_node(context, argument));
 
                 let (should_break, new_end) = comma_or_end_list(
                     source,
@@ -704,10 +727,10 @@ fn call_step(
             }
 
             let start = root.start;
-            let function = context.add_expression(root);
+            let function = add_node(context, root);
 
-            root = AstExpression {
-                value: AstExpressionValue::Call(function, arguments),
+            root = AstNode {
+                value: AstNodeValue::Call(function, arguments),
                 start,
                 end,
             }
@@ -719,9 +742,9 @@ fn call_step(
 
 fn dot_step(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let mut root = paren_step(source, context, provenance)?;
     while let Some(Token {
         value: TokenValue::Period,
@@ -730,15 +753,18 @@ fn dot_step(
     {
         source.next();
         let (name, start, end) = word(source, provenance, "expected a name after dot operator")?;
-        let right = context.add_expression(AstExpression {
-            value: AstExpressionValue::Name(name),
-            start,
-            end,
-        });
+        let right = add_node(
+            context,
+            AstNode {
+                value: AstNodeValue::Name(name),
+                start,
+                end,
+            },
+        );
         let start = root.start;
-        let left = context.add_expression(root);
-        root = AstExpression {
-            value: AstExpressionValue::BinExpr(BinOp::Dot, left, right),
+        let left = add_node(context, root);
+        root = AstNode {
+            value: AstNodeValue::BinExpr(BinOp::Dot, left, right),
             start,
             end,
         };
@@ -749,9 +775,9 @@ fn dot_step(
 
 fn paren_step(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let peeked = peek_token(source, provenance, "expected (, [, or expression")?;
     match peeked.value {
         TokenValue::OpenParen => {
@@ -770,9 +796,9 @@ fn paren_step(
 
 fn paren(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let expr = expression(source, context, provenance)?;
     assert_next_lexeme_eq(
         source.next(),
@@ -786,15 +812,15 @@ fn paren(
 
 fn array_literal(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     start: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let expr = expression(source, context, start)?;
     let separator = token(source, start, "expected comma, semicolon or ]")?;
     match separator.value {
         TokenValue::Comma => {
             let mut end = separator.end;
-            let mut children = vec![context.add_expression(expr)];
+            let mut children = vec![add_node(context, expr)];
 
             let mut closed = peek_for_closed(
                 source,
@@ -812,7 +838,7 @@ fn array_literal(
                 end = peeked.end;
                 let expr = expression(source, context, end)?;
                 end = expr.end;
-                children.push(context.add_expression(expr));
+                children.push(add_node(context, expr));
 
                 let (should_break, new_end) = comma_or_end_list(
                     source,
@@ -823,8 +849,8 @@ fn array_literal(
                 end = new_end;
                 closed = should_break;
             }
-            Ok(AstExpression {
-                value: AstExpressionValue::ArrayLiteral(children),
+            Ok(AstNode {
+                value: AstNodeValue::ArrayLiteral(children),
                 start,
                 end,
             })
@@ -838,17 +864,17 @@ fn array_literal(
                 end,
                 "expected ] after array length in array literal",
             )?;
-            let expr = context.add_expression(expr);
-            Ok(AstExpression {
-                value: AstExpressionValue::ArrayLiteralLength(expr, length),
+            let expr = add_node(context, expr);
+            Ok(AstNode {
+                value: AstNodeValue::ArrayLiteralLength(expr, length),
                 start,
                 end: close.end,
             })
         }
         TokenValue::CloseSquare => {
-            let expr = context.add_expression(expr);
-            Ok(AstExpression {
-                value: AstExpressionValue::ArrayLiteral(vec![expr]),
+            let expr = add_node(context, expr);
+            Ok(AstNode {
+                value: AstNodeValue::ArrayLiteral(vec![expr]),
                 start,
                 end: separator.end,
             })
@@ -862,14 +888,14 @@ fn array_literal(
 
 fn struct_literal_step(
     source: &mut TokenIter,
-    context: &mut ParseTree,
+    context: &mut Vec<AstNode>,
     provenance: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     let atom = atom(source, provenance, "expected a word or atom")?;
     match (atom, peek_token_optional(source)?) {
         (
-            AstExpression {
-                value: AstExpressionValue::Name(name),
+            AstNode {
+                value: AstNodeValue::Name(name),
                 start,
                 ..
             },
@@ -900,12 +926,12 @@ fn struct_literal_step(
                 {
                     let lex = lex.clone();
                     source.next();
-                    let argument = AstExpression {
-                        value: AstExpressionValue::Name(field.clone()),
+                    let argument = AstNode {
+                        value: AstNodeValue::Name(field.clone()),
                         start: field_start,
                         end: field_end,
                     };
-                    fields.insert(field, context.add_expression(argument));
+                    fields.insert(field, add_node(context, argument));
                     if lex == TokenValue::CloseBracket {
                         break;
                     }
@@ -918,7 +944,7 @@ fn struct_literal_step(
                     )?;
                     let argument = expression(source, context, provenance)?;
                     end = argument.end;
-                    fields.insert(field, context.add_expression(argument));
+                    fields.insert(field, add_node(context, argument));
 
                     if let TokenValue::Comma =
                         peek_token(source, end, "expected comma or ) to end function call")?.value
@@ -935,8 +961,8 @@ fn struct_literal_step(
                     }
                 }
             }
-            Ok(AstExpression {
-                value: AstExpressionValue::StructLiteral { name, fields },
+            Ok(AstNode {
+                value: AstNodeValue::StructLiteral { name, fields },
                 start,
                 end,
             })
@@ -949,22 +975,22 @@ fn atom(
     source: &mut TokenIter,
     provenance: Provenance,
     reason: &'static str,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     // TODO: expectation reasoning
     let Token { value, start, end } = token(source, provenance, reason)?;
     match value {
-        TokenValue::True => Ok(AstExpression {
-            value: AstExpressionValue::Bool(true),
+        TokenValue::True => Ok(AstNode {
+            value: AstNodeValue::Bool(true),
             start,
             end,
         }),
-        TokenValue::False => Ok(AstExpression {
-            value: AstExpressionValue::Bool(false),
+        TokenValue::False => Ok(AstNode {
+            value: AstNodeValue::Bool(false),
             start,
             end,
         }),
-        TokenValue::Word(word) => Ok(AstExpression {
-            value: AstExpressionValue::Name(word),
+        TokenValue::Word(word) => Ok(AstNode {
+            value: AstNodeValue::Name(word),
             start,
             end,
         }),
@@ -1001,7 +1027,7 @@ fn try_decimal(
     num: i64,
     start: Provenance,
     end: Provenance,
-) -> Result<AstExpression, ParseError> {
+) -> Result<AstNode, ParseError> {
     // TODO: handle overflow
     if let Some(Token {
         value: TokenValue::Period,
@@ -1031,14 +1057,14 @@ fn try_decimal(
         } else {
             num
         };
-        Ok(AstExpression {
-            value: AstExpressionValue::Float(num),
+        Ok(AstNode {
+            value: AstNodeValue::Float(num),
             start,
             end,
         })
     } else {
-        Ok(AstExpression {
-            value: AstExpressionValue::Int(num),
+        Ok(AstNode {
+            value: AstNodeValue::Int(num),
             start,
             end,
         })
@@ -1089,85 +1115,6 @@ fn peek_token_optional<'a>(source: &'a mut TokenIter) -> Result<Option<&'a Token
         .peek()
         .map(|result| result.as_ref().map_err(|e| e.clone()))
         .transpose()?)
-}
-
-fn traverse(root: Node<&AstStatement, &AstExpression, &AstType>, children: &mut Vec<NodePtr>) {
-    use AstExpressionValue::*;
-    use AstStatementValue::*;
-    use AstTypeValue::*;
-
-    match root {
-        Node::Statement(AstStatement {
-            value:
-                Declaration(_, child) | Expression(child) | FunctionDeclaration { body: child, .. },
-            ..
-        })
-        | Node::Expression(AstExpression {
-            value: TakeShared(child) | TakeUnique(child) | ArrayLiteralLength(child, _),
-            ..
-        }) => {
-            children.push(NodePtr::Expression(*child));
-        }
-        Node::Expression(AstExpression {
-            value:
-                Assignment(left, right) | BinExpr(_, left, right) | If(left, right) | While(left, right),
-            ..
-        }) => {
-            children.push(NodePtr::Expression(*right));
-            children.push(NodePtr::Expression(*left));
-        }
-        Node::Expression(AstExpression {
-            value: ArrayLiteral(values),
-            ..
-        }) => {
-            for value in values {
-                children.push(NodePtr::Expression(*value));
-            }
-        }
-        Node::Expression(AstExpression {
-            value: Call(function, parameters),
-            ..
-        }) => {
-            children.push(NodePtr::Expression(*function));
-            for expression in parameters {
-                children.push(NodePtr::Expression(*expression));
-            }
-        }
-        Node::Expression(AstExpression {
-            value: Block(statements),
-            ..
-        }) => {
-            for statement in statements {
-                children.push(NodePtr::Statement(*statement));
-            }
-        }
-        Node::Expression(AstExpression {
-            value: StructLiteral { fields, .. },
-            ..
-        }) => {
-            for expression in fields.values() {
-                children.push(NodePtr::Expression(*expression));
-            }
-        }
-        Node::Kind(AstType {
-            value: Unique(kind) | Shared(kind) | Array(kind),
-            ..
-        }) => {
-            children.push(NodePtr::Kind(*kind));
-        }
-        Node::Kind(AstType {
-            value: AstTypeValue::Name(_),
-            ..
-        })
-        | Node::Statement(AstStatement {
-            value: Import(_) | StructDeclaration { .. },
-            ..
-        })
-        | Node::Expression(AstExpression {
-            value: AstExpressionValue::Name(_) | Int(_) | Float(_) | Bool(_),
-            ..
-        }) => {}
-    }
 }
 
 fn assert_next_lexeme_eq(
@@ -1239,6 +1186,8 @@ fn peek_for_closed(
 mod test {
     use matches::assert_matches;
 
+    use crate::arena::ArenaIter;
+
     use super::*;
 
     fn tokens(tokens: &[TokenValue]) -> impl '_ + Iterator<Item = Result<Token, LexError>> {
@@ -1277,74 +1226,39 @@ mod test {
             TokenValue::Word("a".to_string()),
         ]))
         .unwrap();
-        let nodes = statements
-            .into_iter()
+        let lines = statements
+            .iter()
             .map(|statement| {
-                let mut line = Vec::new();
-                line.extend(ast.iter_from(NodePtr::Statement(statement)));
-                line
+                ArenaIter::iter_from(&ast, *statement)
+                    .map(|(_, node)| &node.value)
+                    .collect()
             })
-            .collect::<Vec<_>>();
-        let matchable_nodes = nodes.iter().map(|line| &line[..]).collect::<Vec<_>>();
+            .collect::<Vec<Vec<_>>>();
+        let matchable_nodes = lines.iter().map(|line| line.as_slice()).collect::<Vec<_>>();
 
-        use AstExpressionValue::*;
-        use AstStatementValue::*;
-        use Node::{Expression as Expr, Statement};
+        use AstNodeValue::*;
         assert_matches!(
             matchable_nodes.as_slice(),
             &[
                 &[
-                    Statement(AstStatement {
-                        value: Declaration(_, _),
-                        ..
-                    }),
-                    Expr(AstExpression {
-                        value: BinExpr(BinOp::Add, _, _),
-                        ..
-                    }),
-                    Expr(AstExpression {
-                        value: BinExpr(BinOp::Subtract, _, _),
-                        ..
-                    }),
-                    Expr(AstExpression { value: Int(15), .. }),
-                    Expr(AstExpression { value: Int(10), .. }),
-                    Expr(AstExpression { value: Int(3), .. }),
+                    Declaration(_, _),
+                    BinExpr(BinOp::Add, _, _),
+                    BinExpr(BinOp::Subtract, _, _),
+                    Int(15),
+                    Int(10),
+                    Int(3),
                 ],
                 &[
-                    Statement(AstStatement {
-                        value: Expression(_),
-                        ..
-                    }),
-                    Expr(AstExpression {
-                        value: If(_, _),
-                        ..
-                    }),
-                    Expr(AstExpression {
-                        value: Bool(true),
-                        ..
-                    }),
-                    Expr(AstExpression {
-                        value: Block(_),
-                        ..
-                    }),
-                    Statement(AstStatement {
-                        value: Expression(_),
-                        ..
-                    }),
-                    Expr(AstExpression {
-                        value: Assignment(_, _),
-                        ..
-                    }),
-                    Expr(AstExpression { value: Name(_), .. }),
-                    Expr(AstExpression { value: Int(3), .. }),
+                    Expression(_),
+                    If(..),
+                    Bool(true),
+                    Block(_),
+                    Expression(_),
+                    Assignment(_, _),
+                    Name(_),
+                    Int(3),
                 ],
-                &[
-                    Statement(AstStatement {
-                        value: Expression(_),
-                        ..
-                    }),
-                    Expr(AstExpression { value: Name(_), .. }),
-                ],
+                &[Expression(_), Name(_),],
             ]
         );
     }
@@ -1368,43 +1282,29 @@ mod test {
             TokenValue::CloseBracket,
         ]))
         .unwrap();
-        let nodes = statements
-            .into_iter()
+        let lines = statements
+            .iter()
             .map(|statement| {
-                let mut line = Vec::new();
-                line.extend(ast.iter_from(NodePtr::Statement(statement)));
-                line
+                ArenaIter::iter_from(&ast, *statement)
+                    .map(|(_, node)| &node.value)
+                    .collect()
             })
-            .collect::<Vec<_>>();
-        let matchable_nodes = nodes.iter().map(|line| &line[..]).collect::<Vec<_>>();
+            .collect::<Vec<Vec<_>>>();
+        let matchable_nodes = lines.iter().map(|line| line.as_slice()).collect::<Vec<_>>();
 
-        use AstExpressionValue::*;
-        use AstStatementValue::*;
-        use Node::{Expression as Expr, Statement};
+        use AstNodeValue::*;
         assert_matches!(
             matchable_nodes.as_slice(),
             &[&[
-                Statement(AstStatement {
-                    value: FunctionDeclaration {
-                        returns: Some(_),
-                        ..
-                    },
+                FunctionDeclaration {
+                    returns: Some(_),
                     ..
-                }),
-                Expr(AstExpression {
-                    value: Block(_),
-                    ..
-                }),
-                Statement(AstStatement {
-                    value: Expression(_),
-                    ..
-                }),
-                Expr(AstExpression {
-                    value: BinExpr(BinOp::Add, _, _),
-                    ..
-                }),
-                Expr(AstExpression { value: Int(3), .. }),
-                Expr(AstExpression { value: Int(5), .. }),
+                },
+                Block(_),
+                Expression(_),
+                BinExpr(BinOp::Add, _, _),
+                Int(3),
+                Int(5),
             ],]
         );
     }
