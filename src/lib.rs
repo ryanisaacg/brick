@@ -6,9 +6,9 @@ use thiserror::Error;
 
 pub mod analyzer;
 pub mod backend;
-pub mod lexer;
 pub mod parser;
 pub mod provenance;
+pub mod tokenizer;
 pub mod tree;
 
 use analyzer::{
@@ -40,7 +40,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
         let contents = fs::read_to_string(&file_name)
             .map_err(|e| CompileError::FilesystemError(e, format!("reading file {}", file_name)))?;
         let file = Box::leak(file.into_boxed_str());
-        let tokens = lexer::lex(file, contents.to_string());
+        let tokens = tokenizer::lex(file, contents.to_string());
         let (statements, arena) = parser::parse(tokens)?;
         let ScanResults {
             imports,
@@ -75,7 +75,7 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
 }
 
 pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u8>, CompileError> {
-    let tokens = lexer::lex(source_name, contents.to_string());
+    let tokens = tokenizer::lex(source_name, contents.to_string());
     let (statements, arena) = parser::parse(tokens)?;
     let mut ir_context = new_ir_context();
     // TODO: support imports?
