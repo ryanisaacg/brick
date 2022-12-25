@@ -16,7 +16,10 @@ parallel to "progress":
 - Reject null bytes in the lexer
 
 data structures:
-- array types
+- array types:
+    - dot-operator on array doesn't parse
+    - integer promotion & demotion
+    - enforce array indices as i32
 - the ability to heap allocate values
 - sum types
 - parametrics polymorphism
