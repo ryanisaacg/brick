@@ -17,6 +17,21 @@ fn test(): i32 {
 }
 
 #[test]
+fn order_of_operations() {
+    assert_eq!(
+        7,
+        run_test(
+            r#"
+fn test(): i32 {
+    1 + 2 * 3
+}"#,
+            ()
+        )
+        .unwrap()
+    );
+}
+
+#[test]
 fn assignment() {
     assert_eq!(
         3,

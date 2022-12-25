@@ -530,7 +530,12 @@ fn typecheck_expression(
             }
         }
         BinExpr(
-            op @ (BinOp::Add | BinOp::Subtract | BinOp::LessThan | BinOp::GreaterThan),
+            op @ (BinOp::Add
+            | BinOp::Subtract
+            | BinOp::Multiply
+            | BinOp::Divide
+            | BinOp::LessThan
+            | BinOp::GreaterThan),
             left,
             right,
         ) => {
@@ -577,12 +582,18 @@ fn typecheck_expression(
                 Wider::Equal => {}
             }
             let left_type = left.kind;
-            if *op == BinOp::Add || *op == BinOp::Subtract {
+            if *op == BinOp::Add
+                || *op == BinOp::Subtract
+                || *op == BinOp::Multiply
+                || *op == BinOp::Divide
+            {
                 IRNode {
                     value: IRNodeValue::BinaryNumeric(
                         match op {
                             BinOp::Add => BinOpNumeric::Add,
                             BinOp::Subtract => BinOpNumeric::Subtract,
+                            BinOp::Multiply => BinOpNumeric::Multiply,
+                            BinOp::Divide => BinOpNumeric::Divide,
                             _ => unreachable!(),
                         },
                         ir_context.add_node(left),

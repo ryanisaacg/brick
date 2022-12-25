@@ -110,6 +110,8 @@ pub enum BinOp {
     Dot,
     Add,
     Subtract,
+    Multiply,
+    Divide,
     LessThan,
     GreaterThan,
     Index,
@@ -670,6 +672,8 @@ fn expression_pratt(
                 TokenValue::Plus => BinOp::Add,
                 TokenValue::Minus => BinOp::Subtract,
                 TokenValue::Period => BinOp::Dot,
+                TokenValue::Asterisk => BinOp::Multiply,
+                TokenValue::ForwardSlash => BinOp::Divide,
                 token => unreachable!("binary operator {:?}", token),
             };
 
@@ -698,7 +702,8 @@ const ASSIGNMENT: u8 = 2;
 const REFERENCE: u8 = ASSIGNMENT + 1;
 const COMPARE: u8 = REFERENCE + 2;
 const SUM: u8 = COMPARE + 2;
-const DOT: u8 = SUM + 2;
+const FACTOR: u8 = SUM + 2;
+const DOT: u8 = FACTOR + 2;
 const CALL: u8 = DOT + 1;
 
 fn prefix_binding_power(op: &TokenValue) -> Option<((), u8)> {
@@ -722,6 +727,7 @@ fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
         TokenValue::Equals => (ASSIGNMENT, ASSIGNMENT - 1),
         TokenValue::LessThan | TokenValue::GreaterThan => (COMPARE, COMPARE - 1),
         TokenValue::Plus | TokenValue::Minus => (SUM, SUM - 1),
+        TokenValue::Asterisk | TokenValue::ForwardSlash => (FACTOR, FACTOR - 1),
         TokenValue::Period => (DOT - 1, DOT),
         _ => return None,
     };

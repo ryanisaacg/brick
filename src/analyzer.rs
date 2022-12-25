@@ -243,6 +243,8 @@ pub enum IRNodeValue {
 pub enum BinOpNumeric {
     Add,
     Subtract,
+    Multiply,
+    Divide,
 }
 
 #[derive(Debug)]

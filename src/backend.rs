@@ -509,6 +509,24 @@ fn emit_node(ctx: &mut EmitContext<'_>, expr_index: usize) {
                         _ => unreachable!(),
                     });
                 }
+                BinOpNumeric::Multiply => {
+                    ctx.add_instruction(match ctx.arena.kind(expr.kind) {
+                        IRType::Number(NumericType::Int64) => Instruction::I64Mul,
+                        IRType::Number(NumericType::Float64) => Instruction::F64Mul,
+                        IRType::Number(NumericType::Int32) => Instruction::I32Mul,
+                        IRType::Number(NumericType::Float32) => Instruction::F32Mul,
+                        _ => unreachable!(),
+                    });
+                }
+                BinOpNumeric::Divide => {
+                    ctx.add_instruction(match ctx.arena.kind(expr.kind) {
+                        IRType::Number(NumericType::Int64) => Instruction::I64DivS,
+                        IRType::Number(NumericType::Float64) => Instruction::F64Div,
+                        IRType::Number(NumericType::Int32) => Instruction::I32DivS,
+                        IRType::Number(NumericType::Float32) => Instruction::F32Div,
+                        _ => unreachable!(),
+                    });
+                }
             }
         }
         IRNodeValue::Comparison(operator, left, right) => {
