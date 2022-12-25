@@ -5,7 +5,7 @@ parallel to "progress":
 - integer demotion
 - integer -> float promotion
 - float -> int casting
-- specify literals
+- specify literal types
 - specify variable types
 - real type inference
 - array bounds checking
