@@ -37,9 +37,7 @@ struct Point {
 fn test(index: i32): i64 {
     let values = [Point { x: 500, y: 2}; 3];
 
-    let point = values[index]
-
-    point.x
+    values[index].x
 }
 "#,
             2,

@@ -377,7 +377,7 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
             ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(
                 &mut ctx.instructions,
-                offset + 4,
+                offset,
                 &Representation::Scalar(ValType::I32),
             );
             // TODO: bound check instead of dropping length
@@ -413,13 +413,13 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
             // TODO: general-purpose allocator
             // Put the heap pointer on the stack, because that's where the array starts
             ctx.add_instruction(Instruction::GlobalGet(HEAP_PTR));
+            // Put the length of the array onto the stack
+            ctx.add_instruction(Instruction::I32Const(*length as i32));
             // Move the heap pointer forward by the size of the array
             ctx.add_instruction(Instruction::GlobalGet(HEAP_PTR));
             ctx.add_instruction(Instruction::I32Const(*length as i32 * size_of as i32 * 8));
             ctx.add_instruction(Instruction::I32Add);
             ctx.add_instruction(Instruction::GlobalSet(HEAP_PTR));
-            // Put the length of the array onto the stack
-            ctx.add_instruction(Instruction::I32Const(*length as i32));
         }
         IRExpressionValue::LocalVariable(name) => {
             ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
@@ -665,10 +665,14 @@ fn emit_assignment(
             }
         }
         Vector(reprs) | Struct { reprs, .. } => {
+            // Backwards, so the first value goes on the stack first
             let mut offset = offset;
             for repr in reprs.iter() {
-                emit_assignment(instructions, locals, offset, repr);
                 offset += size_of_repr_in_bytes(repr);
+            }
+            for repr in reprs.iter() {
+                offset -= size_of_repr_in_bytes(repr);
+                emit_assignment(instructions, locals, offset, repr);
             }
         }
     }
@@ -708,10 +712,14 @@ fn emit_dereference(
             }
         }
         Vector(reprs) | Struct { reprs, .. } => {
+            // Backwards, because the first value should go on the stack first
             let mut offset = offset;
             for repr in reprs.iter() {
-                emit_dereference(instructions, offset, repr);
                 offset += size_of_repr_in_bytes(repr);
+            }
+            for repr in reprs.iter() {
+                offset -= size_of_repr_in_bytes(repr);
+                emit_dereference(instructions, offset, repr);
             }
         }
     }
@@ -838,7 +846,7 @@ fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) -> u32 {
             ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(
                 &mut ctx.instructions,
-                offset + 4,
+                offset,
                 &Representation::Scalar(ValType::I32),
             );
             emit_expression(ctx, *index);
