@@ -19,15 +19,17 @@ mod debug;
  * more
  */
 const MAIN_MEMORY: u32 = 0;
-const STACK_MINIMUM_PAGES: u64 = 16;
+const STACK_PAGES: u64 = 16;
 const HEAP_MINIMUM_PAGES: u64 = 48;
-const MEMORY_MINIMUM_PAGES: u64 = STACK_MINIMUM_PAGES + HEAP_MINIMUM_PAGES;
-const MAXIMUM_MEMORY: u64 = 16384;
+const MEMORY_MINIMUM_PAGES: u64 = STACK_PAGES + HEAP_MINIMUM_PAGES;
+const MAXIMUM_MEMORY: u64 = 16_384;
+const WASM_PAGE_SIZE: u64 = 65_536;
 
 // TODO: handle stack overflows
 const STACK_PTR: u32 = 0;
 const BASE_PTR: u32 = 1;
-const ASSIGNMENT_PTR: u32 = 2;
+const REFERENCE_PTR: u32 = 2;
+const HEAP_PTR: u32 = 3;
 
 pub fn emit(statements: Vec<IRStatement>, arena: &IRContext, with_debug: bool) -> Vec<u8> {
     let mut module = Module::new();
@@ -73,13 +75,20 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext, with_debug: bool) -
         },
         &ConstExpr::i32_const(0x50),
     );
+    // Heap pointer
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+        },
+        &ConstExpr::i32_const((STACK_PAGES * WASM_PAGE_SIZE) as i32),
+    );
 
     let mut debug_info = DebugInfo::new();
     let mut type_representations = Vec::new();
     let mut debug_representations = Vec::new();
     // TODO: deref programs fail to generate debug representations
     for (idx, kind) in arena.kinds().enumerate() {
-        println!("{:?}", arena.pretty_dbg(NodePtr::Kind(idx)));
         let repr = represented_by(arena, idx);
         type_representations.push(repr);
         match kind {
@@ -95,6 +104,12 @@ pub fn emit(statements: Vec<IRStatement>, arena: &IRContext, with_debug: bool) -
                 // TODO: maybe throw if type doesn't exist?
                 let kind = debug_representations[*child]
                     .map(|child_type_id| debug_info.pointer_type(child_type_id));
+                debug_representations.push(kind);
+            }
+            IRType::Array(child) => {
+                // TODO: maybe throw if type doesn't exist?
+                let kind = debug_representations[*child]
+                    .map(|child_type_id| debug_info.array_type(child_type_id));
                 debug_representations.push(kind);
             }
             IRType::Function { .. } | IRType::Struct { .. } => {
@@ -232,7 +247,7 @@ fn analyze_locals(
             .name_to_offset
             .insert(param.name.to_string(), results.stack_size);
         let repr = &type_representations[param.kind];
-        results.stack_size += size_of_repr(repr);
+        results.stack_size += size_of_repr_in_bytes(repr);
         flatten_repr(repr, &mut repr_buffer);
 
         for val_type in repr_buffer.drain(..) {
@@ -250,7 +265,7 @@ fn analyze_locals(
             results
                 .name_to_offset
                 .insert(name.to_string(), results.stack_size);
-            results.stack_size += size_of_repr(&type_representations[expr.kind]);
+            results.stack_size += size_of_repr_in_bytes(&type_representations[expr.kind]);
         }
     }
 
@@ -339,7 +354,7 @@ fn emit_statement<'a>(ctx: &mut EmitContext<'a>, statement: &IRStatement) {
             emit_expression(ctx, *expr);
             let expr = ctx.arena.expression(*expr);
             ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
-            ctx.add_instruction(Instruction::GlobalSet(ASSIGNMENT_PTR));
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_assignment(
                 &mut ctx.instructions,
                 &mut ctx.wasm_locals,
@@ -353,8 +368,62 @@ fn emit_statement<'a>(ctx: &mut EmitContext<'a>, statement: &IRStatement) {
 fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
     let expr = ctx.arena.expression(expr_index);
     match &expr.value {
+        IRExpressionValue::ArrayIndex(array, index) => {
+            // TODO: is this generally the correct way to handle things? is there a case where
+            // there's a non-lvalue-array?
+            // it almost seems like there needs to be auto-derefs at a higher IR level for stack
+            // variables, then we can maybe remove emit_lvalue as a concept
+            let offset = emit_lvalue(ctx, *array);
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
+            emit_dereference(
+                &mut ctx.instructions,
+                offset + 4,
+                &Representation::Scalar(ValType::I32),
+            );
+            // TODO: bound check instead of dropping length
+            //ctx.add_instruction(Instruction::Drop);
+            emit_expression(ctx, *index);
+            let repr = &ctx.representations[expr.kind];
+            ctx.add_instruction(Instruction::I32Const(size_of_repr_in_bytes(repr) as i32));
+            ctx.add_instruction(Instruction::I32Mul);
+            ctx.add_instruction(Instruction::I32Add);
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
+            emit_dereference(&mut ctx.instructions, 0, repr);
+        }
+        IRExpressionValue::ArrayLiteralLength(value, length) => {
+            // TODO: should this logic be lifted into the IR?
+            let repr = &ctx.representations[ctx.arena.expression(*value).kind];
+            let size_of = size_of_repr_in_bytes(repr);
+            emit_expression(ctx, *value);
+            // Store the current heap value in the reference pointer, because that's
+            // where we'll be storing the value
+            ctx.add_instruction(Instruction::GlobalGet(HEAP_PTR));
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
+            for index in 0..(*length) {
+                let offset = (index as u32) * size_of;
+                emit_assignment(&mut ctx.instructions, &mut ctx.wasm_locals, offset, repr);
+                if index < length - 1 {
+                    // For all the non-last indices, put the array value that
+                    // is being copied back on the stack
+                    ctx.add_instruction(Instruction::GlobalGet(HEAP_PTR));
+                    ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
+                    emit_dereference(&mut ctx.instructions, offset, repr);
+                }
+            }
+            // TODO: general-purpose allocator
+            // Put the heap pointer on the stack, because that's where the array starts
+            ctx.add_instruction(Instruction::GlobalGet(HEAP_PTR));
+            // Move the heap pointer forward by the size of the array
+            ctx.add_instruction(Instruction::GlobalGet(HEAP_PTR));
+            ctx.add_instruction(Instruction::I32Const(*length as i32 * size_of as i32 * 8));
+            ctx.add_instruction(Instruction::I32Add);
+            ctx.add_instruction(Instruction::GlobalSet(HEAP_PTR));
+            // Put the length of the array onto the stack
+            ctx.add_instruction(Instruction::I32Const(*length as i32));
+        }
         IRExpressionValue::LocalVariable(name) => {
             ctx.add_instruction(Instruction::GlobalGet(BASE_PTR));
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(
                 &mut ctx.instructions,
                 *ctx.stack_offsets.get(name.as_str()).unwrap(),
@@ -363,6 +432,7 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
         }
         IRExpressionValue::Dot(..) => {
             let offset = emit_lvalue(ctx, expr_index);
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(
                 &mut ctx.instructions,
                 offset,
@@ -373,7 +443,7 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
             emit_expression(ctx, *expr);
             let expr = ctx.arena.expression(*expr);
             let offset = emit_lvalue(ctx, *lvalue);
-            ctx.add_instruction(Instruction::GlobalSet(ASSIGNMENT_PTR));
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_assignment(
                 &mut ctx.instructions,
                 &mut ctx.wasm_locals,
@@ -407,6 +477,7 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
         }
         IRExpressionValue::Dereference(child) => {
             emit_expression(ctx, *child);
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
             emit_dereference(&mut ctx.instructions, 0, &ctx.representations[expr.kind]);
         }
         IRExpressionValue::Call(function, arguments) => {
@@ -443,6 +514,8 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
                     ctx.add_instruction(match ctx.arena.kind(expr.kind) {
                         IRType::Number(NumericType::Int64) => Instruction::I64Add,
                         IRType::Number(NumericType::Float64) => Instruction::F64Add,
+                        IRType::Number(NumericType::Int32) => Instruction::I32Add,
+                        IRType::Number(NumericType::Float32) => Instruction::F32Add,
                         _ => unreachable!(),
                     });
                 }
@@ -450,6 +523,8 @@ fn emit_expression(ctx: &mut EmitContext<'_>, expr_index: usize) {
                     ctx.add_instruction(match ctx.arena.kind(expr.kind) {
                         IRType::Number(NumericType::Int64) => Instruction::I64Sub,
                         IRType::Number(NumericType::Float64) => Instruction::F64Sub,
+                        IRType::Number(NumericType::Int32) => Instruction::I32Sub,
+                        IRType::Number(NumericType::Float32) => Instruction::F32Sub,
                         _ => unreachable!(),
                     });
                 }
@@ -541,7 +616,7 @@ fn emit_parameter(
             let mut offset = offset;
             for repr in reprs.iter() {
                 local_index = emit_parameter(instructions, local_index, offset, repr);
-                offset += size_of_repr(repr);
+                offset += size_of_repr_in_bytes(repr);
             }
 
             local_index
@@ -570,7 +645,7 @@ fn emit_assignment(
             };
             let local_idx = locals.len() as u32;
             instructions.push(Instruction::LocalSet(local_idx));
-            instructions.push(Instruction::GlobalGet(ASSIGNMENT_PTR));
+            instructions.push(Instruction::GlobalGet(REFERENCE_PTR));
             instructions.push(Instruction::LocalGet(local_idx));
             locals.push(*scalar);
             match scalar {
@@ -593,7 +668,7 @@ fn emit_assignment(
             let mut offset = offset;
             for repr in reprs.iter() {
                 emit_assignment(instructions, locals, offset, repr);
-                offset += size_of_repr(repr);
+                offset += size_of_repr_in_bytes(repr);
             }
         }
     }
@@ -615,6 +690,7 @@ fn emit_dereference(
                 align: 1,
                 memory_index: MAIN_MEMORY,
             };
+            instructions.push(Instruction::GlobalGet(REFERENCE_PTR));
             match scalar {
                 ValType::I32 => {
                     instructions.push(Instruction::I32Load(mem_arg));
@@ -635,7 +711,7 @@ fn emit_dereference(
             let mut offset = offset;
             for repr in reprs.iter() {
                 emit_dereference(instructions, offset, repr);
-                offset += size_of_repr(repr);
+                offset += size_of_repr_in_bytes(repr);
             }
         }
     }
@@ -645,7 +721,6 @@ fn emit_dereference(
 enum Representation {
     Void,
     Scalar(ValType),
-    #[allow(dead_code)] // TODO
     Vector(Vec<Representation>),
     Struct {
         field_offsets: HashMap<String, u32>,
@@ -665,6 +740,8 @@ fn represented_by(ctx: &IRContext, kind: usize) -> Representation {
         IRType::Number(NumericType::Float32) => Scalar(ValType::F32),
         IRType::Number(NumericType::Int64) => Scalar(ValType::I64),
         IRType::Number(NumericType::Float64) => Scalar(ValType::F64),
+        // pair of (start, length)
+        IRType::Array(_) => Vector(vec![Scalar(ValType::I32), Scalar(ValType::I32)]),
         IRType::Struct { fields } => {
             // TODO: don't constantly re-calculate struct reprs
             // TODO: support re-ordering of fields
@@ -677,7 +754,7 @@ fn represented_by(ctx: &IRContext, kind: usize) -> Representation {
                 field_order.push(key.clone());
                 field_offsets.insert(key.clone(), total_size);
                 let repr = represented_by(ctx, *field);
-                total_size += size_of_repr(&repr);
+                total_size += size_of_repr_in_bytes(&repr);
                 reprs.push(repr);
             }
 
@@ -706,12 +783,12 @@ fn flatten_repr(repr: &Representation, buffer: &mut Vec<ValType>) {
     }
 }
 
-fn size_of_repr(repr: &Representation) -> u32 {
+fn size_of_repr_in_bytes(repr: &Representation) -> u32 {
     use Representation::*;
     match repr {
         Void => 0,
         Scalar(val) => value_size(*val),
-        Vector(reprs) | Struct { reprs, .. } => reprs.iter().map(size_of_repr).sum(),
+        Vector(reprs) | Struct { reprs, .. } => reprs.iter().map(size_of_repr_in_bytes).sum(),
     }
 }
 
@@ -755,6 +832,22 @@ fn emit_lvalue(ctx: &mut EmitContext, lvalue: usize) -> u32 {
             let offset = emit_lvalue(ctx, *left);
 
             offset + field_offset
+        }
+        IRExpressionValue::ArrayIndex(array, index) => {
+            let offset = emit_lvalue(ctx, *array); // TODO
+            ctx.add_instruction(Instruction::GlobalSet(REFERENCE_PTR));
+            emit_dereference(
+                &mut ctx.instructions,
+                offset + 4,
+                &Representation::Scalar(ValType::I32),
+            );
+            emit_expression(ctx, *index);
+            let repr = &ctx.representations[expr.kind];
+            ctx.add_instruction(Instruction::I32Const(size_of_repr_in_bytes(repr) as i32));
+            ctx.add_instruction(Instruction::I32Mul);
+            ctx.add_instruction(Instruction::I32Add);
+
+            0
         }
         _ => unreachable!(),
     }

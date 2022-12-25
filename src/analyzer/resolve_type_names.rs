@@ -40,7 +40,7 @@ pub fn resolve_type_names(
                     }
                 }
             }
-            Unique(child) | Shared(child) => {
+            Unique(child) | Shared(child) | Array(child) => {
                 if let Some(replacement) = resolutions.get(child) {
                     *child = *replacement;
                 }

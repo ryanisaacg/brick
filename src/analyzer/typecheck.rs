@@ -155,7 +155,67 @@ fn typecheck_expression(
 
     // TODO: analyze if, block
     Ok(match value {
-        ArrayLiteral(..) | ArrayLiteralLength(..) | BinExpr(BinOp::Index, _, _) => todo!(),
+        ArrayLiteralLength(child, length) => {
+            let child = typecheck_expression(
+                parse_context.expression(*child),
+                parse_context,
+                ir_context,
+                local_scope,
+            )?;
+            let kind = IRType::Array(child.kind);
+            let kind = ir_context.add_kind(kind);
+            let child = ir_context.add_expression(child);
+
+            IRExpression {
+                value: IRExpressionValue::ArrayLiteralLength(child, *length),
+                kind,
+                start,
+                end,
+            }
+        }
+        ArrayLiteral(_) => {
+            todo!();
+        }
+        BinExpr(BinOp::Index, left, right) => {
+            // TODO: apply auto-dereferencing
+            let left = typecheck_expression(
+                parse_context.expression(*left),
+                parse_context,
+                ir_context,
+                local_scope,
+            )?;
+            let right = typecheck_expression(
+                parse_context.expression(*right),
+                parse_context,
+                ir_context,
+                local_scope,
+            )?;
+            let left_kind = ir_context.kind(left.kind);
+            let IRType::Array(inner) = left_kind else {
+                return Err(TypecheckError::IllegalNonArrayIndex(left_kind.clone(), left.end));
+            };
+            let right_kind = ir_context.kind(right.kind);
+            if !matches!(
+                right_kind,
+                IRType::Number(NumericType::Int32 | NumericType::Int64)
+            ) {
+                return Err(TypecheckError::IllegalNonNumericIndex(
+                    right_kind.clone(),
+                    right.end,
+                ));
+            }
+
+            let kind = *inner;
+            let left = ir_context.add_expression(left);
+            let right = ir_context.add_expression(right);
+
+            IRExpression {
+                value: IRExpressionValue::ArrayIndex(left, right),
+                kind,
+                start,
+                end,
+            }
+        }
         StructLiteral { name, fields } => {
             let struct_type_idx = resolve(local_scope, name.as_str());
             let struct_type = struct_type_idx.map(|idx| ir_context.kind(idx));
@@ -237,7 +297,7 @@ fn typecheck_expression(
             // TODO: provide more error diagnostics
             let mut lvalue = match parse_context.expression(*lvalue) {
                 expr @ AstExpression {
-                    value: Name(_) | BinExpr(BinOp::Dot, _, _),
+                    value: Name(_) | BinExpr(BinOp::Dot, _, _) | BinExpr(BinOp::Index, _, _),
                     ..
                 } => typecheck_expression(expr, parse_context, ir_context, local_scope)?,
                 AstExpression { start, .. } => {
@@ -497,6 +557,8 @@ fn typecheck_expression(
             if left_kind != right_kind
                 || left_kind != IRType::Number(NumericType::Int64)
                     && left_kind != IRType::Number(NumericType::Float64)
+                    && left_kind != IRType::Number(NumericType::Int32)
+                    && left_kind != IRType::Number(NumericType::Float32)
             {
                 return Err(TypecheckError::BinaryOperandMismatch(
                     left_kind, right_kind, start,
@@ -604,19 +666,19 @@ fn resolve_ast_type(
             name => resolve(scope, name)
                 .ok_or_else(|| TypecheckError::UnknownName(name.to_string(), ast_type.start))?,
         },
-        AstTypeValue::Unique(inner) => {
+        pointer @ (AstTypeValue::Unique(inner)
+        | AstTypeValue::Shared(inner)
+        | AstTypeValue::Array(inner)) => {
             let inner = parse_context.kind(*inner);
             let inner = resolve_ast_type(inner, parse_context, ir_context, scope)?;
 
-            ir_context.add_kind(IRType::Unique(inner))
+            match pointer {
+                AstTypeValue::Unique(_) => ir_context.add_kind(IRType::Unique(inner)),
+                AstTypeValue::Shared(_) => ir_context.add_kind(IRType::Shared(inner)),
+                AstTypeValue::Array(_) => ir_context.add_kind(IRType::Array(inner)),
+                _ => unreachable!(),
+            }
         }
-        AstTypeValue::Shared(inner) => {
-            let inner = parse_context.kind(*inner);
-            let inner = resolve_ast_type(inner, parse_context, ir_context, scope)?;
-
-            ir_context.add_kind(IRType::Shared(inner))
-        }
-        AstTypeValue::Array(_) => todo!(),
     })
 }
 

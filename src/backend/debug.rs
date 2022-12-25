@@ -69,6 +69,16 @@ impl DebugInfo {
         id
     }
 
+    pub fn array_type(&mut self, inner_type_id: UnitEntryId) -> UnitEntryId {
+        let unit = &mut self.dwarf.unit;
+        let root = unit.root();
+        let id = unit.add(root, gc::DW_TAG_array_type);
+        let die = unit.get_mut(id);
+        die.set(gc::DW_AT_type, AttributeValue::UnitRef(inner_type_id));
+
+        id
+    }
+
     pub fn function_declaration(
         &mut self,
         function_declaration: &FunDecl,

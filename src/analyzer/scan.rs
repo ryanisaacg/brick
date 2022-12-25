@@ -115,6 +115,12 @@ fn ast_type_to_ir(
 
             IRType::Shared(inner)
         }
-        AstTypeValue::Array(_) => todo!(),
+        AstTypeValue::Array(inner) => {
+            let inner = parse_context.kind(*inner);
+            let inner = ast_type_to_ir(inner, parse_context, ir_context)?;
+            let inner = ir_context.add_kind(inner);
+
+            IRType::Array(inner)
+        }
     })
 }

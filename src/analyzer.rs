@@ -34,6 +34,7 @@ pub enum IRType {
     Number(NumericType),
     Unique(usize),
     Shared(usize),
+    Array(usize),
     Function {
         parameters: Vec<usize>,
         returns: usize,
@@ -79,6 +80,7 @@ impl fmt::Display for IRType {
             Number(Float64) => write!(f, "f64"),
             Unique(inner) => write!(f, "unique {}", inner),
             Shared(inner) => write!(f, "shared {}", inner),
+            Array(inner) => write!(f, "array {}", inner),
             Function {
                 parameters,
                 returns,
@@ -134,6 +136,10 @@ pub enum TypecheckError {
     UnknownName(String, Provenance),
     #[error("Attempted to reference a field on a non-struct type {0} at {1}")]
     IllegalLeftDotOperand(IRType, Provenance),
+    #[error("Attempted to index a non-array-type {0} at {1}")]
+    IllegalNonArrayIndex(IRType, Provenance),
+    #[error("Attempted to index with non-numeric-type {0} at {1}")]
+    IllegalNonNumericIndex(IRType, Provenance),
     #[error("The dot operator must be followed by a name at {0}")]
     IllegalRightHandDotOperand(Provenance),
     #[error("Field {0} not found on {1} at {2}")]
@@ -188,6 +194,8 @@ pub enum IRExpressionValue {
     StructLiteral(HashMap<String, usize>),
     Dot(usize, String),
     BinaryNumeric(BinOpNumeric, usize, usize),
+    ArrayIndex(usize, usize),
+    ArrayLiteralLength(usize, u64),
     Comparison(BinOpComparison, usize, usize),
     If(usize, usize),
     While(usize, usize),
@@ -231,7 +239,12 @@ fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut Vec
             ..
         })
         | Node::Expression(IRExpression {
-            value: Dereference(child) | TakeUnique(child) | TakeShared(child) | Dot(child, _),
+            value:
+                Dereference(child)
+                | TakeUnique(child)
+                | TakeShared(child)
+                | Dot(child, _)
+                | ArrayLiteralLength(child, _),
             ..
         }) => {
             children.push(NodePtr::Expression(*child));
@@ -242,7 +255,8 @@ fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut Vec
                 | Comparison(_, left, right)
                 | If(left, right)
                 | While(left, right)
-                | Assignment(left, right),
+                | Assignment(left, right)
+                | ArrayIndex(left, right),
             ..
         }) => {
             children.push(NodePtr::Expression(*right));
@@ -287,7 +301,7 @@ fn traverse(root: Node<&IRStatement, &IRExpression, &IRType>, children: &mut Vec
                 children.push(NodePtr::Kind(*field));
             }
         }
-        Node::Kind(Unique(inner) | Shared(inner)) => {
+        Node::Kind(Unique(inner) | Shared(inner) | Array(inner)) => {
             children.push(NodePtr::Kind(*inner));
         }
         Node::Kind(Void | Unresolved(..) | IRType::Bool | Number(_))
