@@ -663,16 +663,16 @@ fn resolve_ast_type(
             name => resolve(scope, name)
                 .ok_or_else(|| TypecheckError::UnknownName(name.to_string(), ast_type.start))?,
         },
-        pointer @ (AstNodeValue::Unique(inner)
-        | AstNodeValue::Shared(inner)
-        | AstNodeValue::Array(inner)) => {
+        pointer @ (AstNodeValue::UniqueType(inner)
+        | AstNodeValue::SharedType(inner)
+        | AstNodeValue::ArrayType(inner)) => {
             let inner = &parse_context[*inner];
             let inner = resolve_ast_type(inner, parse_context, ir_context, scope)?;
 
             match pointer {
-                AstNodeValue::Unique(_) => ir_context.add_kind(IRType::Unique(inner)),
-                AstNodeValue::Shared(_) => ir_context.add_kind(IRType::Shared(inner)),
-                AstNodeValue::Array(_) => ir_context.add_kind(IRType::Array(inner)),
+                AstNodeValue::UniqueType(_) => ir_context.add_kind(IRType::Unique(inner)),
+                AstNodeValue::SharedType(_) => ir_context.add_kind(IRType::Shared(inner)),
+                AstNodeValue::ArrayType(_) => ir_context.add_kind(IRType::Array(inner)),
                 _ => unreachable!(),
             }
         }

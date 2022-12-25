@@ -59,9 +59,9 @@ pub enum AstNodeValue {
     Block(Vec<usize>),
 
     // Types
-    Unique(usize),
-    Shared(usize),
-    Array(usize),
+    UniqueType(usize),
+    SharedType(usize),
+    ArrayType(usize),
 }
 
 impl ArenaNode for AstNode {
@@ -75,9 +75,9 @@ impl ArenaNode for AstNode {
             | TakeShared(child)
             | TakeUnique(child)
             | ArrayLiteralLength(child, _)
-            | Unique(child)
-            | Shared(child)
-            | Array(child) => {
+            | UniqueType(child)
+            | SharedType(child)
+            | ArrayType(child) => {
                 children.push(*child);
             }
             BinExpr(_, left, right) | If(left, right) | While(left, right) => {
@@ -397,8 +397,8 @@ fn type_expression(
             let subtype = add_node(context, subtype);
             Ok(AstNode {
                 value: match ptr {
-                    TokenValue::Unique => AstNodeValue::Unique(subtype),
-                    TokenValue::Shared => AstNodeValue::Shared(subtype),
+                    TokenValue::Unique => AstNodeValue::UniqueType(subtype),
+                    TokenValue::Shared => AstNodeValue::SharedType(subtype),
                     _ => unreachable!(),
                 },
                 start: next.start,
@@ -416,7 +416,7 @@ fn type_expression(
             )?;
             let subtype = add_node(context, subtype);
             Ok(AstNode {
-                value: AstNodeValue::Array(subtype),
+                value: AstNodeValue::ArrayType(subtype),
                 start: next.start,
                 end,
             })

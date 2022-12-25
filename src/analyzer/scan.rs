@@ -98,21 +98,21 @@ fn ast_type_to_ir(
             "f32" => Number(Float32),
             _ => Unresolved(string.clone(), ast_type.start),
         },
-        AstNodeValue::Unique(inner) => {
+        AstNodeValue::UniqueType(inner) => {
             let inner = &parse_context[*inner];
             let inner = ast_type_to_ir(inner, parse_context, ir_context)?;
             let inner = ir_context.add_kind(inner);
 
             IRType::Unique(inner)
         }
-        AstNodeValue::Shared(inner) => {
+        AstNodeValue::SharedType(inner) => {
             let inner = &parse_context[*inner];
             let inner = ast_type_to_ir(inner, parse_context, ir_context)?;
             let inner = ir_context.add_kind(inner);
 
             IRType::Shared(inner)
         }
-        AstNodeValue::Array(inner) => {
+        AstNodeValue::ArrayType(inner) => {
             let inner = &parse_context[*inner];
             let inner = ast_type_to_ir(inner, parse_context, ir_context)?;
             let inner = ir_context.add_kind(inner);
