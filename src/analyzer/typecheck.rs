@@ -291,7 +291,7 @@ fn typecheck_expression(
                 end,
             }
         }
-        Assignment(lvalue, rvalue) => {
+        BinExpr(BinOp::Assignment, lvalue, rvalue) => {
             // TODO: provide more error diagnostics
             let mut lvalue = match &parse_context[*lvalue] {
                 expr @ AstNode {
@@ -594,7 +594,7 @@ fn typecheck_expression(
                 }
             }
         }
-        _ => todo!("nested top-level declarations"),
+        other => todo!("nested top-level declarations, {:?}", other),
     })
 }
 

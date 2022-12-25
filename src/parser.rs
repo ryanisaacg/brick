@@ -41,7 +41,6 @@ pub enum AstNodeValue {
     Name(String),
 
     // Expressions
-    Assignment(usize, usize),
     Int(i64),
     Float(f64),
     Bool(bool),
@@ -81,10 +80,7 @@ impl ArenaNode for AstNode {
             | Array(child) => {
                 children.push(*child);
             }
-            Assignment(left, right)
-            | BinExpr(_, left, right)
-            | If(left, right)
-            | While(left, right) => {
+            BinExpr(_, left, right) | If(left, right) | While(left, right) => {
                 children.push(*right);
                 children.push(*left);
             }
@@ -117,12 +113,13 @@ pub enum BinOp {
     LessThan,
     GreaterThan,
     Index,
+    Assignment,
 }
 
 #[derive(Debug, Error)]
 pub enum ParseError {
     #[error("unexpected token {0}, {1}")]
-    UnexpectedLexeme(Box<Token>, &'static str),
+    UnexpectedToken(Box<Token>, &'static str),
     #[error("unexpected end of input at {0}, {1}")]
     UnexpectedEndOfInput(Provenance, &'static str),
     #[error("expected type for parameter at {0}")]
@@ -185,7 +182,7 @@ fn statement(
             }
         }
         _ => {
-            let expr = expression(source, context, start)?;
+            let expr = expression(source, context, start, true)?;
             let start = expr.start;
             let end = expr.end;
             AstNode {
@@ -305,7 +302,13 @@ fn function_declaration(
     } else {
         None
     };
-    let body = block(source, context, start)?;
+    let Token { end, .. } = assert_next_lexeme_eq(
+        source.next(),
+        TokenValue::OpenBracket,
+        start,
+        "expected { after predicate",
+    )?;
+    let body = block(source, context, end)?;
     let end = body.end;
 
     Ok(AstNode {
@@ -348,7 +351,7 @@ fn variable_declaration(
         start,
         "expected = after let binding target",
     )?;
-    let value = expression(source, context, start)?;
+    let value = expression(source, context, start, true)?;
     let end = value.end;
 
     Ok(AstNode {
@@ -423,7 +426,7 @@ fn type_expression(
             start: next.start,
             end: next.end,
         }),
-        _ => Err(ParseError::UnexpectedLexeme(
+        _ => Err(ParseError::UnexpectedToken(
             Box::new(next),
             "expected either 'unique' or type name",
         )),
@@ -434,388 +437,305 @@ fn expression(
     source: &mut TokenIter,
     context: &mut Vec<AstNode>,
     provenance: Provenance,
+    can_be_struct: bool, // TODO: refactor grammar?
 ) -> Result<AstNode, ParseError> {
-    match peek_token(source, provenance, "expected expression")? {
-        Token {
-            value: token @ (TokenValue::If | TokenValue::While),
-            start,
-            ..
-        } => {
-            let start = *start;
-            let token = token.clone();
-            source.next();
-            branch(source, context, token, start)
-        }
-        Token {
-            value: TokenValue::OpenBracket,
-            start,
-            ..
-        } => {
-            let start = *start;
-            block(source, context, start)
-        }
-        _ => assignment_step(source, context, provenance),
-    }
+    expression_pratt(source, context, provenance, 0, can_be_struct)
 }
 
-fn branch(
+// Pratt parser based on https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html
+
+fn expression_pratt(
     source: &mut TokenIter,
     context: &mut Vec<AstNode>,
-    token: TokenValue,
-    start: Provenance,
+    provenance: Provenance,
+    min_binding: u8,
+    can_be_struct: bool,
 ) -> Result<AstNode, ParseError> {
-    let predicate = expression(source, context, start)?;
-    let block = block(source, context, start)?;
+    let Token { value, start, end } = token(source, provenance, "expected expression")?;
+    println!("{:?}", value);
+    let mut left = match value {
+        // TODO: should this be treated as a unary operator instead?
+        TokenValue::Minus => {
+            let (int, _, end) = integer(source, end, "expected digit after negative sign")?;
+            try_decimal(source, -(int as i64), start, end)?
+        }
+        TokenValue::OpenParen => {
+            let left = expression_pratt(source, context, end, 0, can_be_struct)?;
+            assert_next_lexeme_eq(
+                source.next(),
+                TokenValue::CloseParen,
+                left.end,
+                "expected ) to match (",
+            )?;
 
-    let predicate_ptr = add_node(context, predicate);
-    let end = block.end;
-    let block_ptr = add_node(context, block);
-
-    Ok(AstNode {
-        value: if token == TokenValue::If {
-            AstNodeValue::If(predicate_ptr, block_ptr)
-        } else {
-            AstNodeValue::While(predicate_ptr, block_ptr)
+            left
+        }
+        TokenValue::OpenSquare => array_literal(source, context, end, can_be_struct)?,
+        token @ (TokenValue::If | TokenValue::While) => branch(source, context, token, start)?,
+        TokenValue::OpenBracket => block(source, context, start)?,
+        // Atoms
+        TokenValue::True => AstNode {
+            value: AstNodeValue::Bool(true),
+            start,
+            end,
         },
-        start,
-        end,
-    })
-}
-
-fn block(
-    source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
-    start: Provenance,
-) -> Result<AstNode, ParseError> {
-    let start = assert_next_lexeme_eq(
-        source.next(),
-        TokenValue::OpenBracket,
-        start,
-        "expected { to start a block",
-    )?
-    .start;
-    let mut statements = Vec::new();
-    let mut end = start;
-    loop {
-        match peek_token(source, start, "expected statement or close bracket")? {
-            Token {
-                value: TokenValue::CloseBracket,
-                end,
-                ..
-            } => {
-                let end = *end;
-                source.next();
-                return Ok(AstNode {
-                    value: AstNodeValue::Block(statements),
-                    start,
-                    end,
-                });
-            }
-            _ => {
-                let statement = statement(source, context, end)?;
-                end = statement.end;
-                statements.push(add_node(context, statement));
-            }
-        }
-    }
-}
-
-fn assignment_step(
-    source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
-    provenance: Provenance,
-) -> Result<AstNode, ParseError> {
-    let mut root = reference_step(source, context, provenance)?;
-
-    while let Some(Token {
-        value: TokenValue::Equals,
-        start,
-        ..
-    }) = peek_token_optional(source)?
-    {
-        let start = *start;
-        source.next(); // remove the peeked token
-        let right = assignment_step(source, context, start)?;
-
-        let Span {
-            left,
-            right,
+        TokenValue::False => AstNode {
+            value: AstNodeValue::Bool(false),
             start,
             end,
-        } = span(context, root, right);
-
-        root = AstNode {
-            value: AstNodeValue::Assignment(left, right),
+        },
+        TokenValue::Word(word) => AstNode {
+            value: AstNodeValue::Name(word),
             start,
             end,
-        };
-    }
-
-    Ok(root)
-}
-
-fn reference_step(
-    source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
-    provenance: Provenance,
-) -> Result<AstNode, ParseError> {
-    let next = peek_token(source, provenance, "expected reference or expression")?;
-    let start = next.start;
-    match &next.value {
-        lex @ (TokenValue::Shared | TokenValue::Unique) => {
-            let lex = lex.clone();
-            source.next();
-            let child = reference_step(source, context, start)?;
-            let end = child.end;
-            let child = add_node(context, child);
-            Ok(AstNode {
-                value: match lex {
-                    TokenValue::Shared => AstNodeValue::TakeShared(child),
-                    TokenValue::Unique => AstNodeValue::TakeUnique(child),
-                    _ => unreachable!(),
+        },
+        TokenValue::Int(int) => try_decimal(source, int as i64, start, end)?,
+        // Prefix operator
+        value => {
+            let Some(((), right_binding)) = prefix_binding_power(&value) else {
+                return Err(ParseError::UnexpectedToken(
+                    Box::new(Token { value, start, end }),
+                    "expected an expression",
+                ))
+            };
+            let right = expression_pratt(source, context, start, right_binding, can_be_struct)?;
+            let end = right.end;
+            let right = add_node(context, right);
+            AstNode {
+                value: match value {
+                    TokenValue::Shared => AstNodeValue::TakeShared(right),
+                    TokenValue::Unique => AstNodeValue::TakeUnique(right),
+                    other => unreachable!("prefix operator {:?}", other),
                 },
                 start,
                 end,
-            })
+            }
         }
-        _ => comparison_step(source, context, provenance),
-    }
-}
+    };
 
-fn comparison_step(
-    source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
-    provenance: Provenance,
-) -> Result<AstNode, ParseError> {
-    let mut left = sum_step(source, context, provenance)?;
-
-    while let Some(Token {
-        value: token @ (TokenValue::LessThan | TokenValue::GreaterThan),
-        ..
-    }) = peek_token_optional(source)?
-    {
-        let operator = match token {
-            TokenValue::LessThan => BinOp::LessThan,
-            TokenValue::GreaterThan => BinOp::GreaterThan,
-            _ => unreachable!(),
+    loop {
+        let op = match peek_token_optional(source)? {
+            None => break,
+            Some(token) => token,
         };
-        source.next();
-        let right = comparison_step(source, context, provenance)?;
-        left = make_bin_expr(context, operator, left, right);
-    }
 
-    Ok(left)
-}
+        if let Some((binding, ())) = postfix_binding_power(&op.value) {
+            if binding < min_binding {
+                break;
+            }
+            if op.value == TokenValue::OpenBracket && !can_be_struct {
+                break;
+            }
+            let Token { value, end, .. } = already_peeked_token(source)?;
 
-fn sum_step(
-    source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
-    provenance: Provenance,
-) -> Result<AstNode, ParseError> {
-    let mut left = call_step(source, context, provenance)?;
+            match value {
+                TokenValue::OpenParen => {
+                    let mut end = end;
+                    let mut arguments = Vec::new();
 
-    while let Some(Token {
-        value: token @ (TokenValue::Plus | TokenValue::Minus),
-        ..
-    }) = peek_token_optional(source)?
-    {
-        let operator = match token {
-            TokenValue::Plus => BinOp::Add,
-            TokenValue::Minus => BinOp::Subtract,
-            _ => unimplemented!(),
-        };
-        source.next();
-        let right = call_step(source, context, provenance)?;
-        left = make_bin_expr(context, operator, left, right);
-    }
+                    let mut closed = peek_for_closed(
+                        source,
+                        TokenValue::CloseParen,
+                        end,
+                        "expected ) or next argument",
+                    )?;
 
-    Ok(left)
-}
+                    while !closed {
+                        let argument = expression(source, context, provenance, can_be_struct)?;
+                        end = argument.end;
+                        arguments.push(add_node(context, argument));
 
-fn make_bin_expr(
-    context: &mut Vec<AstNode>,
-    operator: BinOp,
-    left: AstNode,
-    right: AstNode,
-) -> AstNode {
-    let start = left.start;
-    let end = right.end;
+                        let (should_break, new_end) = comma_or_end_list(
+                            source,
+                            TokenValue::CloseParen,
+                            end,
+                            "expected comma or ) to end function call",
+                        )?;
+                        end = new_end;
+                        closed = should_break;
+                    }
 
-    AstNode {
-        value: AstNodeValue::BinExpr(operator, add_node(context, left), add_node(context, right)),
-        start,
-        end,
-    }
-}
+                    left = AstNode {
+                        value: AstNodeValue::Call(add_node(context, left), arguments),
+                        start,
+                        end,
+                    };
+                }
+                TokenValue::OpenSquare => {
+                    let index = expression(source, context, end, can_be_struct)?;
+                    let Token { end, .. } = assert_next_lexeme_eq(
+                        source.next(),
+                        TokenValue::CloseSquare,
+                        index.end,
+                        "expected ] to follow array index",
+                    )?;
+                    left = AstNode {
+                        value: AstNodeValue::BinExpr(
+                            BinOp::Index,
+                            add_node(context, left),
+                            add_node(context, index),
+                        ),
+                        start,
+                        end,
+                    };
+                }
+                TokenValue::OpenBracket if can_be_struct => {
+                    let mut end = end;
+                    let mut fields = HashMap::new();
 
-struct Span {
-    left: usize,
-    right: usize,
-    start: Provenance,
-    end: Provenance,
-}
+                    loop {
+                        if TokenValue::CloseBracket
+                            == peek_token(source, end, "expected } or next field")?.value
+                        {
+                            source.next();
+                            break;
+                        }
 
-fn span(context: &mut Vec<AstNode>, left: AstNode, right: AstNode) -> Span {
-    let start = left.start;
-    let end = right.end;
-    let left = add_node(context, left);
-    let right = add_node(context, right);
+                        let (field, field_start, field_end) =
+                            word(source, end, "expected field in struct literal")?;
+                        if let lex @ (TokenValue::Comma | TokenValue::CloseBracket) =
+                            &peek_token(source, end, "expected comma or } to end struct literal")?
+                                .value
+                        {
+                            let lex = lex.clone();
+                            source.next();
+                            let argument = AstNode {
+                                value: AstNodeValue::Name(field.clone()),
+                                start: field_start,
+                                end: field_end,
+                            };
+                            fields.insert(field, add_node(context, argument));
+                            if lex == TokenValue::CloseBracket {
+                                break;
+                            }
+                        } else {
+                            assert_next_lexeme_eq(
+                                source.next(),
+                                TokenValue::Colon,
+                                end,
+                                "expected colon after field name",
+                            )?;
+                            let argument = expression(source, context, provenance, can_be_struct)?;
+                            end = argument.end;
+                            fields.insert(field, add_node(context, argument));
 
-    Span {
-        left,
-        right,
-        start,
-        end,
-    }
-}
+                            if let TokenValue::Comma =
+                                peek_token(source, end, "expected comma or ) to end function call")?
+                                    .value
+                            {
+                                source.next();
+                            } else {
+                                assert_next_lexeme_eq(
+                                    source.next(),
+                                    TokenValue::CloseBracket,
+                                    end,
+                                    "expected close parenthesis or comma after argument",
+                                )?;
+                                break;
+                            }
+                        }
+                    }
 
-fn call_step(
-    source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
-    provenance: Provenance,
-) -> Result<AstNode, ParseError> {
-    let mut root = dot_step(source, context, provenance)?;
+                    let AstNodeValue::Name(name) = left.value else {
+                        todo!("non-name struct literal");
+                    };
 
-    while let Some(Token {
-        value: opening @ (TokenValue::OpenParen | TokenValue::OpenSquare),
-        end,
-        ..
-    }) = peek_token_optional(source)?
-    {
-        let is_square = opening == &TokenValue::OpenSquare;
-        let mut end = *end;
-        source.next(); // remove the peeked token
-        if is_square {
-            let index = expression(source, context, end)?;
-            assert_next_lexeme_eq(
-                source.next(),
-                TokenValue::CloseSquare,
-                end,
-                "expected ] to follow array index",
-            )?;
-            let index = add_node(context, index);
-            let start = root.start;
-            let left = add_node(context, root);
-            root = AstNode {
-                value: AstNodeValue::BinExpr(BinOp::Index, left, index),
+                    left = AstNode {
+                        value: AstNodeValue::StructLiteral { name, fields },
+                        start,
+                        end,
+                    };
+                }
+                token => unreachable!("postfix operator {:?}", token),
+            }
+
+            continue;
+        }
+
+        if let Some((left_binding, right_binding)) = infix_binding_power(&op.value) {
+            if left_binding < min_binding {
+                break;
+            }
+            let Token {
+                value,
+                end: current,
+                ..
+            } = already_peeked_token(source)?;
+
+            let right = expression_pratt(source, context, current, right_binding, can_be_struct)?;
+
+            let bin_op = match value {
+                TokenValue::Equals => BinOp::Assignment,
+                TokenValue::LessThan => BinOp::LessThan,
+                TokenValue::GreaterThan => BinOp::GreaterThan,
+                TokenValue::Plus => BinOp::Add,
+                TokenValue::Minus => BinOp::Subtract,
+                TokenValue::Period => BinOp::Dot,
+                token => unreachable!("binary operator {:?}", token),
+            };
+
+            let start = left.start;
+            let end = right.end;
+            left = AstNode {
+                value: AstNodeValue::BinExpr(
+                    bin_op,
+                    add_node(context, left),
+                    add_node(context, right),
+                ),
                 start,
                 end,
             };
-        } else {
-            let mut arguments = Vec::new();
 
-            let mut closed = peek_for_closed(
-                source,
-                TokenValue::CloseParen,
-                end,
-                "expected ) or next argument",
-            )?;
-
-            while !closed {
-                let argument = expression(source, context, provenance)?;
-                end = argument.end;
-                arguments.push(add_node(context, argument));
-
-                let (should_break, new_end) = comma_or_end_list(
-                    source,
-                    TokenValue::CloseParen,
-                    end,
-                    "expected comma or ) to end function call",
-                )?;
-                end = new_end;
-                closed = should_break;
-            }
-
-            let start = root.start;
-            let function = add_node(context, root);
-
-            root = AstNode {
-                value: AstNodeValue::Call(function, arguments),
-                start,
-                end,
-            }
+            continue;
         }
+
+        break;
     }
 
-    Ok(root)
+    Ok(left)
 }
 
-fn dot_step(
-    source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
-    provenance: Provenance,
-) -> Result<AstNode, ParseError> {
-    let mut root = paren_step(source, context, provenance)?;
-    while let Some(Token {
-        value: TokenValue::Period,
-        ..
-    }) = peek_token_optional(source)?
-    {
-        source.next();
-        let (name, start, end) = word(source, provenance, "expected a name after dot operator")?;
-        let right = add_node(
-            context,
-            AstNode {
-                value: AstNodeValue::Name(name),
-                start,
-                end,
-            },
-        );
-        let start = root.start;
-        let left = add_node(context, root);
-        root = AstNode {
-            value: AstNodeValue::BinExpr(BinOp::Dot, left, right),
-            start,
-            end,
-        };
-    }
+const ASSIGNMENT: u8 = 2;
+const REFERENCE: u8 = ASSIGNMENT + 1;
+const COMPARE: u8 = REFERENCE + 2;
+const SUM: u8 = COMPARE + 2;
+const DOT: u8 = SUM + 2;
+const CALL: u8 = DOT + 1;
 
-    Ok(root)
+fn prefix_binding_power(op: &TokenValue) -> Option<((), u8)> {
+    let res = match op {
+        TokenValue::Shared | TokenValue::Unique => ((), REFERENCE),
+        _ => return None,
+    };
+    Some(res)
 }
 
-fn paren_step(
-    source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
-    provenance: Provenance,
-) -> Result<AstNode, ParseError> {
-    let peeked = peek_token(source, provenance, "expected (, [, or expression")?;
-    match peeked.value {
-        TokenValue::OpenParen => {
-            let start = peeked.start;
-            source.next();
-            paren(source, context, start)
-        }
-        TokenValue::OpenSquare => {
-            let start = peeked.start;
-            source.next();
-            array_literal(source, context, start)
-        }
-        _ => struct_literal_step(source, context, provenance),
-    }
+fn postfix_binding_power(op: &TokenValue) -> Option<(u8, ())> {
+    let res = match op {
+        TokenValue::OpenParen | TokenValue::OpenSquare | TokenValue::OpenBracket => (CALL, ()),
+        _ => return None,
+    };
+    Some(res)
 }
 
-fn paren(
-    source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
-    provenance: Provenance,
-) -> Result<AstNode, ParseError> {
-    let expr = expression(source, context, provenance)?;
-    assert_next_lexeme_eq(
-        source.next(),
-        TokenValue::CloseParen,
-        expr.start,
-        "parenthesized expressions must end with a )",
-    )?;
-
-    Ok(expr)
+fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
+    let res = match op {
+        TokenValue::Equals => (ASSIGNMENT, ASSIGNMENT - 1),
+        TokenValue::LessThan | TokenValue::GreaterThan => (COMPARE, COMPARE - 1),
+        TokenValue::Plus | TokenValue::Minus => (SUM, SUM - 1),
+        TokenValue::Period => (DOT - 1, DOT),
+        _ => return None,
+    };
+    Some(res)
 }
 
 fn array_literal(
     source: &mut TokenIter,
     context: &mut Vec<AstNode>,
     start: Provenance,
+    can_be_struct: bool,
 ) -> Result<AstNode, ParseError> {
-    let expr = expression(source, context, start)?;
+    let expr = expression(source, context, start, can_be_struct)?;
     let separator = token(source, start, "expected comma, semicolon or ]")?;
     match separator.value {
         TokenValue::Comma => {
@@ -836,7 +756,7 @@ fn array_literal(
                     break;
                 }
                 end = peeked.end;
-                let expr = expression(source, context, end)?;
+                let expr = expression(source, context, end, can_be_struct)?;
                 end = expr.end;
                 children.push(add_node(context, expr));
 
@@ -879,131 +799,71 @@ fn array_literal(
                 end: separator.end,
             })
         }
-        _ => Err(ParseError::UnexpectedLexeme(
+        _ => Err(ParseError::UnexpectedToken(
             Box::new(separator),
             "expected comma, semicolon or ]",
         )),
     }
 }
 
-fn struct_literal_step(
+fn branch(
     source: &mut TokenIter,
     context: &mut Vec<AstNode>,
-    provenance: Provenance,
+    token: TokenValue,
+    start: Provenance,
 ) -> Result<AstNode, ParseError> {
-    let atom = atom(source, provenance, "expected a word or atom")?;
-    match (atom, peek_token_optional(source)?) {
-        (
-            AstNode {
-                value: AstNodeValue::Name(name),
-                start,
-                ..
-            },
-            Some(Token {
-                value: TokenValue::OpenBracket,
-                end,
-                ..
-            }),
-        ) => {
-            let name = name;
-            let start = start;
-            let mut end = *end;
-            source.next();
-            let mut fields = HashMap::new();
+    let predicate = expression(source, context, start, false)?;
+    assert_next_lexeme_eq(
+        source.next(),
+        TokenValue::OpenBracket,
+        predicate.end,
+        "expected { after predicate",
+    )?;
+    let block = block(source, context, start)?;
 
-            loop {
-                if TokenValue::CloseBracket
-                    == peek_token(source, end, "expected } or next field")?.value
-                {
-                    source.next();
-                    break;
-                }
+    let predicate_ptr = add_node(context, predicate);
+    let end = block.end;
+    let block_ptr = add_node(context, block);
 
-                let (field, field_start, field_end) =
-                    word(source, end, "expected field in struct literal")?;
-                if let lex @ (TokenValue::Comma | TokenValue::CloseBracket) =
-                    &peek_token(source, end, "expected comma or } to end struct literal")?.value
-                {
-                    let lex = lex.clone();
-                    source.next();
-                    let argument = AstNode {
-                        value: AstNodeValue::Name(field.clone()),
-                        start: field_start,
-                        end: field_end,
-                    };
-                    fields.insert(field, add_node(context, argument));
-                    if lex == TokenValue::CloseBracket {
-                        break;
-                    }
-                } else {
-                    assert_next_lexeme_eq(
-                        source.next(),
-                        TokenValue::Colon,
-                        end,
-                        "expected colon after field name",
-                    )?;
-                    let argument = expression(source, context, provenance)?;
-                    end = argument.end;
-                    fields.insert(field, add_node(context, argument));
-
-                    if let TokenValue::Comma =
-                        peek_token(source, end, "expected comma or ) to end function call")?.value
-                    {
-                        source.next();
-                    } else {
-                        assert_next_lexeme_eq(
-                            source.next(),
-                            TokenValue::CloseBracket,
-                            end,
-                            "expected close parenthesis or comma after argument",
-                        )?;
-                        break;
-                    }
-                }
-            }
-            Ok(AstNode {
-                value: AstNodeValue::StructLiteral { name, fields },
-                start,
-                end,
-            })
-        }
-        (atom, _) => Ok(atom),
-    }
+    Ok(AstNode {
+        value: if token == TokenValue::If {
+            AstNodeValue::If(predicate_ptr, block_ptr)
+        } else {
+            AstNodeValue::While(predicate_ptr, block_ptr)
+        },
+        start,
+        end,
+    })
 }
 
-fn atom(
+fn block(
     source: &mut TokenIter,
-    provenance: Provenance,
-    reason: &'static str,
+    context: &mut Vec<AstNode>,
+    start: Provenance,
 ) -> Result<AstNode, ParseError> {
-    // TODO: expectation reasoning
-    let Token { value, start, end } = token(source, provenance, reason)?;
-    match value {
-        TokenValue::True => Ok(AstNode {
-            value: AstNodeValue::Bool(true),
-            start,
-            end,
-        }),
-        TokenValue::False => Ok(AstNode {
-            value: AstNodeValue::Bool(false),
-            start,
-            end,
-        }),
-        TokenValue::Word(word) => Ok(AstNode {
-            value: AstNodeValue::Name(word),
-            start,
-            end,
-        }),
-        TokenValue::Int(int) => try_decimal(source, int as i64, start, end),
-        // TODO: should this be treated as a unary operator instead?
-        TokenValue::Minus => {
-            let (int, _, end) = integer(source, start, "expected digit after negative sign")?;
-            try_decimal(source, -(int as i64), start, end)
+    let mut statements = Vec::new();
+    let mut end = start;
+    loop {
+        match peek_token(source, start, "expected statement or close bracket")? {
+            Token {
+                value: TokenValue::CloseBracket,
+                end,
+                ..
+            } => {
+                let end = *end;
+                source.next();
+                return Ok(AstNode {
+                    value: AstNodeValue::Block(statements),
+                    start,
+                    end,
+                });
+            }
+            _ => {
+                let statement = statement(source, context, end)?;
+                end = statement.end;
+                statements.push(add_node(context, statement));
+            }
         }
-        value => Err(ParseError::UnexpectedLexeme(
-            Box::new(Token { value, start, end }),
-            reason,
-        )),
     }
 }
 
@@ -1018,7 +878,7 @@ fn integer(
             start,
             end,
         } => Ok((int, start, end)),
-        other => Err(ParseError::UnexpectedLexeme(Box::new(other), reason)),
+        other => Err(ParseError::UnexpectedToken(Box::new(other), reason)),
     }
 }
 
@@ -1045,7 +905,7 @@ fn try_decimal(
                 ..
             } => (value as f64, end),
             other => {
-                return Err(ParseError::UnexpectedLexeme(
+                return Err(ParseError::UnexpectedToken(
                     Box::new(other),
                     "expected number after decimal point",
                 ))
@@ -1094,8 +954,12 @@ fn word(
             end,
             ..
         } => Ok((name, start, end)),
-        other => Err(ParseError::UnexpectedLexeme(Box::new(other), reason)),
+        other => Err(ParseError::UnexpectedToken(Box::new(other), reason)),
     }
+}
+
+fn already_peeked_token(source: &mut TokenIter) -> Result<Token, ParseError> {
+    Ok(source.next().expect("already peeked that token exists")?)
 }
 
 fn peek_token<'a>(
@@ -1137,7 +1001,7 @@ fn assert_lexeme_eq(
     if lexeme.value == target {
         Ok(())
     } else {
-        Err(ParseError::UnexpectedLexeme(
+        Err(ParseError::UnexpectedToken(
             Box::new(lexeme.clone()),
             reason,
         ))
@@ -1164,7 +1028,7 @@ fn comma_or_end_list(
             _ => Ok((false, next.end)),
         },
         other if other == list_end => Ok((true, next.end)),
-        _ => Err(ParseError::UnexpectedLexeme(Box::new(next), reason)),
+        _ => Err(ParseError::UnexpectedToken(Box::new(next), reason)),
     }
 }
 
@@ -1254,7 +1118,7 @@ mod test {
                     Bool(true),
                     Block(_),
                     Expression(_),
-                    Assignment(_, _),
+                    BinExpr(BinOp::Assignment, _, _),
                     Name(_),
                     Int(3),
                 ],

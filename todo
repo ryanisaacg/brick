@@ -1,6 +1,7 @@
 parallel to "progress":
 - the rest of the math operators
 - the rest of the comparison operators
+- += style assignment operators
 - integer promotion
 - integer -> float promotion
 - float -> int casting
@@ -9,15 +10,17 @@ parallel to "progress":
 - constant evaluation
 - namespacing
 - symbols
-- handle disposing of values from functions that aren't used
+- handle disposing of values from functions that aren't used (e.g. Rust ';' statements)
 - early return
 - else statements
 - better type checking for struct fields?
 - Reject null bytes in the lexer
+- parallel parsing
+- module support
+- pretty compiler diagnostics
 
 data structures:
 - array types:
-    - dot-operator on array doesn't parse
     - integer promotion & demotion
     - enforce array indices as i32
 - the ability to heap allocate values
