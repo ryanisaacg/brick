@@ -93,6 +93,8 @@ impl fmt::Display for TokenValue {
 pub enum LexError {
     #[error("unexpected character {0} at {1}")]
     UnexpectedStart(char, Provenance),
+    #[error("illegal null byte in source code at {0}")]
+    IllegalNullByte(Provenance),
 }
 
 pub fn lex<'a>(
@@ -210,6 +212,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 ']' => TokenValue::CloseSquare,
                 '*' => TokenValue::Asterisk,
                 '/' => TokenValue::ForwardSlash,
+                '\0' => return Some(Err(LexError::IllegalNullByte(start))),
                 ch if ch.is_whitespace() => return self.next(),
                 ch => return Some(Err(LexError::UnexpectedStart(ch, start))),
             };

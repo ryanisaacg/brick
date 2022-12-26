@@ -7,7 +7,6 @@ parallel to "progress":
 - namespacing
 - symbols
 - better type checking for struct fields?
-- Reject null bytes in the lexer
 - parallel parsing
 - module support
 - pretty compiler diagnostics
