@@ -1,29 +1,17 @@
 parallel to "progress":
-- the rest of the math operators
-- the rest of the comparison operators
-- += style assignment operators
-- integer demotion
-- integer -> float promotion
-- float -> int casting
-- specify literal types
 - specify variable types
 - real type inference
 - array bounds checking
-- blocks returning values
 - basic extern types
 - constant evaluation
 - namespacing
 - symbols
-- handle disposing of values from functions that aren't used (e.g. Rust ';' statements)
-- early return
-- else statements
 - better type checking for struct fields?
 - Reject null bytes in the lexer
 - parallel parsing
 - module support
 - pretty compiler diagnostics
 - string support
-- check & deref / promote trailing return values, rather than just return statements
 
 data structures:
 - the ability to heap allocate values
@@ -40,6 +28,21 @@ source debugging:
 - generate info for variables
 - generate function preludes and epilogues
 - generate info for computations
+
+number crunching:
+- the rest of the math operators
+- the rest of the comparison operators
+- += style assignment operators
+- integer demotion
+- integer -> float promotion
+- float -> int casting
+- specify literal types
+
+returns / stack management:
+- blocks returning values
+- handle disposing of values from functions that aren't used (e.g. Rust ';' statements)
+- else statements
+- check & deref / promote trailing return values, rather than just return statements
 
 stuff to learn:
 - pattern matching
