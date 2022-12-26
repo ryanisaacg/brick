@@ -22,6 +22,7 @@ parallel to "progress":
 - parallel parsing
 - module support
 - pretty compiler diagnostics
+- string support
 
 data structures:
 - the ability to heap allocate values
