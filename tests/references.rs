@@ -88,3 +88,21 @@ fn increment(val: unique i32): void {
         .unwrap()
     );
 }
+
+#[test]
+fn auto_dereference_promote_return() {
+    assert_eq!(
+        5i64,
+        run_test(
+            r#"
+fn test(): i64 {
+    let a = 5
+    let b = shared a
+    return b
+}
+"#,
+            ()
+        )
+        .unwrap()
+    );
+}

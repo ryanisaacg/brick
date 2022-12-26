@@ -23,6 +23,7 @@ parallel to "progress":
 - module support
 - pretty compiler diagnostics
 - string support
+- check & deref / promote trailing return values, rather than just return statements
 
 data structures:
 - the ability to heap allocate values

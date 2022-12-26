@@ -59,7 +59,10 @@ pub fn compile_file(source_name: &'static str) -> Result<Vec<u8>, CompileError> 
     }
     resolve_type_names(&mut ir_context, &declarations)?;
     let mut ir = Vec::new();
-    let global_scope = [Scope { declarations }];
+    let global_scope = [Scope {
+        declarations,
+        return_type: None,
+    }];
     // TODO: also, parallelize this?
     for (statements, arena) in parsed_files.values() {
         let new_ir = typecheck(
@@ -83,7 +86,10 @@ pub fn compile_source(source_name: &'static str, contents: &str) -> Result<Vec<u
         declarations,
     } = scan_top_level(statements.iter().copied(), &arena, &mut ir_context)?;
     resolve_type_names(&mut ir_context, &declarations)?;
-    let global_scope = [Scope { declarations }];
+    let global_scope = [Scope {
+        declarations,
+        return_type: None,
+    }];
     let ir = typecheck(
         statements.into_iter(),
         &mut ir_context,

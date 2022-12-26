@@ -259,6 +259,7 @@ pub enum BinOpComparison {
 #[derive(Clone, Debug)]
 pub struct Scope {
     pub declarations: HashMap<String, usize>,
+    pub return_type: Option<usize>,
 }
 
 impl ArenaNode for IRNode {

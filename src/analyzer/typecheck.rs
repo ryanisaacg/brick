@@ -22,6 +22,7 @@ pub fn typecheck(
     let mut local_scope = Vec::with_capacity(1 + scopes.len());
     local_scope.push(Scope {
         declarations: HashMap::new(),
+        return_type: None,
     });
     local_scope.extend(scopes.iter().cloned());
 
@@ -41,12 +42,26 @@ pub fn typecheck(
                     return Ok(None);
                 }
                 AstNodeValue::Return(expr) => {
-                    let expr = typecheck_expression(
+                    let mut expr = typecheck_expression(
                         &parse_context[*expr],
                         parse_context,
                         ir_context,
                         &local_scope[..],
                     )?;
+                    for level in scopes {
+                        if let Some(return_type) = level.return_type {
+                            expr = deref_until_parity(ir_context, return_type, expr);
+                            expr = maybe_promote(ir_context, expr, return_type);
+                            if !are_types_equal(ir_context, return_type, expr.kind) {
+                                return Err(TypecheckError::UnexpectedType {
+                                    found: ir_context.kind(expr.kind).clone(),
+                                    expected: ir_context.kind(return_type).clone(),
+                                    provenance: expr.start,
+                                });
+                            }
+                            break;
+                        }
+                    }
                     IRNodeValue::Return(ir_context.add_node(expr))
                 }
                 AstNodeValue::Expression(expr) => {
@@ -120,6 +135,7 @@ pub fn typecheck(
                                 .iter()
                                 .map(|FunctionParameter { name, kind }| (name.to_string(), *kind))
                                 .collect(),
+                            return_type: Some(returns),
                         },
                     );
                     let body = typecheck_expression(
@@ -128,13 +144,15 @@ pub fn typecheck(
                         ir_context,
                         &local_scope[..],
                     )?;
+                    let body = ir_context.add_node(body);
+                    check_returns(ir_context, returns, body)?;
 
                     // TODO: verify body actually returns that type
                     IRNodeValue::FunctionDeclaration(FunDecl {
                         name: name.to_string(),
                         params,
                         returns,
-                        body: ir_context.add_node(body),
+                        body,
                     })
                 }
                 _ => todo!("handle loose statements"),
@@ -243,12 +261,8 @@ fn typecheck_expression(
                             ir_context,
                             local_scope,
                         )?;
-                        let expected_type = ir_context.kind(*expected_type_idx);
-                        let provided_type = ir_context.kind(provided_value.kind);
-                        let derefs = derefs_for_parity(ir_context, expected_type, provided_type);
-                        for _ in 0..derefs {
-                            provided_value = maybe_dereference(provided_value, ir_context);
-                        }
+                        provided_value =
+                            deref_until_parity(ir_context, *expected_type_idx, provided_value);
                         provided_value =
                             maybe_promote(ir_context, provided_value, *expected_type_idx);
                         let provided_value = ir_context.add_node(provided_value);
@@ -316,30 +330,19 @@ fn typecheck_expression(
             let rvalue = &parse_context[*rvalue];
             let mut rvalue = typecheck_expression(rvalue, parse_context, ir_context, local_scope)?;
 
-            let l_derefs_required = derefs_for_parity(
-                ir_context,
-                ir_context.kind(rvalue.kind),
-                ir_context.kind(lvalue.kind),
-            );
+            let l_derefs_required = derefs_for_parity(ir_context, rvalue.kind, lvalue.kind);
             for _ in 0..l_derefs_required {
                 if matches!(ir_context.kind(lvalue.kind), IRType::Shared(_)) {
                     return Err(TypecheckError::AssignToSharedReference(lvalue.end));
                 }
                 lvalue = maybe_dereference(lvalue, ir_context);
             }
-            let r_derefs_required = derefs_for_parity(
-                ir_context,
-                ir_context.kind(rvalue.kind),
-                ir_context.kind(lvalue.kind),
-            );
-            for _ in 0..r_derefs_required {
-                rvalue = maybe_dereference(rvalue, ir_context);
-            }
+            rvalue = deref_until_parity(ir_context, lvalue.kind, rvalue);
             rvalue = maybe_promote(ir_context, rvalue, lvalue.kind);
 
             let l_kind = ir_context.kind(lvalue.kind);
             let r_kind = ir_context.kind(rvalue.kind);
-            if !are_types_equal(ir_context, l_kind, r_kind) {
+            if !are_types_equal(ir_context, lvalue.kind, rvalue.kind) {
                 return Err(TypecheckError::UnexpectedType {
                     found: r_kind.clone(),
                     expected: l_kind.clone(),
@@ -382,19 +385,13 @@ fn typecheck_expression(
                     let argument = &parse_context[*argument];
                     let mut argument =
                         typecheck_expression(argument, parse_context, ir_context, local_scope)?;
-                    let argument_kind = ir_context.kind(argument.kind);
-                    let parameter_kind = ir_context.kind(parameter_types[index]);
-                    let derefs_required =
-                        derefs_for_parity(ir_context, parameter_kind, argument_kind);
-                    for _ in 0..derefs_required {
-                        argument = maybe_dereference(argument, ir_context);
-                    }
+                    argument = deref_until_parity(ir_context, parameter_types[index], argument);
                     argument = maybe_promote(ir_context, argument, parameter_types[index]);
-                    let argument_kind = ir_context.kind(argument.kind);
-                    let parameter_kind = ir_context.kind(parameter_types[index]);
-                    if are_types_equal(ir_context, argument_kind, parameter_kind) {
+                    if are_types_equal(ir_context, argument.kind, parameter_types[index]) {
                         Ok(ir_context.add_node(argument))
                     } else {
+                        let argument_kind = ir_context.kind(argument.kind);
+                        let parameter_kind = ir_context.kind(parameter_types[index]);
                         Err(TypecheckError::UnexpectedType {
                             found: argument_kind.clone(),
                             expected: parameter_kind.clone(),
@@ -636,22 +633,32 @@ fn typecheck_expression(
     })
 }
 
-// TODO: handle needing to reference
-fn derefs_for_parity(ir_context: &IRContext, benchmark: &IRType, argument: &IRType) -> u32 {
+fn deref_until_parity(
+    ir_context: &mut IRContext,
+    benchmark: usize,
+    mut expression: IRNode,
+) -> IRNode {
+    let derefs = derefs_for_parity(ir_context, benchmark, expression.kind);
+    for _ in 0..derefs {
+        expression = maybe_dereference(expression, ir_context);
+    }
+
+    expression
+}
+
+fn derefs_for_parity(ir_context: &IRContext, benchmark_idx: usize, argument: usize) -> u32 {
+    let benchmark = ir_context.kind(benchmark_idx);
+    let argument = ir_context.kind(argument);
     match (benchmark, argument) {
         (
             IRType::Unique(benchmark) | IRType::Shared(benchmark),
             IRType::Unique(argument) | IRType::Shared(argument),
-        ) => derefs_for_parity(
-            ir_context,
-            ir_context.kind(*benchmark),
-            ir_context.kind(*argument),
-        ),
+        ) => derefs_for_parity(ir_context, *benchmark, *argument),
         (IRType::Unique(_benchmark) | IRType::Shared(_benchmark), _) => {
             0 // TODO: should this indicate an error state?
         }
-        (benchmark, IRType::Unique(argument) | IRType::Shared(argument)) => {
-            derefs_for_parity(ir_context, benchmark, ir_context.kind(*argument)) + 1
+        (_, IRType::Unique(argument) | IRType::Shared(argument)) => {
+            derefs_for_parity(ir_context, benchmark_idx, *argument) + 1
         }
         (_benchmark, _guardian) => 0,
     }
@@ -789,12 +796,12 @@ fn resolve(scope: &[Scope], name: &str) -> Option<usize> {
     None
 }
 
-fn are_types_equal(ir_context: &IRContext, a: &IRType, b: &IRType) -> bool {
+fn are_types_equal(ir_context: &IRContext, a: usize, b: usize) -> bool {
     use IRType::*;
+    let a = ir_context.kind(a);
+    let b = ir_context.kind(b);
     match (a, b) {
-        (Unique(a), Unique(b)) | (Shared(a), Shared(b)) => {
-            are_types_equal(ir_context, ir_context.kind(*a), ir_context.kind(*b))
-        }
+        (Unique(a), Unique(b)) | (Shared(a), Shared(b)) => are_types_equal(ir_context, *a, *b),
         (
             Function {
                 parameters: a_param,
@@ -806,33 +813,22 @@ fn are_types_equal(ir_context: &IRContext, a: &IRType, b: &IRType) -> bool {
             },
         ) => {
             a_param.len() == b_param.len()
-                && a_param.iter().zip(b_param.iter()).all(|(a, b)| {
-                    are_types_equal(ir_context, ir_context.kind(*a), ir_context.kind(*b))
-                })
-                && are_types_equal(
-                    ir_context,
-                    ir_context.kind(*a_returns),
-                    ir_context.kind(*b_returns),
-                )
+                && a_param
+                    .iter()
+                    .zip(b_param.iter())
+                    .all(|(a, b)| are_types_equal(ir_context, *a, *b))
+                && are_types_equal(ir_context, *a_returns, *b_returns)
         }
         (Struct { fields: a_fields }, Struct { fields: b_fields }) => {
             a_fields.iter().all(|(a_key, a_value)| {
                 if let Some(b_value) = b_fields.get(a_key) {
-                    are_types_equal(
-                        ir_context,
-                        ir_context.kind(*a_value),
-                        ir_context.kind(*b_value),
-                    )
+                    are_types_equal(ir_context, *a_value, *b_value)
                 } else {
                     false
                 }
             }) && b_fields.iter().all(|(b_key, b_value)| {
                 if let Some(a_value) = a_fields.get(b_key) {
-                    are_types_equal(
-                        ir_context,
-                        ir_context.kind(*b_value),
-                        ir_context.kind(*a_value),
-                    )
+                    are_types_equal(ir_context, *a_value, *b_value)
                 } else {
                     false
                 }
@@ -841,4 +837,18 @@ fn are_types_equal(ir_context: &IRContext, a: &IRType, b: &IRType) -> bool {
         (Void | Bool | Number(_), Void | Bool | Number(_)) => a == b,
         _ => false,
     }
+}
+
+fn check_returns(
+    ir_context: &mut IRContext,
+    return_type: usize,
+    body: usize,
+) -> Result<(), TypecheckError> {
+    let body_expr = ir_context.node(body);
+    if !are_types_equal(ir_context, return_type, body_expr.kind) {
+        // TODO: check if a 'return' statement is guaranteed to be reached
+        // TODO: attempt to repair the body, and return an error if it is impsosible
+    }
+
+    Ok(())
 }
