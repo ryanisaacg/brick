@@ -161,3 +161,25 @@ fn test_fibonacci() {
     assert_eq!(fibonacci(4), 5);
     assert_eq!(fibonacci(5), 8);
 }
+
+#[test]
+fn conditional_return() {
+    assert_eq!(
+        1,
+        run_test(
+            r#"
+fn test(): i32 {
+    if false {
+        return 0;
+    }
+    if true {
+        return 1;
+    }
+    2
+}
+"#,
+            ()
+        )
+        .unwrap()
+    );
+}

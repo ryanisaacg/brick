@@ -40,6 +40,15 @@ pub fn typecheck(
                     // TODO: disallow inside functions?
                     return Ok(None);
                 }
+                AstNodeValue::Return(expr) => {
+                    let expr = typecheck_expression(
+                        &parse_context[*expr],
+                        parse_context,
+                        ir_context,
+                        &local_scope[..],
+                    )?;
+                    IRNodeValue::Return(ir_context.add_node(expr))
+                }
                 AstNodeValue::Expression(expr) => {
                     let expr = typecheck_expression(
                         &parse_context[*expr],

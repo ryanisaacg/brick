@@ -341,6 +341,10 @@ fn emit_function_declaration(ctx: &mut EmitContext<'_>, stack_size: u32, decl: &
 fn emit_node(ctx: &mut EmitContext<'_>, expr_index: usize) {
     let expr = ctx.arena.node(expr_index);
     match &expr.value {
+        IRNodeValue::Return(expr) => {
+            emit_node(ctx, *expr);
+            ctx.add_instruction(Instruction::Return);
+        }
         IRNodeValue::ArrayIndex(array, index) => {
             // TODO: is this generally the correct way to handle things? is there a case where
             // there's a non-lvalue-array?

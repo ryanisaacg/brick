@@ -37,6 +37,7 @@ pub enum AstNodeValue {
     Declaration(String, usize),
     Expression(usize), // TODO: should I just remove this wrapper?
     Import(String),
+    Return(usize),
 
     Name(String),
 
@@ -77,6 +78,7 @@ impl ArenaNode for AstNode {
             | ArrayLiteralLength(child, _)
             | UniqueType(child)
             | SharedType(child)
+            | Return(child)
             | ArrayType(child) => {
                 children.push(*child);
             }
@@ -168,7 +170,8 @@ fn statement(
                 value @ (TokenValue::Let
                 | TokenValue::Import
                 | TokenValue::Function
-                | TokenValue::Struct),
+                | TokenValue::Struct
+                | TokenValue::Return),
             start,
             ..
         } => {
@@ -180,6 +183,7 @@ fn statement(
                 TokenValue::Import => import_declaration(source, start)?,
                 TokenValue::Function => function_declaration(source, context, start)?,
                 TokenValue::Struct => struct_declaration(source, context, start)?,
+                TokenValue::Return => return_declaration(source, context, start)?,
                 _ => unreachable!(),
             }
         }
@@ -202,6 +206,22 @@ fn statement(
         source.next();
     }
     Ok(statement)
+}
+
+fn return_declaration(
+    source: &mut TokenIter,
+    context: &mut Vec<AstNode>,
+    start: Provenance,
+) -> Result<AstNode, ParseError> {
+    let value = expression(source, context, start, true)?;
+    let end = value.end;
+    let value = add_node(context, value);
+
+    Ok(AstNode {
+        value: AstNodeValue::Return(value),
+        start,
+        end,
+    })
 }
 
 fn struct_declaration(

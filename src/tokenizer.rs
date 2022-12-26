@@ -48,6 +48,7 @@ pub enum TokenValue {
     Struct,
     Unique,
     Shared,
+    Return,
 }
 
 impl fmt::Display for TokenValue {
@@ -83,6 +84,7 @@ impl fmt::Display for TokenValue {
             Struct => write!(f, "keyword struct"),
             Unique => write!(f, "keyword unique"),
             Shared => write!(f, "keyword shared"),
+            Return => write!(f, "keyword return"),
         }
     }
 }
@@ -169,6 +171,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "struct" => TokenValue::Struct,
                         "unique" => TokenValue::Unique,
                         "shared" => TokenValue::Shared,
+                        "return" => TokenValue::Return,
                         _ => TokenValue::Word(word),
                     }
                 }
