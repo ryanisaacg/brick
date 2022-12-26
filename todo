@@ -13,9 +13,10 @@ parallel to "progress":
 - string support
 
 data structures:
-- the ability to heap allocate values
 - sum types
 - parametrics polymorphism
+- the ability to grow arrays
+- the ability to heap allocate values
 
 closures (blocked by data structures):
 - nested function declarations
