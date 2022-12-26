@@ -186,6 +186,8 @@ pub enum TypecheckError {
     IllegalRightHandDotOperand(Provenance),
     #[error("Field {0} not found on {1} at {2}")]
     FieldNotFound(String, IRType, Provenance),
+    #[error("Attempted to assign to shared reference at {0}")]
+    AssignToSharedReference(Provenance),
 }
 
 #[derive(Debug)]

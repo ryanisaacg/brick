@@ -313,6 +313,9 @@ fn typecheck_expression(
                 ir_context.kind(lvalue.kind),
             );
             for _ in 0..l_derefs_required {
+                if matches!(ir_context.kind(lvalue.kind), IRType::Shared(_)) {
+                    return Err(TypecheckError::AssignToSharedReference(lvalue.end));
+                }
                 lvalue = maybe_dereference(lvalue, ir_context);
             }
             let r_derefs_required = derefs_for_parity(
