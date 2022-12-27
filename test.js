@@ -1,5 +1,6 @@
 var url = "out.wasm";
-WebAssembly.instantiateStreaming(fetch(url)).then((result) => {
+const importObject = { imports: { print: (arg) => console.log(arg) } };
+WebAssembly.instantiateStreaming(fetch(url), importObject).then((result) => {
   window.brick = result.instance;
   const store_in_mem = result.instance.exports.store_in_mem;
   const memory = result.instance.exports.memory;

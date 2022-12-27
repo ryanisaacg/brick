@@ -29,6 +29,12 @@ pub enum AstNodeValue {
         params: Vec<NameAndType>,
         returns: Option<usize>,
         body: usize,
+        is_extern: bool,
+    },
+    ExternFunctionBinding {
+        name: String,
+        params: Vec<NameAndType>,
+        returns: Option<usize>,
     },
     StructDeclaration {
         name: String,
@@ -102,7 +108,13 @@ impl ArenaNode for AstNode {
                     children.push(*expression);
                 }
             }
-            Name(_) | Import(_) | StructDeclaration { .. } | Int(_) | Float(_) | Bool(_) => {}
+            Name(_)
+            | Import(_)
+            | StructDeclaration { .. }
+            | Int(_)
+            | Float(_)
+            | Bool(_)
+            | ExternFunctionBinding { .. } => {}
         }
     }
 }
@@ -164,23 +176,18 @@ fn statement(
     context: &mut Vec<AstNode>,
     start: Provenance,
 ) -> Result<AstNode, ParseError> {
-    let statement = match peek_token(source, start, "expected let, fn, or expression")? {
-        Token {
-            value:
-                value @ (TokenValue::Let
-                | TokenValue::Import
-                | TokenValue::Function
-                | TokenValue::Struct
-                | TokenValue::Return),
-            start,
-            ..
-        } => {
-            let start = *start;
-            let value = value.clone();
-            source.next();
+    let statement = match peek_token(source, start, "expected let, fn, or expression")?.value {
+        TokenValue::Let
+        | TokenValue::Import
+        | TokenValue::Function
+        | TokenValue::Extern
+        | TokenValue::Struct
+        | TokenValue::Return => {
+            let Token { start, value, .. } = already_peeked_token(source)?;
             match value {
                 TokenValue::Let => variable_declaration(source, context, start)?,
                 TokenValue::Import => import_declaration(source, start)?,
+                TokenValue::Extern => extern_function_declaration(source, context, start)?,
                 TokenValue::Function => function_declaration(source, context, start)?,
                 TokenValue::Struct => struct_declaration(source, context, start)?,
                 TokenValue::Return => return_declaration(source, context, start)?,
@@ -271,12 +278,105 @@ fn struct_declaration(
     })
 }
 
+fn extern_function_declaration(
+    source: &mut TokenIter,
+    context: &mut Vec<AstNode>,
+    start: Provenance,
+) -> Result<AstNode, ParseError> {
+    assert_next_lexeme_eq(
+        source.next(),
+        TokenValue::Function,
+        start,
+        "expected 'fn' after 'extern'",
+    )?;
+    let FunctionHeader {
+        name,
+        params,
+        returns,
+        end,
+    } = function_header(source, context, start)?;
+
+    let next = token(source, end, "expected ; or { after extern fn decl")?;
+    let (value, end) = match &next.value {
+        TokenValue::Semicolon => (
+            AstNodeValue::ExternFunctionBinding {
+                name,
+                params,
+                returns,
+            },
+            next.end,
+        ),
+        TokenValue::OpenBracket => {
+            let body = block(source, context, end)?;
+            let end = body.end;
+            (
+                AstNodeValue::FunctionDeclaration {
+                    name,
+                    params,
+                    returns,
+                    body: add_node(context, body),
+                    is_extern: false,
+                },
+                end,
+            )
+        }
+        _ => {
+            return Err(ParseError::UnexpectedToken(
+                Box::new(next),
+                "expected ; or { after extern fn decl",
+            ))
+        }
+    };
+
+    Ok(AstNode { value, start, end })
+}
+
 fn function_declaration(
     source: &mut TokenIter,
     context: &mut Vec<AstNode>,
     start: Provenance,
 ) -> Result<AstNode, ParseError> {
-    let (name, _, end) = word(source, start, "expected name after 'fn'")?;
+    let FunctionHeader {
+        name,
+        params,
+        returns,
+        end: _,
+    } = function_header(source, context, start)?;
+    let Token { end, .. } = assert_next_lexeme_eq(
+        source.next(),
+        TokenValue::OpenBracket,
+        start,
+        "expected { after function declaration",
+    )?;
+    let body = block(source, context, end)?;
+    let end = body.end;
+
+    Ok(AstNode {
+        value: AstNodeValue::FunctionDeclaration {
+            name,
+            params,
+            returns,
+            body: add_node(context, body),
+            is_extern: false,
+        },
+        start,
+        end,
+    })
+}
+
+struct FunctionHeader {
+    name: String,
+    params: Vec<NameAndType>,
+    returns: Option<usize>,
+    end: Provenance,
+}
+
+fn function_header(
+    source: &mut TokenIter,
+    context: &mut Vec<AstNode>,
+    start: Provenance,
+) -> Result<FunctionHeader, ParseError> {
+    let (name, _, mut end) = word(source, start, "expected name after 'fn'")?;
 
     let mut pos = assert_next_lexeme_eq(
         source.next(),
@@ -304,43 +404,34 @@ fn function_declaration(
             }
         }
     }
-    assert_next_lexeme_eq(
+    end = assert_next_lexeme_eq(
         source.next(),
         TokenValue::CloseParen,
         pos,
         "expected closing parenthesis to end parameters",
-    )?;
+    )?
+    .end;
     let returns = if let Token {
         value: TokenValue::Colon,
         start,
-        ..
+        end: colon_end,
     } = peek_token(source, start, "expected body after function declaration")?
     {
         let start = *start;
+        end = *colon_end;
         source.next();
         let kind = type_expression(source, context, start)?;
         let kind = add_node(context, kind);
+
         Some(kind)
     } else {
         None
     };
-    let Token { end, .. } = assert_next_lexeme_eq(
-        source.next(),
-        TokenValue::OpenBracket,
-        start,
-        "expected { after predicate",
-    )?;
-    let body = block(source, context, end)?;
-    let end = body.end;
 
-    Ok(AstNode {
-        value: AstNodeValue::FunctionDeclaration {
-            name,
-            params,
-            returns,
-            body: add_node(context, body),
-        },
-        start,
+    Ok(FunctionHeader {
+        name,
+        params,
+        returns,
         end,
     })
 }

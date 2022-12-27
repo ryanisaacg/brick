@@ -49,6 +49,7 @@ pub enum TokenValue {
     Unique,
     Shared,
     Return,
+    Extern,
 }
 
 impl fmt::Display for TokenValue {
@@ -85,6 +86,7 @@ impl fmt::Display for TokenValue {
             Unique => write!(f, "keyword unique"),
             Shared => write!(f, "keyword shared"),
             Return => write!(f, "keyword return"),
+            Extern => write!(f, "keyword extern"),
         }
     }
 }
@@ -174,6 +176,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "unique" => TokenValue::Unique,
                         "shared" => TokenValue::Shared,
                         "return" => TokenValue::Return,
+                        "extern" => TokenValue::Extern,
                         _ => TokenValue::Word(word),
                     }
                 }

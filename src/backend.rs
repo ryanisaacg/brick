@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::{
     analyzer::{
-        BinOpComparison, BinOpNumeric, FunDecl, IRContext, IRNode, IRNodeValue, IRType,
-        NumericType, F32_KIND, I32_KIND,
+        BinOpComparison, BinOpNumeric, FunDecl, FunctionParameter, IRContext, IRNode, IRNodeValue,
+        IRType, NumericType, F32_KIND, I32_KIND,
     },
     arena::ArenaIter,
 };
@@ -35,19 +35,32 @@ pub fn emit(statements: Vec<IRNode>, arena: &IRContext, with_debug: bool) -> Vec
     let mut module = Module::new();
     let mut types = TypeSection::new();
     let mut functions = FunctionSection::new();
+    let mut imports = ImportSection::new();
     let mut exports = ExportSection::new();
     let mut codes = CodeSection::new();
     let mut globals = GlobalSection::new();
+    let mut memories = MemorySection::new();
 
     let mut function_indices = HashMap::new();
 
-    // TODO: how stable is this order
+    let mut current_fn_type_idx = 0;
+    let mut main = None;
 
-    let mut current_function_idx = 0;
+    // The imports will have the indices before the functions,
+    // because of WASM module order
     for statement in statements.iter() {
-        if let IRNodeValue::FunctionDeclaration(decl) = &statement.value {
-            function_indices.insert(decl.name.clone(), current_function_idx);
-            current_function_idx += 1;
+        if let IRNodeValue::ExternFunctionBinding { name, .. } = &statement.value {
+            function_indices.insert(name.clone(), current_fn_type_idx);
+            current_fn_type_idx += 1;
+        }
+    }
+    for statement in statements.iter() {
+        if let IRNodeValue::FunctionDeclaration(FunDecl { name, .. }) = &statement.value {
+            function_indices.insert(name.clone(), current_fn_type_idx);
+            if name == "main" {
+                main = Some(current_fn_type_idx);
+            }
+            current_fn_type_idx += 1;
         }
     }
 
@@ -121,14 +134,34 @@ pub fn emit(statements: Vec<IRNode>, arena: &IRContext, with_debug: bool) -> Vec
         }
     }
 
-    current_function_idx = 0;
-
+    current_fn_type_idx = 0;
+    for statement in statements.iter() {
+        if let IRNodeValue::ExternFunctionBinding {
+            name,
+            params,
+            returns,
+        } = &statement.value
+        {
+            emit_function_types(params, *returns, &type_representations, &mut types);
+            imports.import(
+                "imports", // TODO: is this name important?
+                name,
+                EntityType::Function(current_fn_type_idx),
+            );
+            current_fn_type_idx += 1;
+        }
+    }
     for statement in statements {
         if let IRNodeValue::FunctionDeclaration(decl) = statement.value {
-            emit_function_types(&decl, &type_representations, &mut types);
-            functions.function(current_function_idx);
+            emit_function_types(
+                &decl.params,
+                decl.returns,
+                &type_representations,
+                &mut types,
+            );
+            functions.function(current_fn_type_idx);
             // TODO: should we export function
-            exports.export(decl.name.as_ref(), ExportKind::Func, current_function_idx);
+            exports.export(decl.name.as_ref(), ExportKind::Func, current_fn_type_idx);
             let LocalsAnalysis {
                 name_to_offset,
                 parameter_locals,
@@ -166,15 +199,12 @@ pub fn emit(statements: Vec<IRNode>, arena: &IRContext, with_debug: bool) -> Vec
                 Some((low_addr, high_addr)),
             );
 
-            current_function_idx += 1;
+            current_fn_type_idx += 1;
         }
     }
 
     debug_info.set_unit_range(0, codes.byte_len());
 
-    module.section(&types);
-    module.section(&functions);
-    let mut memories = MemorySection::new();
     memories.memory(MemoryType {
         minimum: MEMORY_MINIMUM_PAGES,
         maximum: Some(MAXIMUM_MEMORY),
@@ -182,9 +212,16 @@ pub fn emit(statements: Vec<IRNode>, arena: &IRContext, with_debug: bool) -> Vec
         shared: false,
     });
     exports.export("memory", ExportKind::Memory, 0);
+
+    module.section(&types);
+    module.section(&imports);
+    module.section(&functions);
     module.section(&memories);
     module.section(&globals);
     module.section(&exports);
+    if let Some(function_index) = main {
+        module.section(&StartSection { function_index });
+    }
     module.section(&codes);
 
     if with_debug {
@@ -207,18 +244,19 @@ pub fn emit(statements: Vec<IRNode>, arena: &IRContext, with_debug: bool) -> Vec
 }
 
 fn emit_function_types(
-    decl: &FunDecl,
+    params: &[FunctionParameter],
+    returns: usize,
     type_representations: &[Representation],
     types: &mut TypeSection,
 ) {
-    let mut params = Vec::new();
-    for param in decl.params.iter() {
-        flatten_repr(&type_representations[param.kind], &mut params);
+    let mut wasm_params = Vec::new();
+    for param in params.iter() {
+        flatten_repr(&type_representations[param.kind], &mut wasm_params);
     }
     let mut results = Vec::new();
-    flatten_repr(&type_representations[decl.returns], &mut results);
+    flatten_repr(&type_representations[returns], &mut results);
 
-    types.function(params, results);
+    types.function(wasm_params, results);
 }
 
 // TODO: handle different bind points with the same name
@@ -578,7 +616,7 @@ fn emit_node(ctx: &mut EmitContext<'_>, expr_index: usize) {
                 emit_node(ctx, *statement);
             }
         }
-        IRNodeValue::FunctionDeclaration(_) => {
+        IRNodeValue::ExternFunctionBinding { .. } | IRNodeValue::FunctionDeclaration(_) => {
             unreachable!(); // TODO
         }
         IRNodeValue::Expression(expr) => {

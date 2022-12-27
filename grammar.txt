@@ -2,46 +2,47 @@ word ::= /[A-Za-z_][A-Za-z_0-9]/
 integer ::= /[0-9_]/
 float ::= integer | integer "." integer
 
-block ::= "{" block_contents "}"
-block_contents = statement | statement block_contents
-
 statement ::= import | declaration | assignment | function | expression | expression ";"
 import ::= "import" word
 declaration ::= "let" word "=" expression ";"
 assignment ::= word "=" expression ";"
-function ::= "fn" word "(" function_args ")" type_annotation block
-    function_args ::= word type_annotation |
-        word type_annotation "," |
-        word type_annotation "," function_args
+
+function ::= maybe_extern function_header type_annotation block
+external_function_declaration ::= "extern" function_header ";"
+function_header ::= "fn" word "(" function_args ")"
+maybe_extern ::= ε | "extern"
+
 struct ::= "struct" word "{" function_args "}"
+
+function_args ::= word type_annotation |
+    word type_annotation "," |
+    word type_annotation "," function_args
 
 type_annotation ::= ":" type
 type ::= word | "unique" type | "shared" type | "[" type "]"
 
-expression ::= if_expr | while_expr | block_expr | assignment_expr
-assignment ::= reference | reference "=" reference
-reference ::= compare | "shared" reference | "unique" reference
-compare ::= sum | sum ">" compare | sum "<" compare
-sum ::= call | call "+" sum | call "-" sum
-call ::= dot |
-    dot "(" call_param ")" | dot "(" call_param ")" call |
-    dot "[" expression "]" | dot "[" expression "]" call
+expression ::= if_expr | while_expr | block | operator | call | "(" expression ")" | array_literal | struct_literal
+operator ::= assignment | reference | numeric | boolean | dot
+assignment ::= expression "=" expression
+reference ::= "shared" expression | "unique" expression
+compare ::= expression ">" expression | expression "<" expression
+numeric ::= expression "+" expression | expression "-" expression | expression "*" expression | expression "/" expression
+dot ::= expression "." word
+call ::=  expression "(" call_param ")" | expression "(" call_param ")" |
+    expression "[" expression "]" | expression "[" expression "]" 
     call_param ::= expression |
         expression "," |
         expression "," call_param
-dot ::= paren | paren "." dot_chain
-    dot_chain ::= word | word "." word
-paren ::= array_literal | struct_literal | "(" expression ")"
-    array_literal ::= "[" expression ";" integer "]" | "[" array_literal_items "]"
-        array_literal_items = expression | expression "," | expression "," array_literal_items
-    struct_literal ::= atom | word "{" struct_literal_params "}"
-        struct_literal_params ::= word | word "," |
-            word "," struct_literal_params |
-            word ":" expression | word ":" expression "," |
-            word ":" expression "," struct_literal_params
+array_literal ::= "[" expression ";" integer "]" | "[" array_literal_items "]"
+    array_literal_items = expression | expression "," | expression "," array_literal_items
+struct_literal ::= atom | word "{" struct_literal_params "}"
+    struct_literal_params ::= word | word "," |
+        word "," struct_literal_params |
+        word ":" expression | word ":" expression "," |
+        word ":" expression "," struct_literal_params
 atom ::= word | integer | "-"integer | float | "-"float
 
-if_expr ::= "if" expression block_expr
-while_expr ::= "while" expression block_expr
-block_expr ::= "{" block_contents "}"
+if_expr ::= "if" expression block
+while_expr ::= "while" expression block
+block ::= "{" block_contents "}"
     block_contents ::= statement | statement block_contents

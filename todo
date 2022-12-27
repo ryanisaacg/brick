@@ -11,6 +11,7 @@ parallel to "progress":
 - module support
 - pretty compiler diagnostics
 - string support
+- forbid name collisions
 
 data structures:
 - sum types

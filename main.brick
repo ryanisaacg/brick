@@ -1,7 +1,5 @@
-fn test(): i64 {
-    difference(2, 3)
+fn test(): void{
+    mutate(5);
 }
 
-fn difference(a: i64, b: i64): i64 {
-    a - b
-}
+extern fn mutate(value: i32): void;

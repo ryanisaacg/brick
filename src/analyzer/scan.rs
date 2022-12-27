@@ -24,10 +24,16 @@ pub fn scan_top_level(
         let statement = &parse_context[statement];
         match &statement.value {
             AstNodeValue::Import(name) => imports.push(name.to_string()),
-            AstNodeValue::FunctionDeclaration {
+            AstNodeValue::ExternFunctionBinding {
                 name,
                 params,
                 returns,
+            }
+            | AstNodeValue::FunctionDeclaration {
+                name,
+                params,
+                returns,
+                is_extern: _,
                 body: _,
             } => {
                 let parameters = params

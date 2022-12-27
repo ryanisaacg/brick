@@ -196,6 +196,7 @@ pub struct FunDecl {
     pub params: Vec<FunctionParameter>,
     pub returns: usize,
     pub body: usize,
+    pub is_extern: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -233,6 +234,11 @@ pub enum IRNodeValue {
     TakeShared(usize),
     Block(Vec<usize>),
     FunctionDeclaration(FunDecl),
+    ExternFunctionBinding {
+        name: String,
+        params: Vec<FunctionParameter>,
+        returns: usize,
+    },
     Expression(usize),
     Declaration(String, usize),
     Return(usize),
@@ -304,7 +310,7 @@ impl ArenaNode for IRNode {
                     children.push(*field);
                 }
             }
-            Bool(_) | Int(_) | Float(_) | LocalVariable(_) => {}
+            Bool(_) | Int(_) | Float(_) | LocalVariable(_) | ExternFunctionBinding { .. } => {}
         }
     }
 }

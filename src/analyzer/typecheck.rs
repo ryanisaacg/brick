@@ -85,11 +85,67 @@ pub fn typecheck(
                         .insert(name.to_string(), expr.kind);
                     IRNodeValue::Declaration(name.clone(), ir_context.add_node(expr))
                 }
+                AstNodeValue::ExternFunctionBinding {
+                    name,
+                    params,
+                    returns,
+                } => {
+                    // TODO: do not allow complex types
+                    let params = params
+                        .iter()
+                        .map(|param| {
+                            let kind = resolve_ast_type(
+                                &parse_context[param.kind],
+                                parse_context,
+                                ir_context,
+                                &local_scope[..],
+                            )?;
+                            Ok(FunctionParameter {
+                                name: param.name.to_string(),
+                                kind,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    let returns = returns
+                        .as_ref()
+                        .map(|type_name| {
+                            resolve_ast_type(
+                                &parse_context[*type_name],
+                                parse_context,
+                                ir_context,
+                                &local_scope[..],
+                            )
+                        })
+                        .unwrap_or(Ok(VOID_KIND))?;
+
+                    // TODO: do we need to insert the function into the global scope?
+                    // I think scan handles that
+
+                    let mut local_scope = local_scope.clone();
+                    local_scope.insert(
+                        0,
+                        Scope {
+                            declarations: params
+                                .iter()
+                                .map(|FunctionParameter { name, kind }| (name.to_string(), *kind))
+                                .collect(),
+                            return_type: Some(returns),
+                        },
+                    );
+
+                    IRNodeValue::ExternFunctionBinding {
+                        name: name.to_string(),
+                        params,
+                        returns,
+                    }
+                }
                 AstNodeValue::FunctionDeclaration {
                     name,
                     params,
                     returns,
                     body,
+                    is_extern,
                 } => {
                     let params = params
                         .iter()
@@ -153,6 +209,7 @@ pub fn typecheck(
                         params,
                         returns,
                         body,
+                        is_extern: *is_extern,
                     })
                 }
                 _ => todo!("handle loose statements"),
