@@ -2,7 +2,6 @@ parallel to "progress":
 - specify variable types
 - real type inference
 - array bounds checking
-- basic extern types
 - constant evaluation
 - namespacing
 - symbols
@@ -44,6 +43,10 @@ returns / stack management:
 - handle disposing of values from functions that aren't used (e.g. Rust ';' statements)
 - else statements
 - check & deref / promote trailing return values, rather than just return statements
+
+extern types:
+- ensure that only legal types are used
+- support function refs and extern refs
 
 stuff to learn:
 - pattern matching
