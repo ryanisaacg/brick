@@ -10,7 +10,6 @@ use super::{
     BOOL_KIND, F32_KIND, F64_KIND, I32_KIND, I64_KIND, VOID_KIND,
 };
 // TODO: unification of separate IRContexts?
-// TODO: initial header-file like parse
 
 pub fn typecheck(
     statements: impl Iterator<Item = usize>,
