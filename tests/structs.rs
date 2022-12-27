@@ -21,7 +21,7 @@ fn add_points(a: Point, b: Point): Point {
     }
 }
 
-fn test(x: f64, y: f64): f64 {
+extern fn test(x: f64, y: f64): f64 {
     let new_point = add_points(Point { x, y }, Point { x: 1.0, y: 2.0 })
     new_point.y = new_point.y - 1.0
     new_point.x + new_point.y
@@ -49,7 +49,7 @@ fn logic(input: Input): f64 {
     value
 }
 
-fn test(double: bool, value: f64): f64 {
+extern fn test(double: bool, value: f64): f64 {
     logic(Input { double, value })
 }
 "#,
@@ -79,7 +79,7 @@ fn set_x_to_five(point: unique Point): void {
     point.x = 5.0
 }
 
-fn test(): f64 {
+extern fn test(): f64 {
     let point = Point { x: 3.0, y: 1.0 }
     set_x_to_five(unique point)
     point.x
@@ -114,7 +114,7 @@ fn perimeter (rect: Rectangle): f64 {
     width + width + height + height
 }
 
-fn test(): f64 {
+extern fn test(): f64 {
    perimeter(Rectangle {
         tl: Point {
             x: 1.0,
@@ -142,7 +142,7 @@ struct Point {
     y: f64,
 }
 
-fn test(): void {
+extern fn test(): void {
     let value = Point { x: 1.0, y: 2.0 };
     let new_value = value;
 }

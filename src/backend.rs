@@ -160,8 +160,9 @@ pub fn emit(statements: Vec<IRNode>, arena: &IRContext, with_debug: bool) -> Vec
                 &mut types,
             );
             functions.function(current_fn_type_idx);
-            // TODO: should we export function
-            exports.export(decl.name.as_ref(), ExportKind::Func, current_fn_type_idx);
+            if decl.is_extern {
+                exports.export(decl.name.as_ref(), ExportKind::Func, current_fn_type_idx);
+            }
             let LocalsAnalysis {
                 name_to_offset,
                 parameter_locals,

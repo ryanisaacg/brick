@@ -8,7 +8,7 @@ fn basic_array() {
         5.0,
         run_test::<i32, f32>(
             r#"
-fn test(index: i32): f32 {
+extern fn test(index: i32): f32 {
     let values = [7.0; 3];
     values[index] = values[index] - 2.0;
     values[index - index] = 4.0;
@@ -34,7 +34,7 @@ struct Point {
     y: i32,
 }
 
-fn test(): i32 {
+extern fn test(): i32 {
     let values = [Point { x: 500, y: 2}; 3];
 
     values[2].x
@@ -52,7 +52,7 @@ fn multiple_arrays() {
         120,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let initial = [120; 1];
     let last = [240; 1];
     last[0] = 6;
@@ -72,7 +72,7 @@ fn two_d_array() {
         7,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let two_array = [[7; 100]; 3];
 
     two_array[2][30]
@@ -90,7 +90,7 @@ fn three_d_array() {
         300,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let three_array = [[[300; 100]; 100]; 500];
 
     three_array[10][10][10]

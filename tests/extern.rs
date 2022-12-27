@@ -14,7 +14,7 @@ fn arithmetic() {
     };
     let (engine, module) = source_to_module(
         r#"
-fn test(): void{
+extern fn test(): void{
     mutate(5);
 }
 

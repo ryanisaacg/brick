@@ -7,7 +7,7 @@ fn auto_dereference() {
         10,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let a = 5
     let b = shared a
     let c = a + b
@@ -27,7 +27,7 @@ fn reject_wrong_kind() {
         1,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let a = 5
     mutate(shared a, 1)
     a
@@ -50,7 +50,7 @@ fn assign_to_shared() {
         1,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let a = 5
     mutate(shared a, 1)
     a
@@ -72,7 +72,7 @@ fn mutation_auto_dereference() {
         6,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let a = 5
     increment(unique a)
     a
@@ -95,7 +95,7 @@ fn auto_dereference_promote_return() {
         5i64,
         run_test(
             r#"
-fn test(): i64 {
+extern fn test(): i64 {
     let a = 5
     let b = shared a
     return b

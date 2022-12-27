@@ -9,7 +9,7 @@ fn arguments() {
         a + b,
         run_test(
             r#"
-fn test(a: i64, b: i64): i64 {
+extern fn test(a: i64, b: i64): i64 {
     a + b
 }"#,
             (a, b)
@@ -24,7 +24,7 @@ fn call_function() {
         -1i64,
         run_test(
             r#"
-fn test(): i64 {
+extern fn test(): i64 {
     difference(2, 3)
 }
 
@@ -44,7 +44,7 @@ fn call_and_return() {
         2,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let a = 2
     let b = difference(2, 3)
     a
@@ -71,7 +71,7 @@ fn difference(a: f64, b: f64): f64 {
     a - b
 }
 
-fn test(): i64 {
+extern fn test(): i64 {
     difference(2.0, 3)
 }
 "#,
@@ -87,7 +87,7 @@ fn return_values() {
         5,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let result = 9000
     result = returns_five()
     result
@@ -107,7 +107,7 @@ fn returns_five(): i32 {
 fn recursive_sum(n: i32) -> i32 {
     run_test(
         r#"
-fn test(n: i32): i32 {
+extern fn test(n: i32): i32 {
     let result = 9000
     result = sum(n)
     result
@@ -135,7 +135,7 @@ fn test_recursive_sum() {
 fn fibonacci(n: i32) -> i32 {
     run_test(
         r#"
-fn test(n: i32): i32 {
+extern fn test(n: i32): i32 {
     fib(n)
 }
 
@@ -168,7 +168,7 @@ fn conditional_return() {
         1,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     if false {
         return 0;
     }

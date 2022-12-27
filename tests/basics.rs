@@ -7,7 +7,7 @@ fn arithmetic() {
         2,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     1 + 2 + 3 - 4
 }"#,
             ()
@@ -22,7 +22,7 @@ fn order_of_operations() {
         7,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     1 + 2 * 3
 }"#,
             ()
@@ -37,7 +37,7 @@ fn assignment() {
         3,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let a = 0;
     a = 3;
     a
@@ -55,7 +55,7 @@ fn branching() {
         6,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let a = 0;
     if a < 2 {
         a = 6;
@@ -78,7 +78,7 @@ fn looping() {
         5,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let a = 0;
     while a < 5 {
         a = a + 1;
@@ -98,7 +98,7 @@ fn floating_point() {
         2.5,
         run_test::<(), f32>(
             r#"
-fn test(): f32 {
+extern fn test(): f32 {
     1.0 + 1.5
 }"#,
             ()
@@ -113,7 +113,7 @@ fn multiple_vars() {
         10,
         run_test(
             r#"
-fn test(): i32 {
+extern fn test(): i32 {
     let a = 1;
     let b = a + 1;
     let c = b + 1;
@@ -131,7 +131,7 @@ fn test(): i32 {
 fn require_declarations() {
     run_test::<_, ()>(
         r#"
-    fn test(): void {
+    extern fn test(): void {
         a = 1
     }
     "#,

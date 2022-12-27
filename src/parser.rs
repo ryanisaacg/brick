@@ -315,7 +315,7 @@ fn extern_function_declaration(
                     params,
                     returns,
                     body: add_node(context, body),
-                    is_extern: false,
+                    is_extern: true,
                 },
                 end,
             )
