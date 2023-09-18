@@ -1,5 +1,0 @@
-fn test(): void{
-    mutate(5);
-}
-
-extern fn mutate(value: i32): void;
