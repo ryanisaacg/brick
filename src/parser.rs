@@ -22,24 +22,37 @@ pub struct AstNode {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct FunctionDeclarationValue {
+    pub name: String,
+    pub params: Vec<NameAndType>,
+    pub returns: Option<usize>,
+    pub body: usize,
+    /**
+     * Whether this function is available to extern. Distinct from declaring an extern function
+     * is available in the environment
+     */
+    pub is_extern: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExternFunctionBindingValue {
+    name: String,
+    params: Vec<NameAndType>,
+    returns: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StructDeclarationValue {
+    name: String,
+    fields: Vec<NameAndType>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum AstNodeValue {
     // Statements
-    FunctionDeclaration {
-        name: String,
-        params: Vec<NameAndType>,
-        returns: Option<usize>,
-        body: usize,
-        is_extern: bool,
-    },
-    ExternFunctionBinding {
-        name: String,
-        params: Vec<NameAndType>,
-        returns: Option<usize>,
-    },
-    StructDeclaration {
-        name: String,
-        fields: Vec<NameAndType>,
-    },
+    FunctionDeclaration(FunctionDeclarationValue),
+    ExternFunctionBinding(ExternFunctionBindingValue),
+    StructDeclaration(StructDeclarationValue),
     Declaration(String, usize),
     Expression(usize), // TODO: should I just remove this wrapper?
     Import(String),
@@ -78,7 +91,7 @@ impl ArenaNode for AstNode {
         match &self.value {
             Declaration(_, child)
             | Expression(child)
-            | FunctionDeclaration { body: child, .. }
+            | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { body: child, .. })
             | TakeShared(child)
             | TakeUnique(child)
             | ArrayLiteralLength(child, _)
@@ -272,7 +285,7 @@ fn struct_declaration(
     }
 
     Ok(AstNode {
-        value: AstNodeValue::StructDeclaration { name, fields },
+        value: AstNodeValue::StructDeclaration(StructDeclarationValue { name, fields }),
         start,
         end,
     })
@@ -299,24 +312,24 @@ fn extern_function_declaration(
     let next = token(source, end, "expected ; or { after extern fn decl")?;
     let (value, end) = match &next.value {
         TokenValue::Semicolon => (
-            AstNodeValue::ExternFunctionBinding {
+            AstNodeValue::ExternFunctionBinding(ExternFunctionBindingValue {
                 name,
                 params,
                 returns,
-            },
+            }),
             next.end,
         ),
         TokenValue::OpenBracket => {
             let body = block(source, context, end)?;
             let end = body.end;
             (
-                AstNodeValue::FunctionDeclaration {
+                AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
                     name,
                     params,
                     returns,
                     body: add_node(context, body),
                     is_extern: true,
-                },
+                }),
                 end,
             )
         }
@@ -352,13 +365,13 @@ fn function_declaration(
     let end = body.end;
 
     Ok(AstNode {
-        value: AstNodeValue::FunctionDeclaration {
+        value: AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
             name,
             params,
             returns,
             body: add_node(context, body),
             is_extern: false,
-        },
+        }),
         start,
         end,
     })
@@ -1276,10 +1289,10 @@ mod test {
         assert_matches!(
             matchable_nodes.as_slice(),
             &[&[
-                FunctionDeclaration {
+                FunctionDeclaration(FunctionDeclarationValue {
                     returns: Some(_),
                     ..
-                },
+                }),
                 Block(_),
                 Expression(_),
                 BinExpr(BinOp::Add, _, _),

@@ -4,6 +4,8 @@ use std::io;
 
 use thiserror::Error;
 
+mod id;
+
 pub mod analyzer;
 pub mod arena;
 pub mod parser;

@@ -1,45 +1,25 @@
 use crate::{
-    parser::{AstNode, AstNodeValue},
+    id::{IDMap, ID},
+    parser::{self, AstNode, AstNodeValue},
     provenance::Provenance,
 };
 
-pub struct Module {
-    pub imports: Vec<Import>,
-    pub functions: Vec<Function>,
-    pub structs: Vec<Struct>,
+pub struct ParserModule {
+    pub imports: IDMap<Import>,
+    pub functions: IDMap<parser::FunctionDeclarationValue>,
+    pub externs: IDMap<parser::ExternFunctionBindingValue>,
+    pub structs: IDMap<parser::StructDeclarationValue>,
 }
 
-// TODO: should this be an enum of Resolved vs Unresolved?
 pub struct Import {
     pub path: String,
 }
 
-pub struct Function {
-    pub name: String,
-    pub params: Vec<NameAndType>,
-    pub returns: MaybeResolvedType,
-    pub body_node: usize,
-    pub is_extern: bool,
-}
-
-pub struct ExternFunction {
-    pub name: String,
-    pub params: Vec<NameAndType>,
-    pub returns: MaybeResolvedType,
-}
-
-pub struct Struct {
-    pub name: String,
-    pub fields: Vec<NameAndType>,
-}
-
-pub struct NameAndType {
-    pub name: String,
-    pub type_: MaybeResolvedType,
-}
-
-pub enum MaybeResolvedType {
-    Unresolved { type_expr_node: usize },
+pub enum ResolvedType {
+    Integer,
+    Float,
+    Reference(ID),
+    BrokenReference, // TODO: include error info
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -49,35 +29,40 @@ pub enum ResolutionErrors {
     IllegalTopLevelNode(AstNode, Provenance),
 }
 
-pub fn resolve_module(
+pub fn top_levels_to_module(
     top_level_nodes: Vec<usize>,
     nodes: Vec<AstNode>,
-) -> Result<Module, ResolutionErrors> {
-    let module = Module {
-        imports: Vec::new(),
-        functions: Vec::new(),
-        structs: Vec::new(),
+) -> (ParserModule, Vec<ResolutionErrors>) {
+    let mut module = ParserModule {
+        imports: IDMap::new(),
+        functions: IDMap::new(),
+        externs: IDMap::new(),
+        structs: IDMap::new(),
     };
+    let mut errors = Vec::new();
 
     for node_ref in top_level_nodes {
         let node = &nodes[node_ref];
         match &node.value {
-            AstNodeValue::FunctionDeclaration {
-                name,
-                params,
-                returns,
-                body,
-                is_extern,
-            } => {}
-            AstNodeValue::ExternFunctionBinding {
-                name,
-                params,
-                returns,
-            } => {}
-            AstNodeValue::StructDeclaration { name, fields } => {}
-            AstNodeValue::Import(path) => {}
+            AstNodeValue::FunctionDeclaration(val) => {
+                let id = ID::new();
+                module.functions.insert(id, val.clone());
+            }
+            AstNodeValue::ExternFunctionBinding(val) => {
+                let id = ID::new();
+                module.externs.insert(id, val.clone());
+            }
+            AstNodeValue::StructDeclaration(val) => {
+                let id = ID::new();
+                module.structs.insert(id, val.clone());
+            }
+            AstNodeValue::Import(path) => {
+                // TODO: deduplicate imports at this stage?
+                let id = ID::new();
+                module.imports.insert(id, Import { path: path.clone() });
+            }
             _ => {
-                return Err(ResolutionErrors::IllegalTopLevelNode(
+                errors.push(ResolutionErrors::IllegalTopLevelNode(
                     node.clone(),
                     node.start,
                 ));
@@ -85,5 +70,5 @@ pub fn resolve_module(
         }
     }
 
-    Ok(module)
+    (module, errors)
 }
