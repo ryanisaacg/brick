@@ -1,7 +1,7 @@
 use crate::{
     id::{IDMap, ID},
     parser::{self, AstNode, AstNodeValue},
-    provenance::Provenance,
+    provenance::SourceMarker,
 };
 
 pub struct ParserModule {
@@ -26,7 +26,7 @@ pub enum ResolvedType {
 pub enum ResolutionErrors {
     // TODO: better formatting
     #[error("unexpected top-level node {0:?} at {1}")]
-    IllegalTopLevelNode(AstNode, Provenance),
+    IllegalTopLevelNode(AstNodeValue, SourceMarker),
 }
 
 pub fn top_levels_to_module(
@@ -63,8 +63,8 @@ pub fn top_levels_to_module(
             }
             _ => {
                 errors.push(ResolutionErrors::IllegalTopLevelNode(
-                    node.clone(),
-                    node.start,
+                    node.value.clone(),
+                    node.provenance.start(),
                 ));
             }
         }

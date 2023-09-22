@@ -2,18 +2,17 @@ use std::fmt;
 use std::iter::Peekable;
 use thiserror::Error;
 
-use crate::provenance::Provenance;
+use crate::provenance::{SourceMarker, SourceRange};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Token {
     pub value: TokenValue,
-    pub start: Provenance,
-    pub end: Provenance,
+    pub range: SourceRange,
 }
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}", self.value, self.start)
+        write!(f, "{} at {}", self.value, self.range)
     }
 }
 
@@ -94,9 +93,9 @@ impl fmt::Display for TokenValue {
 #[derive(Clone, Debug, Error)]
 pub enum LexError {
     #[error("unexpected character {0} at {1}")]
-    UnexpectedStart(char, Provenance),
+    UnexpectedStart(char, SourceMarker),
     #[error("illegal null byte in source code at {0}")]
-    IllegalNullByte(Provenance),
+    IllegalNullByte(SourceMarker),
 }
 
 pub fn lex<'a>(
@@ -124,7 +123,7 @@ struct TokenIterator<T: Iterator<Item = char>> {
 }
 
 impl<T: Iterator<Item = char>> TokenIterator<T> {
-    fn next_char(&mut self) -> Option<(char, Provenance)> {
+    fn next_char(&mut self) -> Option<(char, SourceMarker)> {
         match self.source.next() {
             None => None,
             Some('\n') => {
@@ -136,7 +135,7 @@ impl<T: Iterator<Item = char>> TokenIterator<T> {
                 self.offset += 1;
                 Some((
                     chr,
-                    Provenance::new(self.source_name, self.source_text, self.line, self.offset),
+                    SourceMarker::new(self.source_name, self.source_text, self.line, self.offset),
                 ))
             }
         }
@@ -222,8 +221,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
 
             Some(Ok(Token {
                 value,
-                start,
-                end: end.unwrap_or(start),
+                range: SourceRange::new(start, end.unwrap_or(start)),
             }))
         } else {
             None
