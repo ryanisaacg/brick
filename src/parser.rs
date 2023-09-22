@@ -14,7 +14,7 @@ pub struct NameAndType {
     pub kind: usize,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AstNode {
     pub value: AstNodeValue,
     pub start: Provenance,
