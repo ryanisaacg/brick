@@ -1,55 +1,7 @@
-parallel to "progress":
-- specify variable types
-- real type inference
-- array bounds checking
-- constant evaluation
-- namespacing
-- symbols
-- better type checking for struct fields?
-- parallel parsing
-- module support
-- pretty compiler diagnostics
-- string support
-- forbid name collisions
+parsing / resolving:
+- rewrite imports to be dot-separated namespace paths?
+- allow dot operator to traverse namespaces
+- fully resolve type-level statements before starting expression statements
 
-data structures:
-- sum types
-- parametrics polymorphism
-- the ability to grow arrays
-- the ability to heap allocate values
-
-closures (blocked by data structures):
-- nested function declarations
-- create the capture environment
-- figure out how to make runtime function calls
-
-source debugging:
-- actually generate a line program that represents the source
-- generate info for variables
-- generate function preludes and epilogues
-- generate info for computations
-
-number crunching:
-- the rest of the math operators
-- the rest of the comparison operators
-- += style assignment operators
-- integer demotion
-- integer -> float promotion
-- float -> int casting
-- specify literal types
-
-returns / stack management:
-- blocks returning values
-- handle disposing of values from functions that aren't used (e.g. Rust ';' statements)
-- else statements
-- check & deref / promote trailing return values, rather than just return statements
-
-extern types:
-- ensure that only legal types are used
-- support function refs and extern refs
-
-stuff to learn:
-- pattern matching
-- borrow-checking
-- optimizations?
-
+semantic analysis:
+- create a control-flow graph of function bodies
