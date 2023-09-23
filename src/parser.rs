@@ -11,7 +11,7 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NameAndType {
     pub name: String,
-    pub kind: usize,
+    pub type_: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -35,15 +35,15 @@ pub struct FunctionDeclarationValue {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExternFunctionBindingValue {
-    name: String,
-    params: Vec<NameAndType>,
-    returns: Option<usize>,
+    pub name: String,
+    pub params: Vec<NameAndType>,
+    pub returns: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructDeclarationValue {
-    name: String,
-    fields: Vec<NameAndType>,
+    pub name: String,
+    pub fields: Vec<NameAndType>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -261,7 +261,7 @@ fn struct_declaration(
         cursor = range.end();
         let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
         let kind = add_node(context, kind);
-        fields.push(NameAndType { name, kind });
+        fields.push(NameAndType { name, type_: kind });
 
         let (should_end, range) = comma_or_end_list(
             source,
@@ -405,7 +405,7 @@ fn function_header(
                 cursor = range.end();
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
                 let kind = add_node(context, kind);
-                params.push(NameAndType { name, kind });
+                params.push(NameAndType { name, type_: kind });
             }
         }
     }
