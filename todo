@@ -1,7 +1,7 @@
-parsing / resolving:
-- rewrite imports to be dot-separated namespace paths?
-- allow dot operator to traverse namespaces
-- fully resolve type-level statements before starting expression statements
+import support:
+- allow imports to have nested paths
+- allow imports to include a list of things, with an optional catch-all
+- properly pull foreign resolved types from imports
 
 semantic analysis:
 - create a control-flow graph of function bodies

@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::{
     arena::ArenaNode,
+    id::{IDMap, ID},
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
 };
@@ -11,7 +12,7 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NameAndType {
     pub name: String,
-    pub type_: usize,
+    pub type_: ID,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -24,8 +25,8 @@ pub struct AstNode {
 pub struct FunctionDeclarationValue {
     pub name: String,
     pub params: Vec<NameAndType>,
-    pub returns: Option<usize>,
-    pub body: usize,
+    pub returns: Option<ID>,
+    pub body: ID,
     /**
      * Whether this function is available to extern. Distinct from declaring an extern function
      * is available in the environment
@@ -37,7 +38,7 @@ pub struct FunctionDeclarationValue {
 pub struct ExternFunctionBindingValue {
     pub name: String,
     pub params: Vec<NameAndType>,
-    pub returns: Option<usize>,
+    pub returns: Option<ID>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,9 +53,9 @@ pub enum AstNodeValue {
     FunctionDeclaration(FunctionDeclarationValue),
     ExternFunctionBinding(ExternFunctionBindingValue),
     StructDeclaration(StructDeclarationValue),
-    Declaration(String, usize),
+    Declaration(String, ID),
     Import(String),
-    Return(usize),
+    Return(ID),
 
     Name(String),
 
@@ -62,28 +63,28 @@ pub enum AstNodeValue {
     Int(i64),
     Float(f64),
     Bool(bool),
-    BinExpr(BinOp, usize, usize),
-    If(usize, usize),
-    While(usize, usize),
-    Call(usize, Vec<usize>),
-    TakeUnique(usize),
-    TakeShared(usize),
+    BinExpr(BinOp, ID, ID),
+    If(ID, ID),
+    While(ID, ID),
+    Call(ID, Vec<ID>),
+    TakeUnique(ID),
+    TakeShared(ID),
     StructLiteral {
         name: String,
-        fields: HashMap<String, usize>,
+        fields: HashMap<String, ID>,
     },
-    ArrayLiteral(Vec<usize>),
-    ArrayLiteralLength(usize, u64),
-    Block(Vec<usize>),
+    ArrayLiteral(Vec<ID>),
+    ArrayLiteralLength(ID, u64),
+    Block(Vec<ID>),
 
     // Types
-    UniqueType(usize),
-    SharedType(usize),
-    ArrayType(usize),
+    UniqueType(ID),
+    SharedType(ID),
+    ArrayType(ID),
 }
 
 impl ArenaNode for AstNode {
-    fn write_children(&self, children: &mut Vec<usize>) {
+    fn write_children(&self, children: &mut Vec<ID>) {
         use AstNodeValue::*;
 
         match &self.value {
@@ -152,38 +153,68 @@ pub enum ParseError {
     MissingTypeForParam(SourceMarker),
     #[error("token error: {0}")]
     TokenError(#[from] LexError),
+    #[error("unexpected top-level statement at {0}")]
+    UnexpectedTopLevelStatement(SourceRange),
 }
 
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, LexError>>;
 type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
+pub struct ParsedSourceFile {
+    pub nodes: IDMap<AstNode>,
+    pub imports: Vec<ID>,
+    pub functions: Vec<ID>,
+    pub types: Vec<ID>,
+}
+
 pub fn parse(
     mut source: impl Iterator<Item = Result<Token, LexError>>,
-) -> Result<(Vec<usize>, Vec<AstNode>), ParseError> {
+) -> Result<ParsedSourceFile, ParseError> {
     let mut source = (&mut source as TokenIterInner<'_>).peekable();
-    let mut context = Vec::new();
+    let mut context = IDMap::new();
 
-    let mut top_level = Vec::new();
+    let mut imports = Vec::new();
+    let mut functions = Vec::new();
+    let mut types = Vec::new();
 
     while let Some(lexeme) = peek_token_optional(&mut source)? {
         let cursor = lexeme.range.start();
         let statement = statement(&mut source, &mut context, cursor)?;
-        top_level.push(add_node(&mut context, statement));
+        let id = add_node(&mut context, statement);
+
+        let statement = &context[&id];
+        match statement.value {
+            AstNodeValue::Import(_) => imports.push(id),
+            AstNodeValue::StructDeclaration(_) => types.push(id),
+            AstNodeValue::FunctionDeclaration(_) | AstNodeValue::ExternFunctionBinding(_) => {
+                functions.push(id);
+            }
+            _ => {
+                return Err(ParseError::UnexpectedTopLevelStatement(
+                    statement.provenance.clone(),
+                ));
+            }
+        }
     }
 
-    Ok((top_level, context))
+    Ok(ParsedSourceFile {
+        nodes: context,
+        imports,
+        functions,
+        types,
+    })
 }
 
-fn add_node(context: &mut Vec<AstNode>, node: AstNode) -> usize {
-    let idx = context.len();
-    context.push(node);
+fn add_node(context: &mut IDMap<AstNode>, node: AstNode) -> ID {
+    let id = ID::new();
+    context.insert(id, node);
 
-    idx
+    id
 }
 
 fn statement(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     cursor: SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let statement = match peek_token(source, cursor, "expected let, fn, or expression")?.value {
@@ -219,7 +250,7 @@ fn statement(
 
 fn return_declaration(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     cursor: SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let value = expression(source, context, cursor, true)?;
@@ -234,7 +265,7 @@ fn return_declaration(
 
 fn struct_declaration(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     cursor: SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let (name, mut provenance) = word(source, cursor, "expected name after 'struct'")?;
@@ -282,7 +313,7 @@ fn struct_declaration(
 
 fn extern_function_declaration(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     start: SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let mut provenance = assert_next_lexeme_eq(
@@ -338,7 +369,7 @@ fn extern_function_declaration(
 
 fn function_declaration(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     start: SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let FunctionHeader {
@@ -372,13 +403,13 @@ fn function_declaration(
 struct FunctionHeader {
     name: String,
     params: Vec<NameAndType>,
-    returns: Option<usize>,
+    returns: Option<ID>,
     end: SourceMarker,
 }
 
 fn function_header(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     cursor: SourceMarker,
 ) -> Result<FunctionHeader, ParseError> {
     let (name, provenance) = word(source, cursor, "expected name after 'fn'")?;
@@ -451,7 +482,7 @@ fn import_declaration(source: &mut TokenIter, cursor: SourceMarker) -> Result<As
 
 fn variable_declaration(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     cursor: SourceMarker,
 ) -> Result<AstNode, ParseError> {
     // TODO: store type hint in declarations
@@ -480,7 +511,7 @@ fn variable_declaration(
 
 fn name_and_type_hint(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     cursor: SourceMarker,
     reason: &'static str,
 ) -> Result<(String, SourceRange, Option<AstNode>), ParseError> {
@@ -506,7 +537,7 @@ fn name_and_type_hint(
 
 fn type_expression(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     cursor: SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let next = token(source, cursor, "expected type")?;
@@ -552,7 +583,7 @@ fn type_expression(
 
 fn expression(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     provenance: SourceMarker,
     can_be_struct: bool, // TODO: refactor grammar?
 ) -> Result<AstNode, ParseError> {
@@ -563,7 +594,7 @@ fn expression(
 
 fn expression_pratt(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     start: SourceMarker,
     min_binding: u8,
     can_be_struct: bool,
@@ -845,7 +876,7 @@ fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
 
 fn array_literal(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     start: SourceMarker,
     can_be_struct: bool,
 ) -> Result<AstNode, ParseError> {
@@ -919,7 +950,7 @@ fn array_literal(
 
 fn if_or_while(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     if_or_while: TokenValue,
     cursor: SourceMarker,
 ) -> Result<AstNode, ParseError> {
@@ -949,7 +980,7 @@ fn if_or_while(
 
 fn block(
     source: &mut TokenIter,
-    context: &mut Vec<AstNode>,
+    context: &mut IDMap<AstNode>,
     cursor: SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let mut statements = Vec::new();
