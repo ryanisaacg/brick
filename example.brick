@@ -1,3 +1,5 @@
-fn add_i64(a: i64, b: shared i64): i64 {
-    a + b
+fn add_i64(a: i64, b: i64): i64 {
+    if a {
+        a + b
+    }
 }

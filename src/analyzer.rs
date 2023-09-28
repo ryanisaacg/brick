@@ -23,5 +23,6 @@ pub fn typecheck(file: ParsedSourceFile) {
 }
 
 fn typecheck_function(function: &ResolvedFunction, ast_nodes: &IDMap<AstNode>) {
-    let _cfg = build_control_flow_graph(function, ast_nodes);
+    let cfg = build_control_flow_graph(function, ast_nodes);
+    println!("{:?}", cfg);
 }

@@ -1,7 +1,10 @@
-//use brick::compile_file;
-//use std::fs;
+use brick::compile_file;
+use std::fs::read_to_string;
 
 fn main() {
-    //let binary = compile_file("main").unwrap();
-    //fs::write("out.wasm", binary).expect("Unable to write file");
+    compile_file(
+        "example.brick",
+        read_to_string("example.brick").expect("file should be readable"),
+    )
+    .unwrap();
 }

@@ -1201,9 +1201,11 @@ mod test {
         })
     }
 
+    // TODO: take ParsedSourceModule for these tests rather than the old raw AST
+
     #[test]
     fn adding() {
-        let (statements, ast) = parse(tokens(&[
+        let ParsedSourceFile { nodes, .. } = parse(tokens(&[
             TokenValue::Let,
             TokenValue::Word("a".to_string()),
             TokenValue::Equals,
@@ -1226,9 +1228,9 @@ mod test {
             TokenValue::Word("a".to_string()),
         ]))
         .unwrap();
-        let lines = statements
+        let lines = nodes
             .iter()
-            .map(|statement| {
+            .map(|(_id, statement)| {
                 ArenaIter::iter_from(&ast, *statement)
                     .map(|(_, node)| &node.value)
                     .collect()
