@@ -1,4 +1,4 @@
-use crate::id::{IDMap, ID};
+/*use crate::id::{IDMap, ID};
 
 pub struct ArenaIter<'a, T: ArenaNode> {
     arena: &'a IDMap<T>,
@@ -28,5 +28,5 @@ impl<'a, T: ArenaNode> Iterator for ArenaIter<'a, T> {
 }
 
 pub trait ArenaNode {
-    fn write_children(&self, children: &mut Vec<ID>);
-}
+    fn write_children(&self, children: &mut Vec<&'a Self>);
+}*/

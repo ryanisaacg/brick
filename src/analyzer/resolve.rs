@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use typed_arena::Arena;
+
 use crate::{
     id::{IDMap, ID},
     parser::{
@@ -8,8 +10,8 @@ use crate::{
     },
 };
 
-pub struct ResolvedModule {
-    pub nodes: IDMap<AstNode>,
+pub struct ResolvedModule<'a> {
+    pub nodes: Arena<AstNode<'a>>,
     pub imports: IDMap<Import>,
     pub functions: IDMap<ResolvedCallable>,
     pub types: IDMap<ResolvedStruct>,
