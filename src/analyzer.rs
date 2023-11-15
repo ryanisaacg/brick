@@ -1,28 +1,22 @@
-use crate::{
-    id::IDMap,
-    parser::{AstNode, ParsedSourceFile},
-};
+use crate::parser::{AstNodeValue, FunctionDeclarationValue, ParsedSourceFile};
 
-use self::{
-    control_flow_graph::build_control_flow_graph,
-    resolve::{resolve_module, ResolvedCallable, ResolvedFunction},
-};
+use self::control_flow_graph::build_control_flow_graph;
 
 mod control_flow_graph;
-mod resolve;
+//mod resolve;
 
-pub fn typecheck(file: ParsedSourceFile) {
-    let module = resolve_module(file);
+pub fn typecheck<'a>(file: ParsedSourceFile<'a>) {
+    //let module = resolve_module(file);
 
-    for function in module.functions.values() {
-        match function {
-            ResolvedCallable::Function(func) => typecheck_function(func, &module.nodes),
-            ResolvedCallable::Extern(_ex) => {}
+    for function in file.functions.iter() {
+        // TODO
+        match &function.value {
+            AstNodeValue::FunctionDeclaration(func) => typecheck_function(func),
+            _ => unreachable!(),
         }
     }
 }
 
-fn typecheck_function(function: &ResolvedFunction, ast_nodes: &IDMap<AstNode>) {
-    let cfg = build_control_flow_graph(function, ast_nodes);
-    println!("{:?}", cfg);
+fn typecheck_function<'a>(function: &'a FunctionDeclarationValue<'a>) {
+    let cfg = build_control_flow_graph(&function.body);
 }

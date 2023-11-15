@@ -2,12 +2,12 @@
 
 use std::io;
 
-//use analyzer::typecheck;
+use analyzer::typecheck;
 use thiserror::Error;
 
 mod id;
 
-//pub mod analyzer;
+pub mod analyzer;
 pub mod arena;
 pub mod parser;
 pub mod provenance;
@@ -28,7 +28,7 @@ pub fn compile_file(source_name: &'static str, contents: String) -> Result<(), C
     let tokens = tokenizer::lex(source_name, contents);
     let mut parse_nodes = Arena::new();
     let parsed_module = parser::parse(&mut parse_nodes, tokens)?;
-    //typecheck(parsed_module);
+    typecheck(parsed_module);
 
     Ok(())
 }

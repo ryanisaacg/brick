@@ -1,158 +1,135 @@
 use crate::{
     arena::ArenaNode,
-    id::{IDMap, ID},
     parser::{AstNode, AstNodeValue},
 };
 
-use super::resolve::ResolvedFunction;
+use petgraph::stable_graph::{NodeIndex, StableGraph};
 
-pub fn build_control_flow_graph(
-    function: &ResolvedFunction,
-    ast_nodes: &IDMap<AstNode>,
-) -> ControlFlowGraph {
-    let mut cfg_nodes = IDMap::new();
-    let end_node_id = ID::new();
-    // TODO: enum member for end node?
-    cfg_nodes.insert(end_node_id, ControlFlowNode::default());
-    let root = create_graph_for_node(function.body, ast_nodes, &mut cfg_nodes, end_node_id);
+pub type ControlFlowGraph<'a> = StableGraph<CfgNode<'a>, CfgEdge>;
 
-    ControlFlowGraph {
-        root,
-        nodes: cfg_nodes,
-    }
-}
+pub fn build_control_flow_graph<'a>(body: &'a AstNode<'a>) -> ControlFlowGraph<'a> {
+    let mut cfg = StableGraph::new();
+    let entrance = cfg.add_node(CfgNode::Entrance);
+    let exit = cfg.add_node(CfgNode::Exit);
 
-fn create_graph_for_node(
-    root_ast: ID,
-    ast_nodes: &IDMap<AstNode>,
-    cfg_nodes: &mut IDMap<ControlFlowNode>,
-    // Not guaranteed to be initialized!
-    // TODO: should this be a stack? it probably should so that you can `break` and `return`
-    end_node_id: ID,
-) -> ID {
-    let mut cfg_node = ControlFlowNode::default();
-    let mut id = ID::new();
+    let (start_body, end_body) = create_graph_for_node(body, &mut cfg, exit);
+    cfg.add_edge(entrance, start_body, CfgEdge::Flow);
+    cfg.add_edge(end_body, exit, CfgEdge::Flow);
 
-    let mut ast_node_children = Vec::new();
-    ast_nodes[&root_ast].write_children(&mut ast_node_children);
-    let node_children_len = ast_node_children.len();
+    let mut edges_to_remove = Vec::new();
 
-    for (idx, child) in ast_node_children.into_iter().enumerate() {
-        let is_last = idx == node_children_len - 1;
-        match &ast_nodes[&child].value {
-            AstNodeValue::Block(_) => {
-                if is_last {
-                    let child_cfg = create_graph_for_node(child, ast_nodes, cfg_nodes, end_node_id);
-                    cfg_node.unconditional_branch(child_cfg);
-                } else {
-                    let new_node_id = ID::new();
-
-                    let child_cfg = create_graph_for_node(child, ast_nodes, cfg_nodes, new_node_id);
-                    cfg_node.unconditional_branch(child_cfg);
-                    cfg_nodes.insert(id, cfg_node);
-
-                    id = new_node_id;
-                    cfg_node = ControlFlowNode::default();
+    for node in cfg.node_indices() {
+        let does_goto = cfg
+            .edges(node)
+            .any(|edge| matches!(edge.weight(), CfgEdge::Goto));
+        if does_goto {
+            // TODO: will this break because of mutating the edges while iterating
+            let mut edges = cfg.neighbors(node).detach();
+            while let Some((edge, _)) = edges.next(&cfg) {
+                if !matches!(cfg.edge_weight(edge), Some(CfgEdge::Goto)) {
+                    edges_to_remove.push(edge);
                 }
-            }
-            AstNodeValue::If(predicate, body) => {
-                cfg_node.statements.push(*predicate);
-                if is_last {
-                    let child_cfg = create_graph_for_node(*body, ast_nodes, cfg_nodes, end_node_id);
-                    cfg_node.if_branch(*predicate, child_cfg);
-                    cfg_node.else_branch(*predicate, end_node_id);
-                } else {
-                    let new_node_id = ID::new();
-
-                    let child_cfg = create_graph_for_node(*body, ast_nodes, cfg_nodes, new_node_id);
-                    cfg_node.if_branch(*predicate, child_cfg);
-                    cfg_node.else_branch(*predicate, new_node_id);
-                    cfg_nodes.insert(id, cfg_node);
-
-                    id = new_node_id;
-                    cfg_node = ControlFlowNode::default();
-                }
-            }
-            AstNodeValue::While(predicate, body) => {
-                // Pass current node onto loop condition
-                let predicate_cfg_id = ID::new();
-                cfg_node.unconditional_branch(predicate_cfg_id);
-                cfg_nodes.insert(id, cfg_node);
-                cfg_node = ControlFlowNode::default();
-
-                let child_cfg =
-                    create_graph_for_node(*body, ast_nodes, cfg_nodes, predicate_cfg_id);
-
-                // Loop points either to its own body or the next statement
-                let mut predicate_cfg = ControlFlowNode::default();
-                predicate_cfg.statements.push(*predicate);
-                predicate_cfg.if_branch(*predicate, child_cfg);
-                if is_last {
-                    predicate_cfg.else_branch(*predicate, end_node_id);
-                } else {
-                    id = ID::new();
-                    predicate_cfg.else_branch(*predicate, id);
-                }
-
-                cfg_nodes.insert(predicate_cfg_id, predicate_cfg);
-            }
-            _ => {
-                cfg_node.statements.push(child);
             }
         }
     }
+    for edge in edges_to_remove {
+        cfg.remove_edge(edge);
+    }
 
-    cfg_nodes.insert(id, cfg_node);
+    // TODO: Promote to leaders
+    // TODO: Collect basics into leaders
 
-    id
+    cfg
 }
 
 #[derive(Debug)]
-pub struct ControlFlowGraph {
-    pub root: ID,
-    pub nodes: IDMap<ControlFlowNode>,
-}
-
-#[derive(Debug, Default)]
-pub struct ControlFlowNode {
-    statements: Vec<ID>,
-    // TODO: track branch conditions legibly?
-    branches: Vec<ControlFlowBranch>,
-}
-
-impl ControlFlowNode {
-    fn unconditional_branch(&mut self, target_node: ID) {
-        self.branches.push(ControlFlowBranch {
-            target_node,
-            branch_type: ControlFlowBranchType::Unconditional,
-        });
-    }
-
-    fn if_branch(&mut self, predicate_node: ID, target_node: ID) {
-        self.branches.push(ControlFlowBranch {
-            target_node,
-            branch_type: ControlFlowBranchType::If(predicate_node),
-        });
-    }
-
-    fn else_branch(&mut self, predicate_node: ID, target_node: ID) {
-        self.branches.push(ControlFlowBranch {
-            target_node,
-            branch_type: ControlFlowBranchType::Else(predicate_node),
-        });
-    }
+pub enum CfgNode<'a> {
+    //LeaderBlock(Vec<&'a AstNode<'a>>),
+    BasicBlock(&'a AstNode<'a>),
+    EmptyBasicBlock,
+    Entrance,
+    Exit,
 }
 
 #[derive(Debug)]
-pub struct ControlFlowBranch {
-    target_node: ID,
-    branch_type: ControlFlowBranchType,
+pub enum CfgEdge {
+    Flow,
+    Goto,
+    If,
+    Else,
 }
 
-#[derive(Debug)]
-pub enum ControlFlowBranchType {
-    Unconditional,
-    If(ID),
-    Else(ID),
-    // TODO: else (ID)
+fn create_graph_for_node<'a>(
+    current: &'a AstNode<'a>,
+    graph: &mut ControlFlowGraph<'a>,
+    exit: NodeIndex,
+) -> (NodeIndex, NodeIndex) {
+    use AstNodeValue::*;
+
+    match &current.value {
+        FunctionDeclaration(_) | ExternFunctionBinding(_) | StructDeclaration(_) | Import(_) => {
+            panic!("TODO: handle class of top level declaration inside statement?")
+        }
+        UniqueType(_) | SharedType(_) | ArrayType(_) => {
+            panic!("Can't handle type nodes inside statement")
+        }
+        Declaration(_, _) => todo!(),
+        Return(expr) => {
+            let node = graph.add_node(CfgNode::BasicBlock(current));
+            let (start_inner, end_inner) = create_graph_for_node(expr, graph, exit);
+            graph.add_edge(node, start_inner, CfgEdge::Flow);
+            graph.add_edge(end_inner, exit, CfgEdge::Goto);
+
+            // TODO: what should the exit be?
+            (start_inner, end_inner)
+        }
+        Name(_) | Int(_) | Float(_) | Bool(_) => {
+            let node = graph.add_node(CfgNode::BasicBlock(current));
+            (node, node)
+        }
+        BinExpr(_, _, _)
+        | Call(_, _)
+        | TakeUnique(_)
+        | TakeShared(_)
+        | StructLiteral { .. }
+        | ArrayLiteral(_)
+        | ArrayLiteralLength(_, _)
+        | Block(_) => {
+            let start = graph.add_node(CfgNode::BasicBlock(current));
+            let mut current_node = start;
+            let mut children = Vec::new();
+            current.write_children(&mut children);
+
+            for child in children {
+                let (start_child, end_child) = create_graph_for_node(child, graph, exit);
+                graph.add_edge(current_node, start_child, CfgEdge::Flow);
+                current_node = end_child;
+            }
+
+            (start, current_node)
+        }
+
+        If(condition, body) => {
+            let (start_condition, end_condition) = create_graph_for_node(condition, graph, exit);
+            let (start_body, end_body) = create_graph_for_node(body, graph, exit);
+            graph.add_edge(end_condition, start_body, CfgEdge::If);
+
+            let virtual_next = graph.add_node(CfgNode::EmptyBasicBlock);
+            graph.add_edge(end_condition, virtual_next, CfgEdge::Else);
+            graph.add_edge(end_body, virtual_next, CfgEdge::Flow);
+
+            (start_condition, virtual_next)
+        }
+        While(condition, body) => {
+            let (start_condition, end_condition) = create_graph_for_node(condition, graph, exit);
+            let (start_body, end_body) = create_graph_for_node(body, graph, exit);
+            graph.add_edge(end_condition, start_body, CfgEdge::If);
+
+            let virtual_next = graph.add_node(CfgNode::EmptyBasicBlock);
+            graph.add_edge(end_condition, virtual_next, CfgEdge::Else);
+            graph.add_edge(end_body, start_condition, CfgEdge::Flow);
+
+            (start_condition, virtual_next)
+        }
+    }
 }

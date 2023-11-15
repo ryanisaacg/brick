@@ -5,6 +5,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+petgraph = "0.6.4"
 # gimli = "0.27.0"
 thiserror = "1.0"
 typed-arena = "2.0.2"

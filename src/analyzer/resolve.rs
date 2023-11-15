@@ -11,116 +11,92 @@ use crate::{
 };
 
 pub struct ResolvedModule<'a> {
-    pub nodes: Arena<AstNode<'a>>,
-    pub imports: IDMap<Import>,
-    pub functions: IDMap<ResolvedCallable>,
-    pub types: IDMap<ResolvedStruct>,
+    pub imports: Vec<&'a AstNode<'a>>,
+    pub functions: HashMap<ID, ResolvedCallable<'a>>,
+    pub types: HashMap<ID, TypeDeclaration<'a>>,
 }
 
 // TODO: resolve the IDMap based module
 pub fn resolve_module(module: ParsedSourceFile) -> ResolvedModule {
-    let names = name_to_id(&module);
+    let names = name_to_node(&module);
 
     let ParsedSourceFile {
-        mut nodes,
         imports,
         functions,
         types,
     } = module;
 
-    let imports = imports
-        .iter()
-        .map(|id| {
-            match nodes
-                .remove(id)
-                .expect("import should be found via ID")
-                .value
-            {
-                AstNodeValue::Import(path) => (*id, Import { path }),
-                node => panic!("ICE: unexpected node passed as an import: {:?}", node),
-            }
-        })
-        .collect();
     let types = types
         .iter()
-        .map(
-            |id| match nodes.remove(id).expect("type should be found via ID").value {
-                AstNodeValue::StructDeclaration(value) => (
-                    *id,
-                    ResolvedStruct {
-                        name: value.name,
-                        fields: resolve_names_and_types(&nodes, value.fields, &names),
-                    },
-                ),
-                node => panic!("ICE: unexpected node type passed as a struct: {:?}", node),
-            },
-        )
+        .map(|node| match node.value {
+            AstNodeValue::StructDeclaration(value) => (
+                value.name.clone(),
+                ResolvedStruct {
+                    name: value.name,
+                    fields: resolve_names_and_types(&nodes, value.fields, &names),
+                },
+            ),
+            node => panic!("ICE: unexpected node type passed as a struct: {:?}", node),
+        })
         .collect();
     let functions = functions
         .iter()
-        .map(
-            |id| match nodes.remove(id).expect("func should be found via ID").value {
-                AstNodeValue::FunctionDeclaration(value) => (
-                    *id,
-                    ResolvedCallable::Function(ResolvedFunction {
-                        name: value.name,
-                        params: resolve_names_and_types(&nodes, value.params, &names),
-                        returns: value
-                            .returns
-                            .map(|type_| resolve_type(&nodes, type_, &names)),
-                        body: value.body,
-                        is_extern: value.is_extern,
-                    }),
-                ),
-                AstNodeValue::ExternFunctionBinding(value) => (
-                    *id,
-                    ResolvedCallable::Extern(ResolvedExternFunction {
-                        name: value.name,
-                        params: resolve_names_and_types(&nodes, value.params, &names),
-                        returns: value
-                            .returns
-                            .map(|type_| resolve_type(&nodes, type_, &names)),
-                    }),
-                ),
-                node => panic!("ICE: unexpected node type passed as a struct: {:?}", node),
-            },
-        )
+        .map(|node| match node.value {
+            AstNodeValue::FunctionDeclaration(value) => (
+                value.name.clone(),
+                ResolvedCallable::Function(ResolvedFunction {
+                    name: value.name,
+                    params: resolve_names_and_types(&nodes, value.params, &names),
+                    returns: value
+                        .returns
+                        .map(|type_| resolve_type(&nodes, type_, &names)),
+                    body: value.body,
+                    is_extern: value.is_extern,
+                }),
+            ),
+            AstNodeValue::ExternFunctionBinding(value) => (
+                value.name.clone(),
+                ResolvedCallable::Extern(ResolvedExternFunction {
+                    name: value.name,
+                    params: resolve_names_and_types(&nodes, value.params, &names),
+                    returns: value
+                        .returns
+                        .map(|type_| resolve_type(&nodes, type_, &names)),
+                }),
+            ),
+            node => panic!("ICE: unexpected node type passed as a struct: {:?}", node),
+        })
         .collect();
 
-    let module = ResolvedModule {
-        nodes,
+    ResolvedModule {
         imports,
         functions,
         types,
-    };
-
-    module
+    }
 }
 
-fn name_to_id(module: &ParsedSourceFile) -> HashMap<String, ID> {
+fn name_to_node<'a>(module: &'a ParsedSourceFile) -> HashMap<String, &'a AstNode<'a>> {
     let mut names = HashMap::new();
 
-    for id in module.imports.iter() {
-        let AstNodeValue::Import(path) = &module.nodes[id].value else {
-        unreachable!();
-    };
-        names.insert(path.clone(), id.clone());
+    for node in module.imports.iter() {
+        let AstNodeValue::Import(path) = node.value else {
+            unreachable!();
+        };
+        names.insert(path.clone(), *node);
     }
-    for id in module.functions.iter() {
+    for node in module.functions.iter() {
         if let AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
         | AstNodeValue::ExternFunctionBinding(ExternFunctionBindingValue { name, .. }) =
-            &module.nodes[id].value
+            node.value
         {
-            names.insert(name.clone(), id.clone());
+            names.insert(name.clone(), *node);
         } else {
             unreachable!();
         };
     }
-    for id in module.types.iter() {
-        if let AstNodeValue::StructDeclaration(StructDeclarationValue { name, .. }) =
-            &module.nodes[id].value
-        {
-            names.insert(name.clone(), id.clone());
+    for node in module.types.iter() {
+        if let AstNodeValue::StructDeclaration(StructDeclarationValue { name, .. }) = node.value {
+            names.insert(name.clone(), node);
         } else {
             unreachable!();
         };
@@ -130,9 +106,8 @@ fn name_to_id(module: &ParsedSourceFile) -> HashMap<String, ID> {
 }
 
 fn resolve_names_and_types(
-    ast_nodes: &IDMap<AstNode>,
+    names: &HashMap<String, &AstNode>,
     params: Vec<NameAndType>,
-    names: &HashMap<String, ID>,
 ) -> Vec<ResolvedNameAndType> {
     params
         .into_iter()
@@ -163,15 +138,15 @@ fn resolve_type(
     }
 }
 
-pub enum ResolvedCallable {
-    Function(ResolvedFunction),
-    Extern(ResolvedExternFunction),
+pub enum ResolvedCallable<'a> {
+    Function(ResolvedFunction<'a>),
+    Extern(ResolvedExternFunction<'a>),
 }
 
-pub struct ResolvedFunction {
+pub struct ResolvedFunction<'a> {
     pub name: String,
-    pub params: Vec<ResolvedNameAndType>,
-    pub returns: Option<ResolvedType>,
+    pub params: Vec<ResolvedNameAndType<'a>>,
+    pub returns: Option<ResolvedType<'a>>,
     pub body: ID,
     /**
      * Whether this function is available to extern. Distinct from declaring an extern function
@@ -180,29 +155,34 @@ pub struct ResolvedFunction {
     pub is_extern: bool,
 }
 
-pub struct ResolvedExternFunction {
+pub struct ResolvedExternFunction<'a> {
     pub name: String,
-    pub params: Vec<ResolvedNameAndType>,
-    pub returns: Option<ResolvedType>,
+    pub params: Vec<ResolvedNameAndType<'a>>,
+    pub returns: Option<ResolvedType<'a>>,
 }
 
-pub struct ResolvedStruct {
+pub struct ResolvedStruct<'a> {
     pub name: String,
-    pub fields: Vec<ResolvedNameAndType>,
+    pub fields: Vec<ResolvedNameAndType<'a>>,
 }
 
-pub struct ResolvedNameAndType {
+pub struct ResolvedNameAndType<'a> {
     pub name: String,
-    pub type_: ResolvedType,
+    pub type_: ResolvedType<'a>,
 }
 
 pub struct Import {
     pub path: String,
 }
 
-pub enum ResolvedType {
+pub enum TypeDeclaration<'a> {
+    Struct(ResolvedStruct<'a>),
+}
+
+pub enum ResolvedType<'a> {
     Integer,
     Float,
-    Reference(ID),
+    Import(&'a AstNode<'a>),
+    Reference(&'a TypeDeclaration<'a>),
     BrokenReference(String),
 }
