@@ -4,8 +4,8 @@ use thiserror::Error;
 use typed_arena::Arena;
 
 use crate::{
-    //arena::ArenaNode,
-    //id::{IDMap, ID},
+    arena::ArenaNode,
+    id::ID,
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
 };
@@ -18,8 +18,19 @@ pub struct NameAndType<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AstNode<'parse> {
+    pub id: ID,
     pub value: AstNodeValue<'parse>,
     pub provenance: SourceRange,
+}
+
+impl<'a> AstNode<'a> {
+    pub fn new(value: AstNodeValue<'a>, provenance: SourceRange) -> AstNode<'a> {
+        AstNode {
+            id: ID::new(),
+            value,
+            provenance,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -84,11 +95,11 @@ pub enum AstNodeValue<'a> {
     ArrayType(&'a AstNode<'a>),
 }
 
-/*impl ArenaNode for AstNode<'_> {
+impl<'a> ArenaNode<'a> for AstNode<'a> {
     fn write_children(&self, children: &mut Vec<&'a Self>) {
         use AstNodeValue::*;
 
-        match self.value {
+        match &self.value {
             Declaration(_, child)
             | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { body: child, .. })
             | TakeShared(child)
@@ -98,7 +109,7 @@ pub enum AstNodeValue<'a> {
             | SharedType(child)
             | Return(child)
             | ArrayType(child) => {
-                children.push(child);
+                children.push(*child);
             }
             BinExpr(_, left, right) | If(left, right) | While(left, right) => {
                 children.push(*right);
@@ -129,7 +140,7 @@ pub enum AstNodeValue<'a> {
             | ExternFunctionBinding { .. } => {}
         }
     }
-}*/
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BinOp {
@@ -162,13 +173,10 @@ type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, LexError>>;
 type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
 pub struct ParsedSourceFile<'a> {
-    pub imports: Vec<&'a mut AstNode<'a>>,
-    pub functions: Vec<&'a mut AstNode<'a>>,
-    pub types: Vec<&'a mut AstNode<'a>>,
+    pub imports: Vec<&'a AstNode<'a>>,
+    pub functions: Vec<&'a AstNode<'a>>,
+    pub types: Vec<&'a AstNode<'a>>,
 }
-
-type ID<'a> = &'a AstNode<'a>;
-type IDMap<T> = Arena<T>;
 
 pub fn parse<'a>(
     context: &'a mut Arena<AstNode<'a>>,
@@ -183,7 +191,7 @@ pub fn parse<'a>(
     while let Some(lexeme) = peek_token_optional(&mut source)? {
         let cursor = lexeme.range.start();
         let statement = statement(&mut source, context, cursor)?;
-        let statement: &mut AstNode = context.alloc(statement);
+        let statement: &AstNode = context.alloc(statement);
 
         match statement.value {
             AstNodeValue::Import(_) => imports.push(statement),
@@ -206,13 +214,13 @@ pub fn parse<'a>(
     })
 }
 
-fn add_node<'a>(context: &'a Arena<AstNode<'a>>, node: AstNode<'a>) -> ID<'a> {
+fn add_node<'a>(context: &'a Arena<AstNode<'a>>, node: AstNode<'a>) -> &'a AstNode<'a> {
     context.alloc(node)
 }
 
 fn statement<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let statement = match peek_token(source, cursor, "expected let, fn, or expression")?.value {
@@ -248,22 +256,19 @@ fn statement<'a>(
 
 fn return_declaration<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let value = expression(source, context, cursor, true)?;
     let provenance = value.provenance.clone();
     let value = add_node(context, value);
 
-    Ok(AstNode {
-        value: AstNodeValue::Return(value),
-        provenance,
-    })
+    Ok(AstNode::new(AstNodeValue::Return(value), provenance))
 }
 
 fn struct_declaration<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let (name, mut provenance) = word(source, cursor, "expected name after 'struct'")?;
@@ -303,15 +308,15 @@ fn struct_declaration<'a>(
     }
     provenance.set_end(cursor);
 
-    Ok(AstNode {
-        value: AstNodeValue::StructDeclaration(StructDeclarationValue { name, fields }),
+    Ok(AstNode::new(
+        AstNodeValue::StructDeclaration(StructDeclarationValue { name, fields }),
         provenance,
-    })
+    ))
 }
 
 fn extern_function_declaration<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     start: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let mut provenance = assert_next_lexeme_eq(
@@ -362,12 +367,12 @@ fn extern_function_declaration<'a>(
     };
     provenance.set_end(end);
 
-    Ok(AstNode { value, provenance })
+    Ok(AstNode::new(value, provenance))
 }
 
 fn function_declaration<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     start: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let FunctionHeader {
@@ -386,8 +391,8 @@ fn function_declaration<'a>(
     let body = block(source, context, next_token.range.end())?;
     provenance.set_end(body.provenance.end());
 
-    Ok(AstNode {
-        value: AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+    Ok(AstNode::new(
+        AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
             name,
             params,
             returns,
@@ -395,19 +400,19 @@ fn function_declaration<'a>(
             is_extern: false,
         }),
         provenance,
-    })
+    ))
 }
 
 struct FunctionHeader<'a> {
     name: String,
     params: Vec<NameAndType<'a>>,
-    returns: Option<ID<'a>>,
+    returns: Option<&'a AstNode<'a>>,
     end: SourceMarker,
 }
 
 fn function_header<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<FunctionHeader<'a>, ParseError> {
     let (name, provenance) = word(source, cursor, "expected name after 'fn'")?;
@@ -475,15 +480,15 @@ fn import_declaration<'a>(
 ) -> Result<AstNode<'a>, ParseError> {
     let (name, provenance) = word(source, cursor, "expected word after 'import'")?;
 
-    Ok(AstNode {
-        value: AstNodeValue::Import(name),
-        provenance: SourceRange::new(cursor, provenance.end()),
-    })
+    Ok(AstNode::new(
+        AstNodeValue::Import(name),
+        SourceRange::new(cursor, provenance.end()),
+    ))
 }
 
 fn variable_declaration<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     // TODO: store type hint in declarations
@@ -504,15 +509,15 @@ fn variable_declaration<'a>(
     let value = expression(source, context, cursor, true)?;
     provenance.set_end(value.provenance.end());
 
-    Ok(AstNode {
-        value: AstNodeValue::Declaration(name, add_node(context, value)),
+    Ok(AstNode::new(
+        AstNodeValue::Declaration(name, add_node(context, value)),
         provenance,
-    })
+    ))
 }
 
 fn name_and_type_hint<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
     reason: &'static str,
 ) -> Result<(String, SourceRange, Option<AstNode<'a>>), ParseError> {
@@ -538,7 +543,7 @@ fn name_and_type_hint<'a>(
 
 fn type_expression<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let next = token(source, cursor, "expected type")?;
@@ -547,14 +552,14 @@ fn type_expression<'a>(
             let subtype = type_expression(source, context, next.range.end())?;
             let end = subtype.provenance.end();
             let subtype = add_node(context, subtype);
-            Ok(AstNode {
-                value: match ptr {
+            Ok(AstNode::new(
+                match ptr {
                     TokenValue::Unique => AstNodeValue::UniqueType(subtype),
                     TokenValue::Shared => AstNodeValue::SharedType(subtype),
                     _ => unreachable!(),
                 },
-                provenance: SourceRange::new(next.range.start(), end),
-            })
+                SourceRange::new(next.range.start(), end),
+            ))
         }
         TokenValue::OpenSquare => {
             let subtype = type_expression(source, context, next.range.end())?;
@@ -566,15 +571,12 @@ fn type_expression<'a>(
                 "expected ] after array type",
             )?;
             let subtype = add_node(context, subtype);
-            Ok(AstNode {
-                value: AstNodeValue::ArrayType(subtype),
-                provenance: SourceRange::new(next.range.start(), end),
-            })
+            Ok(AstNode::new(
+                AstNodeValue::ArrayType(subtype),
+                SourceRange::new(next.range.start(), end),
+            ))
         }
-        TokenValue::Word(name) => Ok(AstNode {
-            value: AstNodeValue::Name(name),
-            provenance: next.range,
-        }),
+        TokenValue::Word(name) => Ok(AstNode::new(AstNodeValue::Name(name), next.range)),
         _ => Err(ParseError::UnexpectedToken(
             Box::new(next),
             "expected either 'unique' or type name",
@@ -584,7 +586,7 @@ fn type_expression<'a>(
 
 fn expression<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     provenance: SourceMarker,
     can_be_struct: bool, // TODO: refactor grammar?
 ) -> Result<AstNode<'a>, ParseError> {
@@ -595,7 +597,7 @@ fn expression<'a>(
 
 fn expression_pratt<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     start: SourceMarker,
     min_binding: u8,
     can_be_struct: bool,
@@ -623,38 +625,36 @@ fn expression_pratt<'a>(
         token @ (TokenValue::If | TokenValue::While) => if_or_while(source, context, token, start)?,
         TokenValue::OpenBracket => block(source, context, start)?,
         // Atoms
-        TokenValue::True => AstNode {
-            value: AstNodeValue::Bool(true),
-            provenance: SourceRange::new(start, cursor),
-        },
-        TokenValue::False => AstNode {
-            value: AstNodeValue::Bool(false),
-            provenance: SourceRange::new(start, cursor),
-        },
-        TokenValue::Word(word) => AstNode {
-            value: AstNodeValue::Name(word),
-            provenance: SourceRange::new(start, cursor),
-        },
+        TokenValue::True => AstNode::new(AstNodeValue::Bool(true), SourceRange::new(start, cursor)),
+        TokenValue::False => {
+            AstNode::new(AstNodeValue::Bool(false), SourceRange::new(start, cursor))
+        }
+        TokenValue::Word(word) => {
+            AstNode::new(AstNodeValue::Name(word), SourceRange::new(start, cursor))
+        }
         TokenValue::Int(int) => try_decimal(source, int as i64, SourceRange::new(start, cursor))?,
         // Prefix operator
         value => {
             let Some(((), right_binding)) = prefix_binding_power(&value) else {
                 return Err(ParseError::UnexpectedToken(
-                    Box::new(Token { value, range: SourceRange::new(start, cursor)}),
+                    Box::new(Token {
+                        value,
+                        range: SourceRange::new(start, cursor),
+                    }),
                     "expected an expression",
-                ))
+                ));
             };
             let right = expression_pratt(source, context, start, right_binding, can_be_struct)?;
             let end = right.provenance.end();
             let right = add_node(context, right);
-            AstNode {
-                value: match value {
+            AstNode::new(
+                match value {
                     TokenValue::Shared => AstNodeValue::TakeShared(right),
                     TokenValue::Unique => AstNodeValue::TakeUnique(right),
                     other => unreachable!("prefix operator {:?}", other),
                 },
-                provenance: SourceRange::new(start, end),
-            }
+                SourceRange::new(start, end),
+            )
         }
     };
 
@@ -700,10 +700,10 @@ fn expression_pratt<'a>(
                         closed = should_break;
                     }
 
-                    left = AstNode {
-                        value: AstNodeValue::Call(add_node(context, left), arguments),
-                        provenance: SourceRange::new(start, end),
-                    };
+                    left = AstNode::new(
+                        AstNodeValue::Call(add_node(context, left), arguments),
+                        SourceRange::new(start, end),
+                    );
                 }
                 TokenValue::OpenSquare => {
                     let index = expression(source, context, range.end(), can_be_struct)?;
@@ -713,14 +713,14 @@ fn expression_pratt<'a>(
                         index.provenance.end(),
                         "expected ] to follow array index",
                     )?;
-                    left = AstNode {
-                        value: AstNodeValue::BinExpr(
+                    left = AstNode::new(
+                        AstNodeValue::BinExpr(
                             BinOp::Index,
                             add_node(context, left),
                             add_node(context, index),
                         ),
-                        provenance: SourceRange::new(start, range.end()),
-                    };
+                        SourceRange::new(start, range.end()),
+                    );
                 }
                 TokenValue::OpenBracket if can_be_struct => {
                     let mut end = range.end();
@@ -742,10 +742,8 @@ fn expression_pratt<'a>(
                         {
                             let lex = lex.clone();
                             source.next();
-                            let argument = AstNode {
-                                value: AstNodeValue::Name(field.clone()),
-                                provenance: field_range,
-                            };
+                            let argument =
+                                AstNode::new(AstNodeValue::Name(field.clone()), field_range);
                             fields.insert(field, add_node(context, argument));
                             if lex == TokenValue::CloseBracket {
                                 break;
@@ -783,10 +781,10 @@ fn expression_pratt<'a>(
                         todo!("non-name struct literal");
                     };
 
-                    left = AstNode {
-                        value: AstNodeValue::StructLiteral { name, fields },
-                        provenance: SourceRange::new(start, end),
-                    };
+                    left = AstNode::new(
+                        AstNodeValue::StructLiteral { name, fields },
+                        SourceRange::new(start, end),
+                    );
                 }
                 token => unreachable!("postfix operator {:?}", token),
             }
@@ -821,14 +819,10 @@ fn expression_pratt<'a>(
 
             let start = left.provenance.start();
             let end = right.provenance.end();
-            left = AstNode {
-                value: AstNodeValue::BinExpr(
-                    bin_op,
-                    add_node(context, left),
-                    add_node(context, right),
-                ),
-                provenance: SourceRange::new(start, end),
-            };
+            left = AstNode::new(
+                AstNodeValue::BinExpr(bin_op, add_node(context, left), add_node(context, right)),
+                SourceRange::new(start, end),
+            );
 
             continue;
         }
@@ -877,7 +871,7 @@ fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
 
 fn array_literal<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     start: SourceMarker,
     can_be_struct: bool,
 ) -> Result<AstNode<'a>, ParseError> {
@@ -915,10 +909,10 @@ fn array_literal<'a>(
                 end = new_end.end();
                 closed = should_break;
             }
-            Ok(AstNode {
-                value: AstNodeValue::ArrayLiteral(children),
-                provenance: SourceRange::new(start, end),
-            })
+            Ok(AstNode::new(
+                AstNodeValue::ArrayLiteral(children),
+                SourceRange::new(start, end),
+            ))
         }
         TokenValue::Semicolon => {
             let (length, range) =
@@ -930,17 +924,17 @@ fn array_literal<'a>(
                 "expected ] after array length in array literal",
             )?;
             let expr = add_node(context, expr);
-            Ok(AstNode {
-                value: AstNodeValue::ArrayLiteralLength(expr, length),
-                provenance: SourceRange::new(start, close.range.end()),
-            })
+            Ok(AstNode::new(
+                AstNodeValue::ArrayLiteralLength(expr, length),
+                SourceRange::new(start, close.range.end()),
+            ))
         }
         TokenValue::CloseSquare => {
             let expr = add_node(context, expr);
-            Ok(AstNode {
-                value: AstNodeValue::ArrayLiteral(vec![expr]),
-                provenance: SourceRange::new(start, separator.range.end()),
-            })
+            Ok(AstNode::new(
+                AstNodeValue::ArrayLiteral(vec![expr]),
+                SourceRange::new(start, separator.range.end()),
+            ))
         }
         _ => Err(ParseError::UnexpectedToken(
             Box::new(separator),
@@ -951,7 +945,7 @@ fn array_literal<'a>(
 
 fn if_or_while<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     if_or_while: TokenValue,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
@@ -969,19 +963,19 @@ fn if_or_while<'a>(
     let provenance = SourceRange::new(cursor, block.provenance.end());
     let block_ptr = add_node(context, block);
 
-    Ok(AstNode {
-        value: if if_or_while == TokenValue::If {
+    Ok(AstNode::new(
+        if if_or_while == TokenValue::If {
             AstNodeValue::If(predicate_ptr, block_ptr)
         } else {
             AstNodeValue::While(predicate_ptr, block_ptr)
         },
         provenance,
-    })
+    ))
 }
 
 fn block<'a>(
     source: &mut TokenIter,
-    context: &'a IDMap<AstNode<'a>>,
+    context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let mut statements = Vec::new();
@@ -995,10 +989,7 @@ fn block<'a>(
             } => {
                 provenance.set_end(range.end());
                 source.next();
-                return Ok(AstNode {
-                    value: AstNodeValue::Block(statements),
-                    provenance,
-                });
+                return Ok(AstNode::new(AstNodeValue::Block(statements), provenance));
             }
             _ => {
                 let statement = statement(source, context, provenance.end())?;
@@ -1059,15 +1050,9 @@ fn try_decimal<'a>(
         };
         let mut provenance = range.clone();
         provenance.set_end(end);
-        Ok(AstNode {
-            value: AstNodeValue::Float(num),
-            provenance,
-        })
+        Ok(AstNode::new(AstNodeValue::Float(num), provenance))
     } else {
-        Ok(AstNode {
-            value: AstNodeValue::Int(num),
-            provenance: range,
-        })
+        Ok(AstNode::new(AstNodeValue::Int(num), range))
     }
 }
 
