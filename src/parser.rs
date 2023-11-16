@@ -173,9 +173,19 @@ type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, LexError>>;
 type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
 pub struct ParsedSourceFile<'a> {
-    pub imports: Vec<&'a AstNode<'a>>,
-    pub functions: Vec<&'a AstNode<'a>>,
-    pub types: Vec<&'a AstNode<'a>>,
+    pub top_level: HashMap<ID, &'a AstNode<'a>>,
+    pub imports: HashMap<String, &'a AstNode<'a>>,
+    pub functions: HashMap<String, CallableDeclaration<'a>>,
+    pub types: HashMap<String, TypeDeclaration<'a>>,
+}
+
+pub enum CallableDeclaration<'a> {
+    Function(&'a FunctionDeclarationValue<'a>),
+    External(&'a ExternFunctionBindingValue<'a>),
+}
+
+pub enum TypeDeclaration<'a> {
+    Struct(&'a StructDeclarationValue<'a>),
 }
 
 pub fn parse<'a>(
@@ -184,20 +194,32 @@ pub fn parse<'a>(
 ) -> Result<ParsedSourceFile<'a>, ParseError> {
     let mut source = (&mut source as TokenIterInner<'_>).peekable();
 
-    let mut imports = Vec::new();
-    let mut functions = Vec::new();
-    let mut types = Vec::new();
+    let mut imports = HashMap::new();
+    let mut functions = HashMap::new();
+    let mut types = HashMap::new();
+    let mut top_level = HashMap::new();
 
     while let Some(lexeme) = peek_token_optional(&mut source)? {
         let cursor = lexeme.range.start();
         let statement = statement(&mut source, context, cursor)?;
         let statement: &AstNode = context.alloc(statement);
 
-        match statement.value {
-            AstNodeValue::Import(_) => imports.push(statement),
-            AstNodeValue::StructDeclaration(_) => types.push(statement),
-            AstNodeValue::FunctionDeclaration(_) | AstNodeValue::ExternFunctionBinding(_) => {
-                functions.push(statement);
+        top_level.insert(statement.id, statement);
+        match &statement.value {
+            AstNodeValue::Import(path) => {
+                imports.insert(path.clone(), statement);
+            }
+            AstNodeValue::StructDeclaration(decl) => {
+                types.insert(decl.name.clone(), TypeDeclaration::Struct(decl));
+            }
+            AstNodeValue::FunctionDeclaration(func) => {
+                functions.insert(func.name.clone(), CallableDeclaration::Function(func));
+            }
+            AstNodeValue::ExternFunctionBinding(extern_func) => {
+                functions.insert(
+                    extern_func.name.clone(),
+                    CallableDeclaration::External(extern_func),
+                );
             }
             _ => {
                 return Err(ParseError::UnexpectedTopLevelStatement(
@@ -208,6 +230,7 @@ pub fn parse<'a>(
     }
 
     Ok(ParsedSourceFile {
+        top_level,
         imports,
         functions,
         types,

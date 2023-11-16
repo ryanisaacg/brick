@@ -1,5 +1,6 @@
-fn add_i64(a: i64, b: i64): i64 {
-    if a {
-        a + b
+fn add_i64(): i64 {
+    if 3 > 4 {
+        1 + 2
     }
+    return 3
 }
