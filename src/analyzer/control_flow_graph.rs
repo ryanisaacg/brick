@@ -73,7 +73,6 @@ fn create_graph_for_node<'a>(
         UniqueType(_) | SharedType(_) | ArrayType(_) => {
             panic!("Can't handle type nodes inside statement")
         }
-        Declaration(_, _) => todo!(),
         Return(expr) => {
             let node = graph.add_node(CfgNode::BasicBlock(current));
             let (start_inner, end_inner) = create_graph_for_node(expr, graph, exit);
@@ -94,6 +93,7 @@ fn create_graph_for_node<'a>(
         | StructLiteral { .. }
         | ArrayLiteral(_)
         | ArrayLiteralLength(_, _)
+        | Declaration(_, _)
         | Block(_) => {
             let start = graph.add_node(CfgNode::BasicBlock(current));
             let mut current_node = start;
