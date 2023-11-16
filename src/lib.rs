@@ -2,16 +2,16 @@
 
 use std::io;
 
-use analyzer::{typecheck, TypecheckError};
 use thiserror::Error;
+use typecheck::typecheck;
 
 mod id;
 
-pub mod analyzer;
 pub mod arena;
 pub mod parser;
 pub mod provenance;
 pub mod tokenizer;
+pub mod typecheck;
 
 use parser::ParseError;
 use typed_arena::Arena;

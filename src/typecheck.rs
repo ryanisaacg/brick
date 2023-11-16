@@ -22,6 +22,11 @@ pub enum ExpressionType<'a> {
     Struct(&'a StructType<'a>),
 }
 
+pub enum ModuleDeclaration<'a> {
+    Func(FuncType<'a>),
+    Struct(StructType<'a>),
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct StructType<'a> {
     pub fields: HashMap<String, ExpressionType<'a>>,
@@ -35,6 +40,7 @@ pub struct FuncType<'a> {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
+    // TODO: long int, long float
     Int,
     Float,
     Bool,
@@ -62,8 +68,10 @@ pub enum TypecheckError<'a> {
 
 // TODO: pass import namespace in
 pub fn typecheck<'a>(file: ParsedSourceFile<'a>) -> Result<(), TypecheckError<'a>> {
+    // TODO: reject void params and fields
+
     //let module = resolve_module(file);
-    let types = HashMap::new();
+    let mut declarations = HashMap::new();
     for type_decl in file.types.values() {
         match type_decl {
             TypeDeclaration::Struct(decl) => {
@@ -71,15 +79,44 @@ pub fn typecheck<'a>(file: ParsedSourceFile<'a>) -> Result<(), TypecheckError<'a
             }
         }
     }
-    for func_decl in file.functions.values() {
+
+    for (name, func_decl) in file.functions.iter() {
+        let (params, returns) = match func_decl {
+            CallableDeclaration::Function(func) => (&func.params, &func.returns),
+            CallableDeclaration::External(func) => (&func.params, &func.returns),
+        };
         // TODO: create a type object to represent this function
+        let name = name.clone();
+        let func = FuncType {
+            params: params
+                .iter()
+                .map(|param| resolve_type_name(&declarations, &param.type_))
+                .collect::<Result<Vec<_>, _>>()?,
+            returns: returns
+                .map(|returns| resolve_type_name(&declarations, returns))
+                .unwrap_or(Ok(ExpressionType::Primitive(PrimitiveType::Void)))?,
+        };
+        declarations.insert(name, ModuleDeclaration::Func(func));
     }
+
+    let types = declarations
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.clone(),
+                match value {
+                    ModuleDeclaration::Func(inner) => ExpressionType::Func(inner),
+                    ModuleDeclaration::Struct(inner) => ExpressionType::Struct(inner),
+                },
+            )
+        })
+        .collect();
     // TODO: handle imports and namespaces
 
     for function in file.functions.values() {
         match function {
             CallableDeclaration::Function(func) => {
-                typecheck_function(func, &types)?;
+                typecheck_function(func, &types).unwrap(); // TODO
             }
             CallableDeclaration::External(_) => {}
         }
@@ -88,17 +125,70 @@ pub fn typecheck<'a>(file: ParsedSourceFile<'a>) -> Result<(), TypecheckError<'a
     Ok(())
 }
 
+fn resolve_type_name<'a>(
+    types: &HashMap<String, ModuleDeclaration<'a>>,
+    name: &'a AstNode<'a>,
+) -> Result<ExpressionType<'a>, TypecheckError<'a>> {
+    Ok(match &name.value {
+        AstNodeValue::Name(name) => match name.as_str() {
+            "bool" => ExpressionType::Primitive(PrimitiveType::Bool),
+            "void" => ExpressionType::Primitive(PrimitiveType::Void),
+            "i32" => ExpressionType::Primitive(PrimitiveType::Int),
+            "f32" => ExpressionType::Primitive(PrimitiveType::Float),
+            other => {
+                unimplemented!("Resolving actual type names is not implemented");
+            }
+        },
+        AstNodeValue::UniqueType(_) => todo!(),
+        AstNodeValue::SharedType(_) => todo!(),
+        AstNodeValue::ArrayType(_) => todo!(),
+        AstNodeValue::FunctionDeclaration(_)
+        | AstNodeValue::ExternFunctionBinding(_)
+        | AstNodeValue::StructDeclaration(_)
+        | AstNodeValue::Declaration(_, _)
+        | AstNodeValue::Import(_)
+        | AstNodeValue::Return(_)
+        | AstNodeValue::Int(_)
+        | AstNodeValue::Float(_)
+        | AstNodeValue::Bool(_)
+        | AstNodeValue::BinExpr(_, _, _)
+        | AstNodeValue::If(_, _)
+        | AstNodeValue::While(_, _)
+        | AstNodeValue::Call(_, _)
+        | AstNodeValue::TakeUnique(_)
+        | AstNodeValue::TakeShared(_)
+        | AstNodeValue::StructLiteral { .. }
+        | AstNodeValue::ArrayLiteral(_)
+        | AstNodeValue::ArrayLiteralLength(_, _)
+        | AstNodeValue::Block(_) => {
+            // TODO: report error
+            panic!("Illegal in expression name");
+        }
+    })
+}
+
 // TODO: some sort of data structure to store the results?
-fn typecheck_function<'a>(
+fn typecheck_function<'a, 'b>(
     function: &'a FunctionDeclarationValue<'a>,
     module_types: &HashMap<String, ExpressionType<'a>>,
 ) -> Result<HashMap<ID, ExpressionType<'a>>, TypecheckError<'a>> {
     let cfg = build_control_flow_graph(&function.body);
+
+    let Some(ExpressionType::Func(function_type)) = module_types.get(&function.name) else {
+        panic!("expected function to be found in the module");
+    };
+    let parameters = function
+        .params
+        .iter()
+        .zip(function_type.params.iter())
+        .map(|(name, param)| (name.name.clone(), param.clone()))
+        .collect();
+
     let mut expressions = HashMap::new();
     // TODO: outermost scope
     typecheck_expression(
         &function.body,
-        &[module_types],
+        &[module_types, &parameters],
         &mut HashMap::new(),
         &mut expressions,
     )?;
