@@ -64,6 +64,8 @@ pub enum TypecheckError<'a> {
     CantCall(&'a AstNode<'a>), // TODO
     #[error("wrong args count")]
     WrongArgsCount(&'a AstNode<'a>),
+    #[error("missing field")]
+    MissingField(&'a AstNode<'a>),
 }
 
 // TODO: pass import namespace in
@@ -185,14 +187,12 @@ fn typecheck_function<'a, 'b>(
         .collect();
 
     let mut expressions = HashMap::new();
-    // TODO: outermost scope
     typecheck_expression(
         &function.body,
         &[module_types, &parameters],
         &mut HashMap::new(),
         &mut expressions,
     )?;
-    // TODO: assign a type to every expression in the function body
     // TODO: ensure that the return type matches the function's declared return type
 
     Ok(expressions)
@@ -331,9 +331,35 @@ fn typecheck_expression<'a, 'b>(
 
             func.returns
         }
+        AstNodeValue::StructLiteral { name, fields } => {
+            let ExpressionType::Struct(struct_type) = resolve(name, current_scope, outer_scopes)
+                .ok_or(TypecheckError::NameNotFound(node))?
+            else {
+                return Err(TypecheckError::CantCall(node));
+            };
+
+            if struct_type.fields.len() != fields.len() {
+                return Err(TypecheckError::WrongArgsCount(node));
+            }
+
+            for (name, param_field) in struct_type.fields.iter() {
+                let Some(arg_field) = fields.get(name) else {
+                    return Err(TypecheckError::MissingField(node));
+                };
+                let arg_field =
+                    typecheck_expression(arg_field, outer_scopes, current_scope, expressions)?;
+                if !is_assignable_to(param_field, &arg_field) {
+                    return Err(TypecheckError::TypeMismatch {
+                        received: arg_field,
+                        expected: *param_field,
+                    });
+                }
+            }
+
+            ExpressionType::Struct(struct_type)
+        }
         AstNodeValue::TakeUnique(_) => todo!(),
         AstNodeValue::TakeShared(_) => todo!(),
-        AstNodeValue::StructLiteral { .. } => todo!(),
         AstNodeValue::ArrayLiteral(_) => todo!(),
         AstNodeValue::ArrayLiteralLength(_, _) => todo!(),
     };
