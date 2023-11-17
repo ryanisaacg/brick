@@ -1,12 +1,7 @@
-use std::{
-    collections::HashMap,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ID(u32);
-
-pub type IDMap<T> = HashMap<ID, T>;
 
 impl ID {
     pub fn new() -> Self {

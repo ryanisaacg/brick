@@ -172,69 +172,23 @@ pub enum ParseError {
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, LexError>>;
 type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
-pub struct ParsedSourceFile<'a> {
-    pub top_level: HashMap<ID, &'a AstNode<'a>>,
-    pub imports: HashMap<String, &'a AstNode<'a>>,
-    pub functions: HashMap<String, CallableDeclaration<'a>>,
-    pub types: HashMap<String, TypeDeclaration<'a>>,
-}
-
-pub enum CallableDeclaration<'a> {
-    Function(&'a FunctionDeclarationValue<'a>),
-    External(&'a ExternFunctionBindingValue<'a>),
-}
-
-pub enum TypeDeclaration<'a> {
-    Struct(&'a StructDeclarationValue<'a>),
-}
-
 pub fn parse<'a>(
     context: &'a mut Arena<AstNode<'a>>,
     mut source: impl Iterator<Item = Result<Token, LexError>>,
-) -> Result<ParsedSourceFile<'a>, ParseError> {
+) -> Result<Vec<&'a AstNode<'a>>, ParseError> {
     let mut source = (&mut source as TokenIterInner<'_>).peekable();
 
-    let mut imports = HashMap::new();
-    let mut functions = HashMap::new();
-    let mut types = HashMap::new();
-    let mut top_level = HashMap::new();
+    let mut top_level = Vec::new();
 
     while let Some(lexeme) = peek_token_optional(&mut source)? {
         let cursor = lexeme.range.start();
         let statement = statement(&mut source, context, cursor)?;
         let statement: &AstNode = context.alloc(statement);
 
-        top_level.insert(statement.id, statement);
-        match &statement.value {
-            AstNodeValue::Import(path) => {
-                imports.insert(path.clone(), statement);
-            }
-            AstNodeValue::StructDeclaration(decl) => {
-                types.insert(decl.name.clone(), TypeDeclaration::Struct(decl));
-            }
-            AstNodeValue::FunctionDeclaration(func) => {
-                functions.insert(func.name.clone(), CallableDeclaration::Function(func));
-            }
-            AstNodeValue::ExternFunctionBinding(extern_func) => {
-                functions.insert(
-                    extern_func.name.clone(),
-                    CallableDeclaration::External(extern_func),
-                );
-            }
-            _ => {
-                return Err(ParseError::UnexpectedTopLevelStatement(
-                    statement.provenance.clone(),
-                ));
-            }
-        }
+        top_level.push(statement);
     }
 
-    Ok(ParsedSourceFile {
-        top_level,
-        imports,
-        functions,
-        types,
-    })
+    Ok(top_level)
 }
 
 fn add_node<'a>(context: &'a Arena<AstNode<'a>>, node: AstNode<'a>) -> &'a AstNode<'a> {

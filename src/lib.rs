@@ -3,7 +3,10 @@
 use std::io;
 
 use thiserror::Error;
-use typecheck::typecheck;
+use typecheck::{
+    resolve::{name_to_declaration, resolve_top_level_declarations},
+    typecheck,
+};
 
 mod id;
 
@@ -28,7 +31,11 @@ pub fn compile_file(source_name: &'static str, contents: String) -> Result<(), C
     let tokens = tokenizer::lex(source_name, contents);
     let mut parse_nodes = Arena::new();
     let parsed_module = parser::parse(&mut parse_nodes, tokens)?;
-    typecheck(parsed_module).unwrap();
+    let source = &parsed_module[..];
+    // TODO: scan for imports and make the imports
+    let names = name_to_declaration(source);
+    let declarations = resolve_top_level_declarations(&names).unwrap();
+    typecheck(source, declarations).unwrap();
 
     Ok(())
 }

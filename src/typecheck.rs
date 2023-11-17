@@ -4,38 +4,52 @@ use thiserror::Error;
 
 use crate::{
     id::ID,
-    parser::{
-        AstNode, AstNodeValue, BinOp, CallableDeclaration, FunctionDeclarationValue,
-        ParsedSourceFile, TypeDeclaration,
-    },
+    parser::{AstNode, AstNodeValue, BinOp, FunctionDeclarationValue},
 };
 
 use self::control_flow_graph::build_control_flow_graph;
 
 mod control_flow_graph;
-//mod resolve;
+pub mod resolve;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum ExpressionType<'a> {
+pub enum ExpressionType {
     Primitive(PrimitiveType),
-    Func(&'a FuncType<'a>),
-    Struct(&'a StructType<'a>),
+    Reference(ID),
 }
 
-pub enum ModuleDeclaration<'a> {
-    Func(FuncType<'a>),
-    Struct(StructType<'a>),
+pub enum ModuleDeclaration {
+    Func(FuncType),
+    Struct(StructType),
+}
+
+impl ModuleDeclaration {
+    pub fn id(&self) -> ID {
+        match self {
+            ModuleDeclaration::Func(inner) => inner.id,
+            ModuleDeclaration::Struct(inner) => inner.id,
+        }
+    }
+
+    pub fn expr(&self) -> ExpressionType {
+        match self {
+            ModuleDeclaration::Func(inner) => ExpressionType::Reference(inner.id),
+            ModuleDeclaration::Struct(inner) => ExpressionType::Reference(inner.id),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct StructType<'a> {
-    pub fields: HashMap<String, ExpressionType<'a>>,
+pub struct StructType {
+    pub id: ID,
+    pub fields: HashMap<String, ExpressionType>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct FuncType<'a> {
-    pub params: Vec<ExpressionType<'a>>,
-    pub returns: ExpressionType<'a>,
+pub struct FuncType {
+    pub id: ID,
+    pub params: Vec<ExpressionType>,
+    pub returns: ExpressionType,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -55,8 +69,8 @@ pub enum TypecheckError<'a> {
     #[error("mismatched types: received {received:?}, expected {expected:?}")]
     TypeMismatch {
         // TODO: provenance
-        expected: ExpressionType<'a>,
-        received: ExpressionType<'a>,
+        expected: ExpressionType,
+        received: ExpressionType,
     },
     #[error("declaration for {0:?} not found")]
     NameNotFound(&'a AstNode<'a>), // TODO
@@ -68,115 +82,81 @@ pub enum TypecheckError<'a> {
     MissingField(&'a AstNode<'a>),
 }
 
-// TODO: pass import namespace in
-pub fn typecheck<'a>(file: ParsedSourceFile<'a>) -> Result<(), TypecheckError<'a>> {
-    // TODO: reject void params and fields
+struct Declarations {
+    name_to_expr: HashMap<String, ExpressionType>,
+    id_to_decl: HashMap<ID, ModuleDeclaration>,
+}
 
-    //let module = resolve_module(file);
-    let mut declarations = HashMap::new();
-    for type_decl in file.types.values() {
-        match type_decl {
-            TypeDeclaration::Struct(decl) => {
-                // TODO: create a type object to represent this struct
-            }
+impl Declarations {
+    fn decl(&self, id: &ID) -> Option<&ModuleDeclaration> {
+        self.id_to_decl.get(id)
+    }
+
+    fn name_to_func(&self, name: &str) -> Option<&FuncType> {
+        if let ExpressionType::Reference(id) = self.name_to_expr.get(name)? {
+            Some(self.id_to_func(&id))
+        } else {
+            None
         }
     }
 
-    for (name, func_decl) in file.functions.iter() {
-        let (params, returns) = match func_decl {
-            CallableDeclaration::Function(func) => (&func.params, &func.returns),
-            CallableDeclaration::External(func) => (&func.params, &func.returns),
-        };
-        // TODO: create a type object to represent this function
-        let name = name.clone();
-        let func = FuncType {
-            params: params
-                .iter()
-                .map(|param| resolve_type_name(&declarations, &param.type_))
-                .collect::<Result<Vec<_>, _>>()?,
-            returns: returns
-                .map(|returns| resolve_type_name(&declarations, returns))
-                .unwrap_or(Ok(ExpressionType::Primitive(PrimitiveType::Void)))?,
-        };
-        declarations.insert(name, ModuleDeclaration::Func(func));
+    fn id_to_func(&self, id: &ID) -> &FuncType {
+        let expr = self.decl(id).expect("function with ID should exist");
+        match expr {
+            ModuleDeclaration::Func(inner) => inner,
+            _ => panic!("ID unexpectedly pointed to non-function"),
+        }
     }
 
-    let types = declarations
-        .iter()
-        .map(|(name, value)| {
-            (
-                name.clone(),
-                match value {
-                    ModuleDeclaration::Func(inner) => ExpressionType::Func(inner),
-                    ModuleDeclaration::Struct(inner) => ExpressionType::Struct(inner),
-                },
-            )
-        })
-        .collect();
-    // TODO: handle imports and namespaces
+    fn id_to_struct(&self, id: &ID) -> &StructType {
+        let expr = self.decl(id).expect("struct with ID should exist");
+        match expr {
+            ModuleDeclaration::Struct(inner) => inner,
+            _ => panic!("ID unexpectedly pointed to non-struct"),
+        }
+    }
+}
 
-    for function in file.functions.values() {
-        match function {
-            CallableDeclaration::Function(func) => {
-                typecheck_function(func, &types).unwrap(); // TODO
+// TODO: pass import namespace in
+pub fn typecheck<'a>(
+    file: &[&'a AstNode<'a>],
+    declarations: HashMap<String, ModuleDeclaration>,
+) -> Result<(), TypecheckError<'a>> {
+    // TODO: verify validity of type and function declarations
+
+    let mut name_to_expr = HashMap::new();
+    let mut id_to_decl = HashMap::new();
+
+    for (name, value) in declarations {
+        name_to_expr.insert(name.clone(), value.expr());
+        id_to_decl.insert(value.id(), value);
+    }
+
+    let context = Declarations {
+        name_to_expr,
+        id_to_decl,
+    };
+
+    // TODO: handle free-floating statements
+
+    for statement in file.iter() {
+        match &statement.value {
+            AstNodeValue::FunctionDeclaration(func) => {
+                typecheck_function(func, &context).unwrap(); // TODO
             }
-            CallableDeclaration::External(_) => {}
+            _ => {}
         }
     }
 
     Ok(())
 }
 
-fn resolve_type_name<'a>(
-    types: &HashMap<String, ModuleDeclaration<'a>>,
-    name: &'a AstNode<'a>,
-) -> Result<ExpressionType<'a>, TypecheckError<'a>> {
-    Ok(match &name.value {
-        AstNodeValue::Name(name) => match name.as_str() {
-            "bool" => ExpressionType::Primitive(PrimitiveType::Bool),
-            "void" => ExpressionType::Primitive(PrimitiveType::Void),
-            "i32" => ExpressionType::Primitive(PrimitiveType::Int),
-            "f32" => ExpressionType::Primitive(PrimitiveType::Float),
-            other => {
-                unimplemented!("Resolving actual type names is not implemented");
-            }
-        },
-        AstNodeValue::UniqueType(_) => todo!(),
-        AstNodeValue::SharedType(_) => todo!(),
-        AstNodeValue::ArrayType(_) => todo!(),
-        AstNodeValue::FunctionDeclaration(_)
-        | AstNodeValue::ExternFunctionBinding(_)
-        | AstNodeValue::StructDeclaration(_)
-        | AstNodeValue::Declaration(_, _)
-        | AstNodeValue::Import(_)
-        | AstNodeValue::Return(_)
-        | AstNodeValue::Int(_)
-        | AstNodeValue::Float(_)
-        | AstNodeValue::Bool(_)
-        | AstNodeValue::BinExpr(_, _, _)
-        | AstNodeValue::If(_, _)
-        | AstNodeValue::While(_, _)
-        | AstNodeValue::Call(_, _)
-        | AstNodeValue::TakeUnique(_)
-        | AstNodeValue::TakeShared(_)
-        | AstNodeValue::StructLiteral { .. }
-        | AstNodeValue::ArrayLiteral(_)
-        | AstNodeValue::ArrayLiteralLength(_, _)
-        | AstNodeValue::Block(_) => {
-            // TODO: report error
-            panic!("Illegal in expression name");
-        }
-    })
-}
-
 // TODO: some sort of data structure to store the results?
 fn typecheck_function<'a, 'b>(
     function: &'a FunctionDeclarationValue<'a>,
-    module_types: &HashMap<String, ExpressionType<'a>>,
-) -> Result<HashMap<ID, ExpressionType<'a>>, TypecheckError<'a>> {
-    let cfg = build_control_flow_graph(&function.body);
-
-    let Some(ExpressionType::Func(function_type)) = module_types.get(&function.name) else {
+    context: &Declarations,
+) -> Result<HashMap<ID, ExpressionType>, TypecheckError<'a>> {
+    let Some(function_type) = context.name_to_func(&function.name) else {
         panic!("expected function to be found in the module");
     };
     let parameters = function
@@ -189,11 +169,13 @@ fn typecheck_function<'a, 'b>(
     let mut expressions = HashMap::new();
     typecheck_expression(
         &function.body,
-        &[module_types, &parameters],
+        &[&context.name_to_expr, &parameters],
         &mut HashMap::new(),
         &mut expressions,
+        context,
     )?;
     // TODO: ensure that the return type matches the function's declared return type
+    let _cfg = build_control_flow_graph(&function.body);
 
     Ok(expressions)
 }
@@ -202,10 +184,11 @@ fn typecheck_function<'a, 'b>(
 // TODO: if-else need to unify
 fn typecheck_expression<'a, 'b>(
     node: &'a AstNode<'a>,
-    outer_scopes: &[&HashMap<String, ExpressionType<'a>>],
-    current_scope: &mut HashMap<String, ExpressionType<'a>>,
-    expressions: &'b mut HashMap<ID, ExpressionType<'a>>,
-) -> Result<ExpressionType<'a>, TypecheckError<'a>> {
+    outer_scopes: &[&HashMap<String, ExpressionType>],
+    current_scope: &mut HashMap<String, ExpressionType>,
+    expressions: &'b mut HashMap<ID, ExpressionType>,
+    context: &Declarations,
+) -> Result<ExpressionType, TypecheckError<'a>> {
     let ty = match &node.value {
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
@@ -218,13 +201,14 @@ fn typecheck_expression<'a, 'b>(
         }
         AstNodeValue::Declaration(name, value) => {
             // TODO: do I want shadowing? currently this shadows
-            let value = typecheck_expression(value, outer_scopes, current_scope, expressions)?;
+            let value =
+                typecheck_expression(value, outer_scopes, current_scope, expressions, context)?;
             current_scope.insert(name.clone(), value);
 
             ExpressionType::Primitive(PrimitiveType::Void)
         }
         AstNodeValue::Return(returned) => {
-            typecheck_expression(returned, outer_scopes, current_scope, expressions)?;
+            typecheck_expression(returned, outer_scopes, current_scope, expressions, context)?;
 
             ExpressionType::Primitive(PrimitiveType::Void)
         }
@@ -241,12 +225,12 @@ fn typecheck_expression<'a, 'b>(
             right,
         ) => {
             let ExpressionType::Primitive(left) =
-                typecheck_expression(left, outer_scopes, current_scope, expressions)?
+                typecheck_expression(left, outer_scopes, current_scope, expressions, context)?
             else {
                 return Err(TypecheckError::ArithmeticMismatch(node));
             };
             let ExpressionType::Primitive(right) =
-                typecheck_expression(right, outer_scopes, current_scope, expressions)?
+                typecheck_expression(right, outer_scopes, current_scope, expressions, context)?
             else {
                 return Err(TypecheckError::ArithmeticMismatch(node));
             };
@@ -258,12 +242,12 @@ fn typecheck_expression<'a, 'b>(
         }
         AstNodeValue::BinExpr(BinOp::LessThan | BinOp::GreaterThan, left, right) => {
             let ExpressionType::Primitive(_) =
-                typecheck_expression(left, outer_scopes, current_scope, expressions)?
+                typecheck_expression(left, outer_scopes, current_scope, expressions, context)?
             else {
                 return Err(TypecheckError::ArithmeticMismatch(node));
             };
             let ExpressionType::Primitive(_) =
-                typecheck_expression(right, outer_scopes, current_scope, expressions)?
+                typecheck_expression(right, outer_scopes, current_scope, expressions, context)?
             else {
                 return Err(TypecheckError::ArithmeticMismatch(node));
             };
@@ -272,8 +256,10 @@ fn typecheck_expression<'a, 'b>(
         }
         AstNodeValue::BinExpr(BinOp::Assignment, left, right) => {
             // TODO: ensure left is a valid lvalue
-            let left = typecheck_expression(left, outer_scopes, current_scope, expressions)?;
-            let right = typecheck_expression(right, outer_scopes, current_scope, expressions)?;
+            let left =
+                typecheck_expression(left, outer_scopes, current_scope, expressions, context)?;
+            let right =
+                typecheck_expression(right, outer_scopes, current_scope, expressions, context)?;
 
             if !is_assignable_to(&left, &right) {
                 return Err(TypecheckError::TypeMismatch {
@@ -286,7 +272,7 @@ fn typecheck_expression<'a, 'b>(
         }
         AstNodeValue::If(condition, body) | AstNodeValue::While(condition, body) => {
             let condition =
-                typecheck_expression(condition, outer_scopes, current_scope, expressions)?;
+                typecheck_expression(condition, outer_scopes, current_scope, expressions, context)?;
             if !matches!(condition, ExpressionType::Primitive(PrimitiveType::Bool)) {
                 return Err(TypecheckError::TypeMismatch {
                     received: condition,
@@ -294,7 +280,7 @@ fn typecheck_expression<'a, 'b>(
                 });
             }
 
-            typecheck_expression(body, outer_scopes, current_scope, expressions)?
+            typecheck_expression(body, outer_scopes, current_scope, expressions, context)?
         }
         AstNodeValue::Block(children) => {
             let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);
@@ -304,23 +290,31 @@ fn typecheck_expression<'a, 'b>(
             let mut child_scope = HashMap::new();
             let mut expr_ty = ExpressionType::Primitive(PrimitiveType::Void);
             for child in children.iter() {
-                expr_ty = typecheck_expression(child, &scopes[..], &mut child_scope, expressions)?;
+                expr_ty = typecheck_expression(
+                    child,
+                    &scopes[..],
+                    &mut child_scope,
+                    expressions,
+                    context,
+                )?;
             }
             expr_ty
         }
         AstNodeValue::Call(func, args) => {
-            let ExpressionType::Func(func) =
-                typecheck_expression(func, outer_scopes, current_scope, expressions)?
+            let ExpressionType::Reference(func) =
+                typecheck_expression(func, outer_scopes, current_scope, expressions, context)?
             else {
                 return Err(TypecheckError::CantCall(node));
             };
+            let func = context.id_to_func(&func);
 
             if func.params.len() != args.len() {
                 return Err(TypecheckError::WrongArgsCount(node));
             }
 
             for (arg, param) in args.iter().zip(func.params.iter()) {
-                let arg = typecheck_expression(arg, outer_scopes, current_scope, expressions)?;
+                let arg =
+                    typecheck_expression(arg, outer_scopes, current_scope, expressions, context)?;
                 if !is_assignable_to(&param, &arg) {
                     return Err(TypecheckError::TypeMismatch {
                         received: arg,
@@ -332,11 +326,13 @@ fn typecheck_expression<'a, 'b>(
             func.returns
         }
         AstNodeValue::StructLiteral { name, fields } => {
-            let ExpressionType::Struct(struct_type) = resolve(name, current_scope, outer_scopes)
-                .ok_or(TypecheckError::NameNotFound(node))?
+            let ExpressionType::Reference(struct_type_id) =
+                resolve(name, current_scope, outer_scopes)
+                    .ok_or(TypecheckError::NameNotFound(node))?
             else {
                 return Err(TypecheckError::CantCall(node));
             };
+            let struct_type = context.id_to_struct(&struct_type_id);
 
             if struct_type.fields.len() != fields.len() {
                 return Err(TypecheckError::WrongArgsCount(node));
@@ -346,8 +342,13 @@ fn typecheck_expression<'a, 'b>(
                 let Some(arg_field) = fields.get(name) else {
                     return Err(TypecheckError::MissingField(node));
                 };
-                let arg_field =
-                    typecheck_expression(arg_field, outer_scopes, current_scope, expressions)?;
+                let arg_field = typecheck_expression(
+                    arg_field,
+                    outer_scopes,
+                    current_scope,
+                    expressions,
+                    context,
+                )?;
                 if !is_assignable_to(param_field, &arg_field) {
                     return Err(TypecheckError::TypeMismatch {
                         received: arg_field,
@@ -356,7 +357,7 @@ fn typecheck_expression<'a, 'b>(
                 }
             }
 
-            ExpressionType::Struct(struct_type)
+            ExpressionType::Reference(struct_type_id)
         }
         AstNodeValue::TakeUnique(_) => todo!(),
         AstNodeValue::TakeShared(_) => todo!(),
@@ -369,11 +370,11 @@ fn typecheck_expression<'a, 'b>(
     Ok(*expressions.get(&node.id).unwrap())
 }
 
-fn resolve<'a>(
+fn resolve(
     name: &str,
-    current_scope: &HashMap<String, ExpressionType<'a>>,
-    outer_scopes: &[&HashMap<String, ExpressionType<'a>>],
-) -> Option<ExpressionType<'a>> {
+    current_scope: &HashMap<String, ExpressionType>,
+    outer_scopes: &[&HashMap<String, ExpressionType>],
+) -> Option<ExpressionType> {
     current_scope
         .get(name)
         .or(outer_scopes.iter().find_map(|scope| scope.get(name)))
@@ -381,6 +382,6 @@ fn resolve<'a>(
 }
 
 // TODO
-fn is_assignable_to<'a>(left: &ExpressionType<'a>, right: &ExpressionType<'a>) -> bool {
+fn is_assignable_to(left: &ExpressionType, right: &ExpressionType) -> bool {
     return left == right;
 }
