@@ -5,13 +5,22 @@ import support:
 - properly pull foreign resolved types from imports
 
 semantic analysis:
-- allow type expressions, maybe hash types for this (bidrectional hashmap?)
 - handle return, break statements in CFG parsing
 - attach types to expressions, ensure they match properly
+
+sum types:
+- decide on some mechanism for sum types
+- implement em
+
+collections:
+- index operator
+- array literals typechecking
+- dicts:
+    - declaration syntax
+    - typechecking
 
 ir:
 - lower code into SSA
 
-backend:
-- turn SSA into lua
-
+interpreter:
+- idk write it
