@@ -103,7 +103,9 @@ pub fn resolve_type_name<'a>(
             PointerKind::Shared,
             Box::new(resolve_type_name(types, inner)?),
         ),
-        AstNodeValue::ArrayType(_) => todo!(),
+        AstNodeValue::ArrayType(inner) => {
+            ExpressionType::Array(Box::new(resolve_type_name(types, inner)?))
+        }
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)

@@ -2,6 +2,7 @@ fn main(): i32 {
     let x = 1 + 2;
     let y = add(shared x, unique 3);
     let condition = x < 5;
+    add_array([3; 10]);
     if unique condition {
         return y;
     }
@@ -10,4 +11,8 @@ fn main(): i32 {
 
 fn add(a: shared i32, b: unique i32): i32 {
     a + b
+}
+
+fn add_array(arr: [i32]): i32 {
+
 }

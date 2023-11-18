@@ -17,6 +17,7 @@ pub enum ExpressionType {
     Primitive(PrimitiveType),
     Named(ID),
     Pointer(PointerKind, Box<ExpressionType>),
+    Array(Box<ExpressionType>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -390,8 +391,15 @@ fn typecheck_expression<'a, 'b>(
                 context,
             )?),
         ),
-        AstNodeValue::ArrayLiteral(_) => todo!(),
-        AstNodeValue::ArrayLiteralLength(_, _) => todo!(),
+        AstNodeValue::ArrayLiteral(_items) => {
+            // TODO: how to determine what the intended array type is?
+            todo!();
+        }
+        AstNodeValue::ArrayLiteralLength(value, _length) => {
+            let inner =
+                typecheck_expression(value, outer_scopes, current_scope, expressions, context)?;
+            ExpressionType::Array(Box::new(inner))
+        }
     };
 
     expressions.insert(node.id, ty);
