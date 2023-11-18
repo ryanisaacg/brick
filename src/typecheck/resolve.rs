@@ -6,7 +6,8 @@ use crate::parser::{
 };
 
 use super::{
-    ExpressionType, FuncType, ModuleDeclaration, PrimitiveType, StructType, TypecheckError,
+    ExpressionType, FuncType, ModuleDeclaration, PointerKind, PrimitiveType, StructType,
+    TypecheckError,
 };
 
 pub fn name_to_declaration<'a>(source: &[&'a AstNode<'a>]) -> HashMap<String, &'a AstNode<'a>> {
@@ -87,15 +88,21 @@ pub fn resolve_type_name<'a>(
             "void" => ExpressionType::Primitive(PrimitiveType::Void),
             "i32" => ExpressionType::Primitive(PrimitiveType::Int),
             "f32" => ExpressionType::Primitive(PrimitiveType::Float),
-            other => ExpressionType::Reference(
+            other => ExpressionType::Named(
                 types
                     .get(other)
                     .ok_or(TypecheckError::NameNotFound(node))?
                     .id,
             ),
         },
-        AstNodeValue::UniqueType(_) => todo!(),
-        AstNodeValue::SharedType(_) => todo!(),
+        AstNodeValue::UniqueType(inner) => ExpressionType::Pointer(
+            PointerKind::Unique,
+            Box::new(resolve_type_name(types, inner)?),
+        ),
+        AstNodeValue::SharedType(inner) => ExpressionType::Pointer(
+            PointerKind::Shared,
+            Box::new(resolve_type_name(types, inner)?),
+        ),
         AstNodeValue::ArrayType(_) => todo!(),
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)

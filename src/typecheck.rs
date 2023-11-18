@@ -12,10 +12,17 @@ use self::control_flow_graph::build_control_flow_graph;
 mod control_flow_graph;
 pub mod resolve;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpressionType {
     Primitive(PrimitiveType),
-    Reference(ID),
+    Named(ID),
+    Pointer(PointerKind, Box<ExpressionType>),
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PointerKind {
+    Shared,
+    Unique,
 }
 
 pub enum ModuleDeclaration {
@@ -33,8 +40,8 @@ impl ModuleDeclaration {
 
     pub fn expr(&self) -> ExpressionType {
         match self {
-            ModuleDeclaration::Func(inner) => ExpressionType::Reference(inner.id),
-            ModuleDeclaration::Struct(inner) => ExpressionType::Reference(inner.id),
+            ModuleDeclaration::Func(inner) => ExpressionType::Named(inner.id),
+            ModuleDeclaration::Struct(inner) => ExpressionType::Named(inner.id),
         }
     }
 }
@@ -93,7 +100,7 @@ impl Declarations {
     }
 
     fn name_to_func(&self, name: &str) -> Option<&FuncType> {
-        if let ExpressionType::Reference(id) = self.name_to_expr.get(name)? {
+        if let ExpressionType::Named(id) = self.name_to_expr.get(name)? {
             Some(self.id_to_func(&id))
         } else {
             None
@@ -212,9 +219,8 @@ fn typecheck_expression<'a, 'b>(
 
             ExpressionType::Primitive(PrimitiveType::Void)
         }
-        AstNodeValue::Name(name) => {
-            resolve(name, current_scope, outer_scopes).ok_or(TypecheckError::NameNotFound(node))?
-        }
+        AstNodeValue::Name(name) => resolve_name(name, current_scope, outer_scopes)
+            .ok_or(TypecheckError::NameNotFound(node))?,
         AstNodeValue::Int(_) => ExpressionType::Primitive(PrimitiveType::Int),
         AstNodeValue::Float(_) => ExpressionType::Primitive(PrimitiveType::Float),
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
@@ -224,31 +230,31 @@ fn typecheck_expression<'a, 'b>(
             left,
             right,
         ) => {
-            let ExpressionType::Primitive(left) =
-                typecheck_expression(left, outer_scopes, current_scope, expressions, context)?
-            else {
+            let left =
+                typecheck_expression(left, outer_scopes, current_scope, expressions, context)?;
+            let ExpressionType::Primitive(left) = fully_dereference(&left) else {
                 return Err(TypecheckError::ArithmeticMismatch(node));
             };
-            let ExpressionType::Primitive(right) =
-                typecheck_expression(right, outer_scopes, current_scope, expressions, context)?
-            else {
+            let right =
+                typecheck_expression(right, outer_scopes, current_scope, expressions, context)?;
+            let ExpressionType::Primitive(right) = fully_dereference(&right) else {
                 return Err(TypecheckError::ArithmeticMismatch(node));
             };
             if left == right {
-                ExpressionType::Primitive(left)
+                ExpressionType::Primitive(*left)
             } else {
                 return Err(TypecheckError::ArithmeticMismatch(node));
             }
         }
         AstNodeValue::BinExpr(BinOp::LessThan | BinOp::GreaterThan, left, right) => {
-            let ExpressionType::Primitive(_) =
-                typecheck_expression(left, outer_scopes, current_scope, expressions, context)?
-            else {
+            let left =
+                typecheck_expression(left, outer_scopes, current_scope, expressions, context)?;
+            let ExpressionType::Primitive(_) = fully_dereference(&left) else {
                 return Err(TypecheckError::ArithmeticMismatch(node));
             };
-            let ExpressionType::Primitive(_) =
-                typecheck_expression(right, outer_scopes, current_scope, expressions, context)?
-            else {
+            let right =
+                typecheck_expression(right, outer_scopes, current_scope, expressions, context)?;
+            let ExpressionType::Primitive(_) = fully_dereference(&right) else {
                 return Err(TypecheckError::ArithmeticMismatch(node));
             };
 
@@ -273,7 +279,11 @@ fn typecheck_expression<'a, 'b>(
         AstNodeValue::If(condition, body) | AstNodeValue::While(condition, body) => {
             let condition =
                 typecheck_expression(condition, outer_scopes, current_scope, expressions, context)?;
-            if !matches!(condition, ExpressionType::Primitive(PrimitiveType::Bool)) {
+            let condition_deref = fully_dereference(&condition);
+            if !matches!(
+                condition_deref,
+                ExpressionType::Primitive(PrimitiveType::Bool)
+            ) {
                 return Err(TypecheckError::TypeMismatch {
                     received: condition,
                     expected: ExpressionType::Primitive(PrimitiveType::Bool),
@@ -301,7 +311,7 @@ fn typecheck_expression<'a, 'b>(
             expr_ty
         }
         AstNodeValue::Call(func, args) => {
-            let ExpressionType::Reference(func) =
+            let ExpressionType::Named(func) =
                 typecheck_expression(func, outer_scopes, current_scope, expressions, context)?
             else {
                 return Err(TypecheckError::CantCall(node));
@@ -318,16 +328,16 @@ fn typecheck_expression<'a, 'b>(
                 if !is_assignable_to(&param, &arg) {
                     return Err(TypecheckError::TypeMismatch {
                         received: arg,
-                        expected: *param,
+                        expected: param.clone(),
                     });
                 }
             }
 
-            func.returns
+            func.returns.clone()
         }
         AstNodeValue::StructLiteral { name, fields } => {
-            let ExpressionType::Reference(struct_type_id) =
-                resolve(name, current_scope, outer_scopes)
+            let ExpressionType::Named(struct_type_id) =
+                resolve_name(name, current_scope, outer_scopes)
                     .ok_or(TypecheckError::NameNotFound(node))?
             else {
                 return Err(TypecheckError::CantCall(node));
@@ -352,25 +362,44 @@ fn typecheck_expression<'a, 'b>(
                 if !is_assignable_to(param_field, &arg_field) {
                     return Err(TypecheckError::TypeMismatch {
                         received: arg_field,
-                        expected: *param_field,
+                        expected: param_field.clone(),
                     });
                 }
             }
 
-            ExpressionType::Reference(struct_type_id)
+            ExpressionType::Named(struct_type_id)
         }
-        AstNodeValue::TakeUnique(_) => todo!(),
-        AstNodeValue::TakeShared(_) => todo!(),
+        // TODO: assert that this is an lvalue
+        AstNodeValue::TakeUnique(inner) => ExpressionType::Pointer(
+            PointerKind::Unique,
+            Box::new(typecheck_expression(
+                inner,
+                outer_scopes,
+                current_scope,
+                expressions,
+                context,
+            )?),
+        ),
+        AstNodeValue::TakeShared(inner) => ExpressionType::Pointer(
+            PointerKind::Shared,
+            Box::new(typecheck_expression(
+                inner,
+                outer_scopes,
+                current_scope,
+                expressions,
+                context,
+            )?),
+        ),
         AstNodeValue::ArrayLiteral(_) => todo!(),
         AstNodeValue::ArrayLiteralLength(_, _) => todo!(),
     };
 
     expressions.insert(node.id, ty);
 
-    Ok(*expressions.get(&node.id).unwrap())
+    Ok(expressions.get(&node.id).unwrap().clone())
 }
 
-fn resolve(
+fn resolve_name(
     name: &str,
     current_scope: &HashMap<String, ExpressionType>,
     outer_scopes: &[&HashMap<String, ExpressionType>],
@@ -378,10 +407,26 @@ fn resolve(
     current_scope
         .get(name)
         .or(outer_scopes.iter().find_map(|scope| scope.get(name)))
-        .copied()
+        .cloned()
 }
 
 // TODO
 fn is_assignable_to(left: &ExpressionType, right: &ExpressionType) -> bool {
-    return left == right;
+    match (left, right) {
+        (
+            ExpressionType::Pointer(left_ty, left_inner),
+            ExpressionType::Pointer(right_ty, right_inner),
+        ) => left_ty == right_ty && is_assignable_to(left_inner, right_inner),
+        (left, ExpressionType::Pointer(_, right_inner)) => is_assignable_to(left, right_inner),
+        (ExpressionType::Pointer(_, _), _right) => false,
+        (left, right) => left == right,
+    }
+}
+
+fn fully_dereference(ty: &ExpressionType) -> &ExpressionType {
+    if let ExpressionType::Pointer(_, inner) = ty {
+        fully_dereference(inner)
+    } else {
+        ty
+    }
 }
