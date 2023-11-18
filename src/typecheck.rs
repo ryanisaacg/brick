@@ -207,6 +207,10 @@ fn typecheck_expression<'a, 'b>(
         AstNodeValue::UniqueType(_) | AstNodeValue::SharedType(_) | AstNodeValue::ArrayType(_) => {
             panic!("illegal type expression in function body");
         }
+        AstNodeValue::Statement(inner) => {
+            typecheck_expression(inner, outer_scopes, current_scope, expressions, context)?;
+            ExpressionType::Primitive(PrimitiveType::Void)
+        }
         AstNodeValue::Declaration(name, value) => {
             // TODO: do I want shadowing? currently this shadows
             let value =
@@ -342,7 +346,7 @@ fn typecheck_expression<'a, 'b>(
 
             let mut child_scope = HashMap::new();
             let mut expr_ty = ExpressionType::Primitive(PrimitiveType::Void);
-            for child in children.iter() {
+            for (index, child) in children.iter().enumerate() {
                 expr_ty = typecheck_expression(
                     child,
                     &scopes[..],
@@ -350,6 +354,14 @@ fn typecheck_expression<'a, 'b>(
                     expressions,
                     context,
                 )?;
+                if index != children.len() - 1
+                    && expr_ty != ExpressionType::Primitive(PrimitiveType::Void)
+                {
+                    return Err(TypecheckError::TypeMismatch {
+                        expected: ExpressionType::Primitive(PrimitiveType::Void),
+                        received: expr_ty,
+                    });
+                }
             }
             expr_ty
         }

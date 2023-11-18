@@ -75,6 +75,8 @@ pub enum AstNodeValue<'a> {
     Declaration(String, &'a AstNode<'a>),
     Import(String),
     Return(&'a AstNode<'a>),
+    // Any non-specific expression that ends in ; is a statement
+    Statement(&'a AstNode<'a>),
 
     Name(String),
 
@@ -115,6 +117,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
             | UniqueType(child)
             | SharedType(child)
             | Return(child)
+            | Statement(child)
             | ArrayType(child) => {
                 children.push(*child);
             }
@@ -218,35 +221,73 @@ fn statement<'a>(
     context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
-    let statement = match peek_token(source, cursor, "expected let, fn, or expression")?.value {
-        TokenValue::Let
-        | TokenValue::Import
-        | TokenValue::Function
-        | TokenValue::Extern
-        | TokenValue::Struct
-        | TokenValue::Return => {
-            let Token { range, value, .. } = already_peeked_token(source)?;
-            let cursor = range.end();
-            match value {
-                TokenValue::Let => variable_declaration(source, context, cursor)?,
-                TokenValue::Import => import_declaration(source, cursor)?,
-                TokenValue::Extern => extern_function_declaration(source, context, cursor)?,
-                TokenValue::Function => function_declaration(source, context, cursor)?,
-                TokenValue::Struct => struct_declaration(source, context, cursor)?,
-                TokenValue::Return => return_declaration(source, context, cursor)?,
-                _ => unreachable!(),
+    Ok(
+        match peek_token(source, cursor, "expected let, fn, or expression")?.value {
+            TokenValue::Let
+            | TokenValue::Import
+            | TokenValue::Function
+            | TokenValue::Extern
+            | TokenValue::Struct
+            | TokenValue::Return => {
+                let Token { range, value, .. } = already_peeked_token(source)?;
+                let cursor = range.end();
+                match value {
+                    TokenValue::Let => {
+                        let statement = variable_declaration(source, context, cursor)?;
+                        assert_next_lexeme_eq(
+                            source.next(),
+                            TokenValue::Semicolon,
+                            statement.provenance.end(),
+                            "expected ; after 'let' statement",
+                        )?;
+
+                        statement
+                    }
+                    TokenValue::Import => {
+                        let statement = import_declaration(source, cursor)?;
+                        assert_next_lexeme_eq(
+                            source.next(),
+                            TokenValue::Semicolon,
+                            statement.provenance.end(),
+                            "expected ; after 'import' statement",
+                        )?;
+
+                        statement
+                    }
+                    TokenValue::Extern => extern_function_declaration(source, context, cursor)?,
+                    TokenValue::Function => function_declaration(source, context, cursor)?,
+                    TokenValue::Struct => struct_declaration(source, context, cursor)?,
+                    TokenValue::Return => {
+                        let statement = return_declaration(source, context, cursor)?;
+                        assert_next_lexeme_eq(
+                            source.next(),
+                            TokenValue::Semicolon,
+                            statement.provenance.end(),
+                            "expected ; after 'import' statement",
+                        )?;
+
+                        statement
+                    }
+                    _ => unreachable!(),
+                }
             }
-        }
-        _ => expression(source, context, cursor, true)?,
-    };
-    if let Some(Token {
-        value: TokenValue::Semicolon,
-        ..
-    }) = peek_token_optional(source)?
-    {
-        source.next();
-    }
-    Ok(statement)
+            _ => {
+                let expr = expression(source, context, cursor, true)?;
+                if let Some(Token {
+                    value: TokenValue::Semicolon,
+                    ..
+                }) = peek_token_optional(source)?
+                {
+                    let token = already_peeked_token(source)?;
+                    let provenance = SourceRange::new(expr.provenance.start(), token.range.end());
+                    let expr = add_node(context, expr);
+                    AstNode::new(AstNodeValue::Statement(expr), provenance)
+                } else {
+                    expr
+                }
+            }
+        },
+    )
 }
 
 fn return_declaration<'a>(

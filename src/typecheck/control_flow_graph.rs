@@ -87,6 +87,7 @@ fn create_graph_for_node<'a>(
             (node, node)
         }
         BinExpr(_, _, _)
+        | Statement(_)
         | Call(_, _)
         | TakeUnique(_)
         | TakeShared(_)

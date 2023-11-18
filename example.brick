@@ -7,7 +7,6 @@ fn main(): i32 {
     } else {
         2
     };
-    let a = z + 2;
     add_array([3; 10]);
     if unique condition {
         return 3;

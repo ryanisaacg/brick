@@ -112,6 +112,7 @@ pub fn resolve_type_name<'a>(
         | AstNodeValue::Declaration(_, _)
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
+        | AstNodeValue::Statement(_)
         | AstNodeValue::Int(_)
         | AstNodeValue::Float(_)
         | AstNodeValue::Bool(_)
