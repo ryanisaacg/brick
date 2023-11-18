@@ -1,6 +1,6 @@
 use crate::{
     arena::ArenaNode,
-    parser::{AstNode, AstNodeValue},
+    parser::{AstNode, AstNodeValue, IfDeclaration},
 };
 
 use petgraph::stable_graph::{NodeIndex, StableGraph};
@@ -109,9 +109,14 @@ fn create_graph_for_node<'a>(
             (start, current_node)
         }
 
-        If(condition, body) => {
+        If(IfDeclaration {
+            condition,
+            if_branch,
+            ..
+        }) => {
+            // TODO: else branch
             let (start_condition, end_condition) = create_graph_for_node(condition, graph, exit);
-            let (start_body, end_body) = create_graph_for_node(body, graph, exit);
+            let (start_body, end_body) = create_graph_for_node(if_branch, graph, exit);
             graph.add_edge(end_condition, start_body, CfgEdge::If);
 
             let virtual_next = graph.add_node(CfgNode::EmptyBasicBlock);

@@ -2,9 +2,15 @@ fn main(): i32 {
     let x = 1 + 2;
     let y = add(shared x, unique 3);
     let condition = x < 5;
+    let z = if condition {
+        1
+    } else {
+        2
+    };
+    let a = z + 2;
     add_array([3; 10]);
     if unique condition {
-        return y;
+        return 3;
     }
     return 2;
 }

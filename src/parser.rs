@@ -60,6 +60,13 @@ pub struct StructDeclarationValue<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct IfDeclaration<'a> {
+    pub condition: &'a AstNode<'a>,
+    pub if_branch: &'a AstNode<'a>,
+    pub else_branch: Option<&'a AstNode<'a>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum AstNodeValue<'a> {
     // Statements
     FunctionDeclaration(FunctionDeclarationValue<'a>),
@@ -76,7 +83,7 @@ pub enum AstNodeValue<'a> {
     Float(f64),
     Bool(bool),
     BinExpr(BinOp, &'a AstNode<'a>, &'a AstNode<'a>),
-    If(&'a AstNode<'a>, &'a AstNode<'a>),
+    If(IfDeclaration<'a>),
     While(&'a AstNode<'a>, &'a AstNode<'a>),
     Call(&'a AstNode<'a>, Vec<&'a AstNode<'a>>),
     TakeUnique(&'a AstNode<'a>),
@@ -111,9 +118,20 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
             | ArrayType(child) => {
                 children.push(*child);
             }
-            BinExpr(_, left, right) | If(left, right) | While(left, right) => {
+            BinExpr(_, left, right) | While(left, right) => {
                 children.push(*right);
                 children.push(*left);
+            }
+            If(IfDeclaration {
+                condition,
+                if_branch,
+                else_branch,
+            }) => {
+                children.push(*condition);
+                children.push(*if_branch);
+                if let Some(else_branch) = else_branch {
+                    children.push(*else_branch);
+                }
             }
             ArrayLiteral(values) | Block(values) => {
                 for value in values {
@@ -934,20 +952,49 @@ fn if_or_while<'a>(
         "expected { after predicate",
     )?;
     let cursor = token.range.end();
-    let block = block(source, context, cursor)?;
+    let if_block = block(source, context, cursor)?;
 
     let predicate_ptr = add_node(context, predicate);
-    let provenance = SourceRange::new(cursor, block.provenance.end());
-    let block_ptr = add_node(context, block);
+    let provenance = SourceRange::new(cursor, if_block.provenance.end());
+    let block_ptr = add_node(context, if_block);
 
-    Ok(AstNode::new(
-        if if_or_while == TokenValue::If {
-            AstNodeValue::If(predicate_ptr, block_ptr)
-        } else {
-            AstNodeValue::While(predicate_ptr, block_ptr)
-        },
-        provenance,
-    ))
+    Ok(if if_or_while == TokenValue::If {
+        match peek_token_optional(source)? {
+            Some(Token {
+                value: TokenValue::Word(word),
+                ..
+            }) if word == "else" => {
+                let else_token = already_peeked_token(source)?;
+                let token = assert_next_lexeme_eq(
+                    source.next(),
+                    TokenValue::OpenBracket,
+                    else_token.range.end(),
+                    "expected { after else",
+                )?;
+                let else_block = block(source, context, token.range.end())?;
+                let provenance = SourceRange::new(cursor, else_block.provenance.end());
+                let else_ptr = add_node(context, else_block);
+                AstNode::new(
+                    AstNodeValue::If(IfDeclaration {
+                        condition: predicate_ptr,
+                        if_branch: block_ptr,
+                        else_branch: Some(else_ptr),
+                    }),
+                    provenance,
+                )
+            }
+            _ => AstNode::new(
+                AstNodeValue::If(IfDeclaration {
+                    condition: predicate_ptr,
+                    if_branch: block_ptr,
+                    else_branch: None,
+                }),
+                provenance,
+            ),
+        }
+    } else {
+        AstNode::new(AstNodeValue::While(predicate_ptr, block_ptr), provenance)
+    })
 }
 
 fn block<'a>(

@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     id::ID,
-    parser::{AstNode, AstNodeValue, BinOp, FunctionDeclarationValue},
+    parser::{AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration},
 };
 
 use self::control_flow_graph::build_control_flow_graph;
@@ -277,7 +277,12 @@ fn typecheck_expression<'a, 'b>(
 
             ExpressionType::Primitive(PrimitiveType::Void)
         }
-        AstNodeValue::If(condition, body) | AstNodeValue::While(condition, body) => {
+        AstNodeValue::If(IfDeclaration {
+            condition,
+            if_branch: body,
+            else_branch: None,
+        })
+        | AstNodeValue::While(condition, body) => {
             let condition =
                 typecheck_expression(condition, outer_scopes, current_scope, expressions, context)?;
             let condition_deref = fully_dereference(&condition);
@@ -291,7 +296,44 @@ fn typecheck_expression<'a, 'b>(
                 });
             }
 
-            typecheck_expression(body, outer_scopes, current_scope, expressions, context)?
+            typecheck_expression(body, outer_scopes, current_scope, expressions, context)?;
+
+            ExpressionType::Primitive(PrimitiveType::Void)
+        }
+        AstNodeValue::If(IfDeclaration {
+            condition,
+            if_branch,
+            else_branch: Some(else_branch),
+        }) => {
+            let condition =
+                typecheck_expression(condition, outer_scopes, current_scope, expressions, context)?;
+            let condition_deref = fully_dereference(&condition);
+            if !matches!(
+                condition_deref,
+                ExpressionType::Primitive(PrimitiveType::Bool)
+            ) {
+                return Err(TypecheckError::TypeMismatch {
+                    received: condition,
+                    expected: ExpressionType::Primitive(PrimitiveType::Bool),
+                });
+            }
+
+            let if_branch =
+                typecheck_expression(if_branch, outer_scopes, current_scope, expressions, context)?;
+            let else_branch = typecheck_expression(
+                else_branch,
+                outer_scopes,
+                current_scope,
+                expressions,
+                context,
+            )?;
+
+            if if_branch == else_branch {
+                if_branch
+            } else {
+                // TODO: typecheck error here UNLESS there's a break/return
+                panic!("if and else don't match");
+            }
         }
         AstNodeValue::Block(children) => {
             let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);

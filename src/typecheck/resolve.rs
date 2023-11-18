@@ -116,7 +116,7 @@ pub fn resolve_type_name<'a>(
         | AstNodeValue::Float(_)
         | AstNodeValue::Bool(_)
         | AstNodeValue::BinExpr(_, _, _)
-        | AstNodeValue::If(_, _)
+        | AstNodeValue::If(_)
         | AstNodeValue::While(_, _)
         | AstNodeValue::Call(_, _)
         | AstNodeValue::TakeUnique(_)
