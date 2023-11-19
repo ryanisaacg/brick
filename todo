@@ -4,6 +4,15 @@ import support:
 - allow imports to include a list of things, with an optional catch-all
 - properly pull foreign resolved types from imports
 
+arithmetic:
+- add type level support for f64 and i64
+- automatically promote integers to equivalent floats
+
+strings:
+- string and character literals in the parser
+- string types
+- string manipulation
+
 semantic analysis:
 - handle return, break statements in CFG parsing
 - attach types to expressions, ensure they match properly
@@ -11,6 +20,15 @@ semantic analysis:
 sum types:
 - decide on some mechanism for sum types
 - implement em
+
+extern:
+- extern structs?
+- extern functions are unsafe
+
+unsafe:
+- functions can be declared unsafe
+- you can have unsafe blocks (or statements?)
+- you can only call unsafe functions from within unsafe blocks
 
 collections:
 - index operator
