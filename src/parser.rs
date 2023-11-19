@@ -12,6 +12,7 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NameAndType<'a> {
+    pub id: ID,
     pub name: String,
     pub type_: &'a AstNode<'a>,
 }
@@ -331,7 +332,11 @@ fn struct_declaration<'a>(
         cursor = range.end();
         let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
         let kind = add_node(context, kind);
-        fields.push(NameAndType { name, type_: kind });
+        fields.push(NameAndType {
+            id: ID::new(),
+            name,
+            type_: kind,
+        });
 
         let (should_end, range) = comma_or_end_list(
             source,
@@ -475,7 +480,11 @@ fn function_header<'a>(
                 cursor = range.end();
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
                 let kind = add_node(context, kind);
-                params.push(NameAndType { name, type_: kind });
+                params.push(NameAndType {
+                    id: ID::new(),
+                    name,
+                    type_: kind,
+                });
             }
         }
     }

@@ -2,18 +2,20 @@
 
 use std::io;
 
+use ir::lower_function;
 use thiserror::Error;
 use typecheck::{
     resolve::{name_to_declaration, resolve_top_level_declarations},
     typecheck,
 };
 
+mod arena;
 mod id;
+mod tokenizer;
 
-pub mod arena;
+pub mod ir;
 pub mod parser;
 pub mod provenance;
-pub mod tokenizer;
 pub mod typecheck;
 
 use parser::ParseError;
@@ -35,7 +37,13 @@ pub fn compile_file(source_name: &'static str, contents: String) -> Result<(), C
     // TODO: scan for imports and make the imports
     let names = name_to_declaration(source);
     let declarations = resolve_top_level_declarations(&names).unwrap();
-    typecheck(source, declarations).unwrap();
+    let functions = typecheck(source, declarations).unwrap();
+
+    let ir_arena = Arena::new();
+    let _ir: Vec<_> = functions
+        .into_iter()
+        .map(|func| lower_function(&ir_arena, func))
+        .collect();
 
     Ok(())
 }

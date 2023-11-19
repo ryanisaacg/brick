@@ -41,7 +41,7 @@ pub fn resolve_top_level_declarations<'a>(
                             id: node.id,
                             fields: fields
                                 .iter()
-                                .map(|NameAndType { name, type_ }| {
+                                .map(|NameAndType { id: _, name, type_ }| {
                                     Ok((
                                         name.clone(),
                                         resolve_type_name(&names_to_declarations, type_)?,
