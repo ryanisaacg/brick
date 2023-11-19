@@ -229,7 +229,24 @@ fn typecheck_expression<'a, 'b>(
         AstNodeValue::Int(_) => ExpressionType::Primitive(PrimitiveType::Int),
         AstNodeValue::Float(_) => ExpressionType::Primitive(PrimitiveType::Float),
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
-        AstNodeValue::BinExpr(BinOp::Dot | BinOp::Index, _, _) => todo!(),
+        AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
+            let left =
+                typecheck_expression(left, outer_scopes, current_scope, expressions, context)?;
+            let ExpressionType::Named(id) = left else {
+                panic!("TODO: left side of dot operator");
+            };
+            // TODO: fallible
+            let struct_type = context.id_to_struct(&id);
+            let AstNodeValue::Name(name) = &right.value else {
+                panic!("TODO: right side of dot operator");
+            };
+            struct_type
+                .fields
+                .get(name)
+                .expect("TODO: field is present")
+                .clone()
+        }
+        AstNodeValue::BinExpr(BinOp::Index, _, _) => todo!(),
         AstNodeValue::BinExpr(
             BinOp::Add | BinOp::Subtract | BinOp::Multiply | BinOp::Divide,
             left,

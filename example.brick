@@ -1,23 +1,25 @@
-fn main(): i32 {
-    let x = 1 + 2;
-    let y = add(shared x, unique 3);
-    let condition = x < 5;
-    let z = if condition {
-        1
-    } else {
-        2
+extern fn random(): f32;
+extern fn floor(value: f32): i32;
+
+struct Rect {
+    tl: Point,
+    size: Point,
+}
+
+struct Point {
+    x: f32,
+    y: f32,
+}
+
+fn main(): bool {
+    let p = Rect {
+        tl: Point { x: 1.0, y: 2.0 },
+        size: Point { x: 32.0, y: 32.0 },
     };
-    add_array([3; 10]);
-    if unique condition {
-        return 3;
-    }
-    return 2;
+    let roll = d6() + d6() + floor(p.tl.x);
+    roll > 7
 }
 
-fn add(a: shared i32, b: unique i32): i32 {
-    a + b
-}
-
-fn add_array(arr: [i32]): i32 {
-
+fn d6(): i32 {
+    floor(random() * 6.0) + 1
 }
