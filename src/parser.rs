@@ -87,16 +87,16 @@ pub enum AstNodeValue<'a> {
     BinExpr(BinOp, &'a AstNode<'a>, &'a AstNode<'a>),
     If(IfDeclaration<'a>),
     While(&'a AstNode<'a>, &'a AstNode<'a>),
-    Call(&'a AstNode<'a>, Vec<&'a AstNode<'a>>),
+    Call(&'a AstNode<'a>, Vec<AstNode<'a>>),
     TakeUnique(&'a AstNode<'a>),
     TakeShared(&'a AstNode<'a>),
     StructLiteral {
         name: String,
-        fields: HashMap<String, &'a AstNode<'a>>,
+        fields: HashMap<String, AstNode<'a>>,
     },
-    ArrayLiteral(Vec<&'a AstNode<'a>>),
+    ArrayLiteral(Vec<AstNode<'a>>),
     ArrayLiteralLength(&'a AstNode<'a>, u64),
-    Block(Vec<&'a AstNode<'a>>),
+    Block(Vec<AstNode<'a>>),
 
     // Types
     UniqueType(&'a AstNode<'a>),
@@ -105,7 +105,7 @@ pub enum AstNodeValue<'a> {
 }
 
 impl<'a> ArenaNode<'a> for AstNode<'a> {
-    fn write_children(&self, children: &mut Vec<&'a Self>) {
+    fn write_children(&'a self, children: &mut Vec<&'a Self>) {
         use AstNodeValue::*;
 
         match &self.value {
@@ -137,19 +137,19 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                 }
             }
             ArrayLiteral(values) | Block(values) => {
-                for value in values {
-                    children.push(*value);
+                for value in values.iter() {
+                    children.push(value);
                 }
             }
             StructLiteral { fields, .. } => {
                 for expression in fields.values() {
-                    children.push(*expression);
+                    children.push(expression);
                 }
             }
             Call(function, parameters) => {
                 children.push(*function);
-                for expression in parameters {
-                    children.push(*expression);
+                for expression in parameters.iter() {
+                    children.push(expression);
                 }
             }
             Name(_)
@@ -724,7 +724,7 @@ fn expression_pratt<'a>(
                     while !closed {
                         let argument = expression(source, context, end, can_be_struct)?;
                         end = argument.provenance.end();
-                        arguments.push(add_node(context, argument));
+                        arguments.push(argument);
 
                         let (should_break, new_end) = comma_or_end_list(
                             source,
@@ -780,7 +780,7 @@ fn expression_pratt<'a>(
                             source.next();
                             let argument =
                                 AstNode::new(AstNodeValue::Name(field.clone()), field_range);
-                            fields.insert(field, add_node(context, argument));
+                            fields.insert(field, argument);
                             if lex == TokenValue::CloseBracket {
                                 break;
                             }
@@ -794,7 +794,7 @@ fn expression_pratt<'a>(
                             let cursor = token.range.end();
                             let argument = expression(source, context, cursor, can_be_struct)?;
                             end = argument.provenance.end();
-                            fields.insert(field, add_node(context, argument));
+                            fields.insert(field, argument);
 
                             if let TokenValue::Comma =
                                 peek_token(source, end, "expected comma or ) to end function call")?
@@ -916,7 +916,7 @@ fn array_literal<'a>(
     match separator.value {
         TokenValue::Comma => {
             let mut end = separator.range.end();
-            let mut children = vec![add_node(context, expr)];
+            let mut children = vec![expr];
 
             let mut closed = peek_for_closed(
                 source,
@@ -934,7 +934,7 @@ fn array_literal<'a>(
                 end = peeked.range.end();
                 let expr = expression(source, context, end, can_be_struct)?;
                 end = expr.provenance.end();
-                children.push(add_node(context, expr));
+                children.push(expr);
 
                 let (should_break, new_end) = comma_or_end_list(
                     source,
@@ -965,13 +965,10 @@ fn array_literal<'a>(
                 SourceRange::new(start, close.range.end()),
             ))
         }
-        TokenValue::CloseSquare => {
-            let expr = add_node(context, expr);
-            Ok(AstNode::new(
-                AstNodeValue::ArrayLiteral(vec![expr]),
-                SourceRange::new(start, separator.range.end()),
-            ))
-        }
+        TokenValue::CloseSquare => Ok(AstNode::new(
+            AstNodeValue::ArrayLiteral(vec![expr]),
+            SourceRange::new(start, separator.range.end()),
+        )),
         _ => Err(ParseError::UnexpectedToken(
             Box::new(separator),
             "expected comma, semicolon or ]",
@@ -1059,7 +1056,7 @@ fn block<'a>(
             _ => {
                 let statement = statement(source, context, provenance.end())?;
                 provenance.set_end(statement.provenance.end());
-                statements.push(add_node(context, statement));
+                statements.push(statement);
             }
         }
     }
