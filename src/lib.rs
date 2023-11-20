@@ -13,6 +13,7 @@ mod arena;
 mod id;
 mod tokenizer;
 
+pub mod interpreter;
 pub mod ir;
 pub mod parser;
 pub mod provenance;

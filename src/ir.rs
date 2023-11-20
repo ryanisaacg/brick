@@ -8,6 +8,8 @@ use crate::{
     typecheck::TypecheckedFunction,
 };
 
+// TODO: should the IR be a stack machine?
+
 pub struct IrModule<'a> {
     // TODO: include imports, structs, and extern function declaration
     pub functions: Vec<IrFunction<'a>>,
@@ -17,9 +19,23 @@ pub fn lower_function<'ast, 'ir>(
     arena: &'ir Arena<IrNode<'ir>>,
     func: TypecheckedFunction<'ast>,
 ) -> IrFunction<'ir> {
+    let mut instructions: Vec<_> = func
+        .func
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, param)| IrNode {
+            id: param.id,
+            value: IrNodeValue::Parameter(i, param.id),
+        })
+        .collect();
+    instructions.push(lower_node(arena, &func, None, func.func.body));
     IrFunction {
         id: func.id,
-        body: lower_node(arena, &func, None, func.func.body),
+        body: IrNode {
+            id: func.id,
+            value: IrNodeValue::Sequence(instructions),
+        },
     }
 }
 
@@ -213,6 +229,8 @@ impl<'a> IrNode<'a> {
 // TODO: should struct fields also be referred to via opaque IDs?
 
 pub enum IrNodeValue<'a> {
+    /// Give the Nth parameter the given ID
+    Parameter(usize, ID),
     VariableReference(ID),
     Declaration(ID),
     // TODO: insert destructors
