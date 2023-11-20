@@ -1,6 +1,6 @@
 #![allow(clippy::result_large_err)]
 
-use std::io;
+use std::{collections::HashMap, io};
 
 use ir::lower_function;
 use thiserror::Error;
@@ -22,6 +22,8 @@ pub mod typecheck;
 use parser::ParseError;
 use typed_arena::Arena;
 
+use crate::interpreter::evaluate_function;
+
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error("parse error: {0}")]
@@ -41,10 +43,20 @@ pub fn compile_file(source_name: &'static str, contents: String) -> Result<(), C
     let functions = typecheck(source, declarations).unwrap();
 
     let ir_arena = Arena::new();
-    let _ir: Vec<_> = functions
+    let ir: HashMap<_, _> = functions
         .into_iter()
-        .map(|func| lower_function(&ir_arena, func))
+        .map(|func| {
+            let func = lower_function(&ir_arena, func);
+            (func.id, func)
+        })
         .collect();
+    let main = ir
+        .iter()
+        .find(|(_, func)| func.name == "main")
+        .expect("function named main")
+        .0;
+    let results = evaluate_function(&ir, *main, &[]);
+    println!("{:?}", results);
 
     Ok(())
 }

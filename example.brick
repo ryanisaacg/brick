@@ -1,25 +1,3 @@
-extern fn random(): f32;
-extern fn floor(value: f32): i32;
-
-struct Rect {
-    tl: Point,
-    size: Point,
-}
-
-struct Point {
-    x: f32,
-    y: f32,
-}
-
-fn main(): bool {
-    let p = Rect {
-        tl: Point { x: 1.0, y: 2.0 },
-        size: Point { x: 32.0, y: 32.0 },
-    };
-    let roll = d6() + d6() + floor(p.tl.x);
-    roll > 7
-}
-
-fn d6(): i32 {
-    floor(random() * 6.0) + 1
+fn main(): i32 {
+    1 + 1
 }

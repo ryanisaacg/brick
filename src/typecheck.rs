@@ -127,6 +127,7 @@ impl Declarations {
 
 pub struct TypecheckedFunction<'a> {
     pub id: ID,
+    pub name: String,
     pub func: &'a FunctionDeclarationValue<'a>,
     pub expression_types: HashMap<ID, ExpressionType>,
     pub referenced_id: HashMap<ID, ID>,
@@ -163,6 +164,7 @@ pub fn typecheck<'a>(
                 let (expression_types, referenced_id) = typecheck_function(func, &context).unwrap();
                 function_results.push(TypecheckedFunction {
                     id: statement.id,
+                    name: func.name.clone(),
                     func,
                     expression_types,
                     referenced_id,

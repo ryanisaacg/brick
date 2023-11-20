@@ -4,7 +4,7 @@ use typed_arena::Arena;
 
 use crate::{
     id::ID,
-    parser::{AstNode, AstNodeValue, BinOp},
+    parser::{AstNode, AstNodeValue, BinOp, IfDeclaration},
     typecheck::TypecheckedFunction,
 };
 
@@ -32,6 +32,7 @@ pub fn lower_function<'ast, 'ir>(
     instructions.push(lower_node(arena, &func, None, func.func.body));
     IrFunction {
         id: func.id,
+        name: func.name,
         body: IrNode {
             id: func.id,
             value: IrNodeValue::Sequence(instructions),
@@ -43,6 +44,7 @@ pub fn lower_function<'ast, 'ir>(
 
 pub struct IrFunction<'a> {
     pub id: ID,
+    pub name: String,
     pub body: IrNode<'a>,
 }
 
@@ -92,7 +94,18 @@ fn lower_node<'ast, 'ir>(
             IrNodeValue::Sequence(contents)
         }
         // TODO
-        AstNodeValue::If(_) => todo!(),
+        AstNodeValue::If(IfDeclaration {
+            condition,
+            if_branch,
+            else_branch,
+        }) => {
+            let condition = lower_node_alloc(arena, context, None, condition);
+            let if_branch = lower_node_alloc(arena, context, assignment, if_branch);
+            let else_branch = else_branch
+                .map(|else_branch| lower_node_alloc(arena, context, assignment, else_branch));
+
+            IrNodeValue::If(condition, if_branch, else_branch)
+        }
 
         AstNodeValue::TakeUnique(inner) => {
             IrNodeValue::TakeUnique(lower_node_alloc(arena, context, None, inner))
@@ -257,7 +270,7 @@ pub enum IrNodeValue<'a> {
     Sequence(Vec<IrNode<'a>>),
 
     // Expressions
-    If(&'a IrNode<'a>, &'a IrNode<'a>, &'a IrNode<'a>),
+    If(&'a IrNode<'a>, &'a IrNode<'a>, Option<&'a IrNode<'a>>),
     While(&'a IrNode<'a>, &'a IrNode<'a>),
     StructLiteral(ID, HashMap<String, IrNode<'a>>),
     ArrayLiteral(Vec<IrNode<'a>>),
