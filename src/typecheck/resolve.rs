@@ -10,14 +10,16 @@ use super::{
     TypecheckError,
 };
 
-pub fn name_to_declaration<'a>(source: &[&'a AstNode<'a>]) -> HashMap<String, &'a AstNode<'a>> {
+pub fn name_to_declaration<'a>(
+    source: impl Iterator<Item = &'a AstNode<'a>>,
+) -> HashMap<String, &'a AstNode<'a>> {
     let mut nodes = HashMap::new();
-    for statement in source.iter() {
+    for statement in source {
         match &statement.value {
             AstNodeValue::StructDeclaration(StructDeclarationValue { name, .. })
             | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
             | AstNodeValue::ExternFunctionBinding(ExternFunctionBindingValue { name, .. }) => {
-                nodes.insert(name.clone(), *statement);
+                nodes.insert(name.clone(), statement);
             }
             _ => {}
         }

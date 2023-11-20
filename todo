@@ -1,8 +1,9 @@
 import support:
-- discover and parse modules that are imported from current module
 - allow imports to have nested paths
 - allow imports to include a list of things, with an optional catch-all
-- properly pull foreign resolved types from imports
+
+namespaces:
+- do em
 
 arithmetic:
 - add type level support for f64 and i64

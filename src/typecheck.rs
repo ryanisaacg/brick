@@ -90,14 +90,14 @@ pub enum TypecheckError<'a> {
     MissingField(&'a AstNode<'a>),
 }
 
-struct Declarations {
+struct Declarations<'a> {
     name_to_expr: HashMap<String, (ID, ExpressionType)>,
-    id_to_decl: HashMap<ID, ModuleDeclaration>,
+    id_to_decl: HashMap<ID, &'a ModuleDeclaration>,
 }
 
-impl Declarations {
+impl<'a> Declarations<'a> {
     fn decl(&self, id: &ID) -> Option<&ModuleDeclaration> {
-        self.id_to_decl.get(id)
+        self.id_to_decl.get(id).copied()
     }
 
     fn name_to_func(&self, name: &str) -> Option<&FuncType> {
@@ -135,8 +135,8 @@ pub struct TypecheckedFunction<'a> {
 
 // TODO: pass import namespace in
 pub fn typecheck<'a>(
-    file: &[&'a AstNode<'a>],
-    declarations: HashMap<String, ModuleDeclaration>,
+    file: impl Iterator<Item = &'a AstNode<'a>>,
+    declarations: &HashMap<String, ModuleDeclaration>,
 ) -> Result<Vec<TypecheckedFunction<'a>>, TypecheckError<'a>> {
     // TODO: verify validity of type and function declarations
 
@@ -157,7 +157,7 @@ pub fn typecheck<'a>(
 
     let mut function_results = Vec::new();
 
-    for statement in file.iter() {
+    for statement in file {
         match &statement.value {
             AstNodeValue::FunctionDeclaration(func) => {
                 // TODO: bubble errors

@@ -194,23 +194,27 @@ pub enum ParseError {
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, LexError>>;
 type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
+pub struct ParsedModule<'a> {
+    pub arena: Arena<AstNode<'a>>,
+    pub top_level_nodes: Vec<AstNode<'a>>,
+}
+
 pub fn parse<'a>(
-    context: &'a mut Arena<AstNode<'a>>,
+    arena: &'a Arena<AstNode<'a>>,
     mut source: impl Iterator<Item = Result<Token, LexError>>,
-) -> Result<Vec<&'a AstNode<'a>>, ParseError> {
+) -> Result<Vec<AstNode<'a>>, ParseError> {
     let mut source = (&mut source as TokenIterInner<'_>).peekable();
 
-    let mut top_level = Vec::new();
+    let mut top_level_nodes = Vec::new();
 
     while let Some(lexeme) = peek_token_optional(&mut source)? {
         let cursor = lexeme.range.start();
-        let statement = statement(&mut source, context, cursor)?;
-        let statement: &AstNode = context.alloc(statement);
+        let statement = statement(&mut source, &arena, cursor)?;
 
-        top_level.push(statement);
+        top_level_nodes.push(statement);
     }
 
-    Ok(top_level)
+    Ok(top_level_nodes)
 }
 
 fn add_node<'a>(context: &'a Arena<AstNode<'a>>, node: AstNode<'a>) -> &'a AstNode<'a> {
@@ -246,12 +250,13 @@ fn statement<'a>(
                     }
                     TokenValue::Import => {
                         let statement = import_declaration(source, cursor)?;
-                        assert_next_lexeme_eq(
-                            source.next(),
-                            TokenValue::Semicolon,
-                            statement.provenance.end(),
-                            "expected ; after 'import' statement",
-                        )?;
+                        if let Some(Token {
+                            value: TokenValue::Semicolon,
+                            ..
+                        }) = peek_token_optional(source)?
+                        {
+                            source.next();
+                        }
 
                         statement
                     }
