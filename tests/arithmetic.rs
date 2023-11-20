@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use brick::{interpret_code, Value};
 
 // TODO: assert matches?
@@ -9,11 +10,11 @@ fn eval_expr(contents: &str) -> Vec<Value> {
 #[test]
 fn basic_precedence() {
     let result = eval_expr("1 + 2 * 3");
-    assert!(matches!(&result[..], [Value::Int(7)]));
+    assert_matches!(&result[..], [Value::Int(7)]);
 }
 
 #[test]
 fn parens() {
     let result = eval_expr("(1 + 2) * 3");
-    assert!(matches!(&result[..], [Value::Int(9)]));
+    assert_matches!(&result[..], [Value::Int(9)]);
 }
