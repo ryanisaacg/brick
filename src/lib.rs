@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, io};
 
+pub use interpreter::Value;
 use ir::lower_function;
 use thiserror::Error;
 use typecheck::{
@@ -32,7 +33,10 @@ pub enum CompileError {
     FilesystemError(io::Error, String),
 }
 
-pub fn compile_file(source_name: &'static str, contents: String) -> Result<(), CompileError> {
+pub fn interpret_code(
+    source_name: &'static str,
+    contents: String,
+) -> Result<Vec<Value>, CompileError> {
     let tokens = tokenizer::lex(source_name, contents);
     let mut parse_nodes = Arena::new();
     let parsed_module = parser::parse(&mut parse_nodes, tokens)?;
@@ -55,8 +59,6 @@ pub fn compile_file(source_name: &'static str, contents: String) -> Result<(), C
         .find(|(_, func)| func.name == "main")
         .expect("function named main")
         .0;
-    let results = evaluate_function(&ir, *main, &[]);
-    println!("{:?}", results);
 
-    Ok(())
+    Ok(evaluate_function(&ir, *main, &[]))
 }

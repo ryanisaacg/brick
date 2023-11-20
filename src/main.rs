@@ -1,10 +1,13 @@
-use brick::compile_file;
+use brick::interpret_code;
 use std::fs::read_to_string;
 
 fn main() {
-    compile_file(
-        "example.brick",
-        read_to_string("example.brick").expect("file should be readable"),
-    )
-    .unwrap();
+    println!(
+        "{:?}",
+        interpret_code(
+            "example.brick",
+            read_to_string("example.brick").expect("file should be readable"),
+        )
+        .unwrap()
+    );
 }
