@@ -17,7 +17,7 @@ pub struct NameAndType<'a> {
     pub type_: &'a AstNode<'a>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct AstNode<'parse> {
     pub id: ID,
     pub value: AstNodeValue<'parse>,
@@ -34,12 +34,12 @@ impl<'a> AstNode<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct FunctionDeclarationValue<'a> {
     pub name: String,
     pub params: Vec<NameAndType<'a>>,
-    pub returns: Option<&'a AstNode<'a>>,
-    pub body: &'a AstNode<'a>,
+    pub returns: Option<&'a mut AstNode<'a>>,
+    pub body: &'a mut AstNode<'a>,
     /**
      * Whether this function is available to extern. Distinct from declaring an extern function
      * is available in the environment
@@ -47,37 +47,37 @@ pub struct FunctionDeclarationValue<'a> {
     pub is_extern: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct ExternFunctionBindingValue<'a> {
     pub name: String,
     pub params: Vec<NameAndType<'a>>,
-    pub returns: Option<&'a AstNode<'a>>,
+    pub returns: Option<&'a mut AstNode<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct StructDeclarationValue<'a> {
     pub name: String,
     pub fields: Vec<NameAndType<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct IfDeclaration<'a> {
-    pub condition: &'a AstNode<'a>,
-    pub if_branch: &'a AstNode<'a>,
-    pub else_branch: Option<&'a AstNode<'a>>,
+    pub condition: &'a mut AstNode<'a>,
+    pub if_branch: &'a mut AstNode<'a>,
+    pub else_branch: Option<&'a mut AstNode<'a>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum AstNodeValue<'a> {
     // Statements
     FunctionDeclaration(FunctionDeclarationValue<'a>),
     ExternFunctionBinding(ExternFunctionBindingValue<'a>),
     StructDeclaration(StructDeclarationValue<'a>),
-    Declaration(String, &'a AstNode<'a>),
+    Declaration(String, &'a mut AstNode<'a>),
     Import(String),
-    Return(&'a AstNode<'a>),
+    Return(&'a mut AstNode<'a>),
     // Any non-specific expression that ends in ; is a statement
-    Statement(&'a AstNode<'a>),
+    Statement(&'a mut AstNode<'a>),
 
     Name(String),
 
@@ -85,24 +85,24 @@ pub enum AstNodeValue<'a> {
     Int(i64),
     Float(f64),
     Bool(bool),
-    BinExpr(BinOp, &'a AstNode<'a>, &'a AstNode<'a>),
+    BinExpr(BinOp, &'a mut AstNode<'a>, &'a mut AstNode<'a>),
     If(IfDeclaration<'a>),
-    While(&'a AstNode<'a>, &'a AstNode<'a>),
-    Call(&'a AstNode<'a>, Vec<AstNode<'a>>),
-    TakeUnique(&'a AstNode<'a>),
-    TakeShared(&'a AstNode<'a>),
+    While(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
+    Call(&'a mut AstNode<'a>, Vec<AstNode<'a>>),
+    TakeUnique(&'a mut AstNode<'a>),
+    TakeShared(&'a mut AstNode<'a>),
     StructLiteral {
         name: String,
         fields: HashMap<String, AstNode<'a>>,
     },
     ArrayLiteral(Vec<AstNode<'a>>),
-    ArrayLiteralLength(&'a AstNode<'a>, u64),
+    ArrayLiteralLength(&'a mut AstNode<'a>, u64),
     Block(Vec<AstNode<'a>>),
 
     // Types
-    UniqueType(&'a AstNode<'a>),
-    SharedType(&'a AstNode<'a>),
-    ArrayType(&'a AstNode<'a>),
+    UniqueType(&'a mut AstNode<'a>),
+    SharedType(&'a mut AstNode<'a>),
+    ArrayType(&'a mut AstNode<'a>),
 }
 
 impl<'a> ArenaNode<'a> for AstNode<'a> {
@@ -217,7 +217,7 @@ pub fn parse<'a>(
     Ok(top_level_nodes)
 }
 
-fn add_node<'a>(context: &'a Arena<AstNode<'a>>, node: AstNode<'a>) -> &'a AstNode<'a> {
+fn add_node<'a>(context: &'a Arena<AstNode<'a>>, node: AstNode<'a>) -> &'a mut AstNode<'a> {
     context.alloc(node)
 }
 
@@ -452,7 +452,7 @@ fn function_declaration<'a>(
 struct FunctionHeader<'a> {
     name: String,
     params: Vec<NameAndType<'a>>,
-    returns: Option<&'a AstNode<'a>>,
+    returns: Option<&'a mut AstNode<'a>>,
     end: SourceMarker,
 }
 

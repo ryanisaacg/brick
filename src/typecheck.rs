@@ -5,6 +5,7 @@ use thiserror::Error;
 use crate::{
     id::ID,
     parser::{AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration},
+    provenance::SourceRange,
 };
 
 use self::control_flow_graph::build_control_flow_graph;
@@ -72,9 +73,9 @@ pub enum PrimitiveType {
 
 // TODO: get the lifetimes out of these typecheck errors
 #[derive(Debug, Error)]
-pub enum TypecheckError<'a> {
+pub enum TypecheckError {
     #[error("arithmetic")]
-    ArithmeticMismatch(&'a AstNode<'a>), // TODO
+    ArithmeticMismatch(SourceRange), // TODO
     #[error("mismatched types: received {received:?}, expected {expected:?}")]
     TypeMismatch {
         // TODO: provenance
@@ -82,13 +83,13 @@ pub enum TypecheckError<'a> {
         received: ExpressionType,
     },
     #[error("declaration for {0:?} not found")]
-    NameNotFound(&'a AstNode<'a>), // TODO
+    NameNotFound(SourceRange), // TODO
     #[error("can't call")]
-    CantCall(&'a AstNode<'a>), // TODO
+    CantCall(SourceRange), // TODO
     #[error("wrong args count")]
-    WrongArgsCount(&'a AstNode<'a>),
+    WrongArgsCount(SourceRange),
     #[error("missing field")]
-    MissingField(&'a AstNode<'a>),
+    MissingField(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -143,7 +144,7 @@ pub struct TypecheckedFunction<'a> {
 pub fn typecheck<'a>(
     file: impl Iterator<Item = &'a AstNode<'a>>,
     declarations: &HashMap<String, ModuleDeclaration>,
-) -> Result<TypecheckedFile<'a>, TypecheckError<'a>> {
+) -> Result<TypecheckedFile<'a>, TypecheckError> {
     // TODO: verify validity of type and function declarations
 
     let mut name_to_expr = HashMap::new();
@@ -210,7 +211,7 @@ fn typecheck_function<'a, 'b>(
     context: &Declarations,
     expressions: &'b mut HashMap<ID, ExpressionType>,
     referenced_id: &'b mut HashMap<ID, ID>,
-) -> Result<(), TypecheckError<'a>> {
+) -> Result<(), TypecheckError> {
     let Some(function_type) = context.name_to_func(&function.name) else {
         panic!("expected function to be found in the module");
     };
@@ -244,7 +245,7 @@ fn typecheck_expression<'a, 'b>(
     expressions: &'b mut HashMap<ID, ExpressionType>,
     referenced_id: &'b mut HashMap<ID, ID>,
     context: &Declarations,
-) -> Result<ExpressionType, TypecheckError<'a>> {
+) -> Result<ExpressionType, TypecheckError> {
     let ty = match &node.value {
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
@@ -295,7 +296,7 @@ fn typecheck_expression<'a, 'b>(
         }
         AstNodeValue::Name(name) => {
             let (ref_id, expr) = resolve_name(name, current_scope, outer_scopes)
-                .ok_or(TypecheckError::NameNotFound(node))?;
+                .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?;
             referenced_id.insert(node.id, ref_id);
             expr
         }
@@ -352,7 +353,7 @@ fn typecheck_expression<'a, 'b>(
                 context,
             )?;
             let ExpressionType::Primitive(left) = fully_dereference(&left) else {
-                return Err(TypecheckError::ArithmeticMismatch(node));
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             let right = typecheck_expression(
                 right,
@@ -363,12 +364,12 @@ fn typecheck_expression<'a, 'b>(
                 context,
             )?;
             let ExpressionType::Primitive(right) = fully_dereference(&right) else {
-                return Err(TypecheckError::ArithmeticMismatch(node));
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             if left == right {
                 ExpressionType::Primitive(*left)
             } else {
-                return Err(TypecheckError::ArithmeticMismatch(node));
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
         }
         AstNodeValue::BinExpr(BinOp::LessThan | BinOp::GreaterThan, left, right) => {
@@ -381,7 +382,7 @@ fn typecheck_expression<'a, 'b>(
                 context,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(&left) else {
-                return Err(TypecheckError::ArithmeticMismatch(node));
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             let right = typecheck_expression(
                 right,
@@ -392,7 +393,7 @@ fn typecheck_expression<'a, 'b>(
                 context,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(&right) else {
-                return Err(TypecheckError::ArithmeticMismatch(node));
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
 
             ExpressionType::Primitive(PrimitiveType::Bool)
@@ -425,12 +426,7 @@ fn typecheck_expression<'a, 'b>(
 
             ExpressionType::Primitive(PrimitiveType::Void)
         }
-        AstNodeValue::If(IfDeclaration {
-            condition,
-            if_branch: body,
-            else_branch: None,
-        })
-        | AstNodeValue::While(condition, body) => {
+        AstNodeValue::While(condition, body) => {
             let condition = typecheck_expression(
                 condition,
                 outer_scopes,
@@ -464,7 +460,7 @@ fn typecheck_expression<'a, 'b>(
         AstNodeValue::If(IfDeclaration {
             condition,
             if_branch,
-            else_branch: Some(else_branch),
+            else_branch,
         }) => {
             let condition = typecheck_expression(
                 condition,
@@ -493,20 +489,30 @@ fn typecheck_expression<'a, 'b>(
                 referenced_id,
                 context,
             )?;
-            let else_branch = typecheck_expression(
-                else_branch,
-                outer_scopes,
-                current_scope,
-                expressions,
-                referenced_id,
-                context,
-            )?;
+            let else_branch = else_branch
+                .as_ref()
+                .map(|else_branch| {
+                    typecheck_expression(
+                        else_branch,
+                        outer_scopes,
+                        current_scope,
+                        expressions,
+                        referenced_id,
+                        context,
+                    )
+                })
+                .transpose()?;
 
-            if if_branch == else_branch {
-                if_branch
-            } else {
-                // TODO: typecheck error here UNLESS there's a break/return
-                panic!("if and else don't match");
+            match else_branch {
+                Some(else_branch) => {
+                    if if_branch == else_branch {
+                        if_branch
+                    } else {
+                        // TODO: typecheck error here UNLESS there's a break/return
+                        panic!("if and else don't match");
+                    }
+                }
+                None => ExpressionType::Primitive(PrimitiveType::Void),
             }
         }
         AstNodeValue::Block(children) => {
@@ -546,12 +552,12 @@ fn typecheck_expression<'a, 'b>(
                 context,
             )?
             else {
-                return Err(TypecheckError::CantCall(node));
+                return Err(TypecheckError::CantCall(node.provenance.clone()));
             };
             let func = context.id_to_func(&func);
 
             if func.params.len() != args.len() {
-                return Err(TypecheckError::WrongArgsCount(node));
+                return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
             }
 
             for (arg, param) in args.iter().zip(func.params.iter()) {
@@ -576,20 +582,20 @@ fn typecheck_expression<'a, 'b>(
         AstNodeValue::StructLiteral { name, fields } => {
             let (ref_id, ExpressionType::Named(struct_type_id)) =
                 resolve_name(name, current_scope, outer_scopes)
-                    .ok_or(TypecheckError::NameNotFound(node))?
+                    .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?
             else {
-                return Err(TypecheckError::CantCall(node));
+                return Err(TypecheckError::CantCall(node.provenance.clone()));
             };
             referenced_id.insert(node.id, ref_id);
             let struct_type = context.id_to_struct(&struct_type_id);
 
             if struct_type.fields.len() != fields.len() {
-                return Err(TypecheckError::WrongArgsCount(node));
+                return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
             }
 
             for (name, param_field) in struct_type.fields.iter() {
                 let Some(arg_field) = fields.get(name) else {
-                    return Err(TypecheckError::MissingField(node));
+                    return Err(TypecheckError::MissingField(node.provenance.clone()));
                 };
                 let arg_field = typecheck_expression(
                     arg_field,

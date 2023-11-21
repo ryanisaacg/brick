@@ -10,28 +10,26 @@ use super::{
     TypecheckError,
 };
 
-pub fn name_to_declaration<'a>(
-    source: impl Iterator<Item = &'a AstNode<'a>>,
-) -> HashMap<String, &'a AstNode<'a>> {
-    let mut nodes = HashMap::new();
-    for statement in source {
+pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, ModuleDeclaration> {
+    let mut names_to_declarations = HashMap::new();
+    for statement in source.iter() {
         match &statement.value {
             AstNodeValue::StructDeclaration(StructDeclarationValue { name, .. })
             | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
             | AstNodeValue::ExternFunctionBinding(ExternFunctionBindingValue { name, .. }) => {
-                nodes.insert(name.clone(), statement);
+                names_to_declarations.insert(name.clone(), statement);
             }
             _ => {}
         }
     }
 
-    nodes
+    resolve_top_level_declarations(&names_to_declarations).unwrap()
 }
 
 // TODO
-pub fn resolve_top_level_declarations<'a>(
-    names_to_declarations: &HashMap<String, &'a AstNode<'a>>,
-) -> Result<HashMap<String, ModuleDeclaration>, TypecheckError<'a>> {
+pub fn resolve_top_level_declarations(
+    names_to_declarations: &HashMap<String, &AstNode<'_>>,
+) -> Result<HashMap<String, ModuleDeclaration>, TypecheckError> {
     names_to_declarations
         .iter()
         .map(|(name, node)| {
@@ -70,6 +68,7 @@ pub fn resolve_top_level_declarations<'a>(
                             })
                             .collect::<Result<Vec<_>, _>>()?,
                         returns: returns
+                            .as_ref()
                             .map(|returns| resolve_type_name(&names_to_declarations, returns))
                             .unwrap_or(Ok(ExpressionType::Primitive(PrimitiveType::Void)))?,
                     }),
@@ -80,10 +79,10 @@ pub fn resolve_top_level_declarations<'a>(
         .collect::<Result<HashMap<_, _>, _>>()
 }
 
-pub fn resolve_type_name<'a>(
-    types: &HashMap<String, &'a AstNode<'a>>,
-    node: &'a AstNode<'a>,
-) -> Result<ExpressionType, TypecheckError<'a>> {
+pub fn resolve_type_name(
+    types: &HashMap<String, &AstNode<'_>>,
+    node: &AstNode<'_>,
+) -> Result<ExpressionType, TypecheckError> {
     Ok(match &node.value {
         AstNodeValue::Name(name) => match name.as_str() {
             "bool" => ExpressionType::Primitive(PrimitiveType::Bool),
@@ -95,7 +94,7 @@ pub fn resolve_type_name<'a>(
             other => ExpressionType::Named(
                 types
                     .get(other)
-                    .ok_or(TypecheckError::NameNotFound(node))?
+                    .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?
                     .id,
             ),
         },

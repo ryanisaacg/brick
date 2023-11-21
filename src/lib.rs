@@ -5,19 +5,14 @@ use std::{
     fs, io,
 };
 
-use imports::find_imports;
 pub use interpreter::Value;
 use interpreter::{evaluate_node, Context};
 use ir::{IrModule, IrNode};
 use thiserror::Error;
-use typecheck::{
-    resolve::{name_to_declaration, resolve_top_level_declarations},
-    typecheck,
-};
+use typecheck::{resolve::resolve_module, typecheck};
 
 mod arena;
 mod id;
-mod imports;
 mod tokenizer;
 
 pub mod interpreter;
@@ -26,7 +21,7 @@ pub mod parser;
 pub mod provenance;
 pub mod typecheck;
 
-use parser::{AstNode, ParseError};
+use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
 use crate::ir::lower_module;
@@ -77,17 +72,15 @@ pub fn compile_file<'a>(
 
     let mut declarations = HashMap::new();
     for (_name, module) in modules.iter() {
-        let source = &module[..];
-        let names = name_to_declaration(source.iter());
-        declarations.extend(resolve_top_level_declarations(&names).unwrap().into_iter());
+        declarations.extend(resolve_module(&module[..]).into_iter());
     }
 
     let ir = modules
-        .into_iter()
+        .iter()
         .map(|(name, contents)| {
             let types = typecheck(contents.iter(), &declarations).unwrap();
             let ir = lower_module(ir_arena, types);
-            (name, ir)
+            (name.clone(), ir)
         })
         .collect();
 
@@ -124,17 +117,21 @@ fn collect_modules<'a>(
         let tokens = tokenizer::lex(source_name, contents);
         let parsed_module = parser::parse(arena, tokens)?;
 
-        for import in find_imports(parsed_module.iter()) {
-            if modules_seen.contains(import.name) {
-                continue;
+        for node in parsed_module.iter() {
+            if let AstNodeValue::Import(name) = &node.value {
+                if modules_seen.contains(name) {
+                    continue;
+                }
+                let source_path = format!("{}.brick", &name[..]);
+                //resolve_file_path(name.as_str());
+                let contents = fs::read_to_string(source_path.as_str()).unwrap();
+                modules_to_parse.push(ParseQueueEntry {
+                    name: name.to_string(),
+                    source_name: source_path.leak(),
+                    contents,
+                });
+                modules_seen.insert(name.to_string());
             }
-            let contents = fs::read_to_string(import.source_path.as_str()).unwrap();
-            modules_to_parse.push(ParseQueueEntry {
-                name: import.name.to_string(),
-                source_name: import.source_path.leak(),
-                contents,
-            });
-            modules_seen.insert(import.name.to_string());
         }
 
         parsed_modules.insert(name, parsed_module);

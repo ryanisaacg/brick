@@ -125,7 +125,7 @@ fn lower_node<'ast, 'ir>(
         }) => {
             let condition = lower_node_alloc(arena, referenced_ids, None, condition);
             let if_branch = lower_node_alloc(arena, referenced_ids, assignment, if_branch);
-            let else_branch = else_branch.map(|else_branch| {
+            let else_branch = else_branch.as_ref().map(|else_branch| {
                 lower_node_alloc(arena, referenced_ids, assignment, else_branch)
             });
 
