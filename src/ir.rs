@@ -33,7 +33,7 @@ pub fn lower_module<'ast, 'ir>(
             .collect(),
         top_level_statements: top_level_statements
             .into_iter()
-            .map(|stmt| lower_node(arena, &referenced_ids, None, &stmt))
+            .map(|stmt| lower_node(arena, &referenced_ids, &stmt))
             .collect(),
     }
 }
@@ -53,7 +53,7 @@ fn lower_function<'ast, 'ir>(
             value: IrNodeValue::Parameter(i, param.id),
         })
         .collect();
-    instructions.push(lower_node(arena, &referenced_ids, None, func.func.body));
+    instructions.push(lower_node(arena, &referenced_ids, func.func.body));
     IrFunction {
         id: func.id,
         name: func.name,
@@ -72,16 +72,9 @@ pub struct IrFunction<'a> {
     pub body: IrNode<'a>,
 }
 
-#[derive(Copy, Clone)]
-enum AssignmentContext<'a> {
-    Assign(&'a IrNode<'a>),
-    Return,
-}
-
 fn lower_node<'ast, 'ir>(
     arena: &'ir Arena<IrNode<'ir>>,
     referenced_ids: &HashMap<ID, ID>,
-    mut assignment: Option<AssignmentContext<'ir>>,
     node: &'ast AstNode<'ast>,
 ) -> IrNode<'ir> {
     let value = match &node.value {
@@ -91,29 +84,15 @@ fn lower_node<'ast, 'ir>(
 
         AstNodeValue::While(cond, body) => {
             // TODO: can you assign out of a while?
-            let cond = lower_node_alloc(arena, referenced_ids, None, cond);
-            let body = lower_node_alloc(arena, referenced_ids, None, body);
+            let cond = lower_node_alloc(arena, referenced_ids, cond);
+            let body = lower_node_alloc(arena, referenced_ids, body);
             IrNodeValue::While(cond, body)
         }
         AstNodeValue::Block(contents) => {
-            // TODO: assigning last value returned in block to parent scope?
             let contents = contents
                 .iter()
-                .enumerate()
-                .map(|(i, node)| {
-                    lower_node(
-                        arena,
-                        referenced_ids,
-                        if i == contents.len() - 1 {
-                            assignment
-                        } else {
-                            None
-                        },
-                        node,
-                    )
-                })
+                .map(|node| lower_node(arena, referenced_ids, node))
                 .collect();
-            assignment = None;
 
             IrNodeValue::Sequence(contents)
         }
@@ -123,39 +102,35 @@ fn lower_node<'ast, 'ir>(
             if_branch,
             else_branch,
         }) => {
-            let condition = lower_node_alloc(arena, referenced_ids, None, condition);
-            let if_branch = lower_node_alloc(arena, referenced_ids, assignment, if_branch);
-            let else_branch = else_branch.as_ref().map(|else_branch| {
-                lower_node_alloc(arena, referenced_ids, assignment, else_branch)
-            });
+            let condition = lower_node_alloc(arena, referenced_ids, condition);
+            let if_branch = lower_node_alloc(arena, referenced_ids, if_branch);
+            let else_branch = else_branch
+                .as_ref()
+                .map(|else_branch| lower_node_alloc(arena, referenced_ids, else_branch));
 
             IrNodeValue::If(condition, if_branch, else_branch)
         }
 
         AstNodeValue::TakeUnique(inner) => {
-            IrNodeValue::TakeUnique(lower_node_alloc(arena, referenced_ids, None, inner))
+            IrNodeValue::TakeUnique(lower_node_alloc(arena, referenced_ids, inner))
         }
         AstNodeValue::TakeShared(inner) => {
-            IrNodeValue::Return(lower_node_alloc(arena, referenced_ids, None, inner))
+            IrNodeValue::Return(lower_node_alloc(arena, referenced_ids, inner))
         }
 
         // Statement doesn't actually add a node - the inner expression
         // has what really counts
-        AstNodeValue::Statement(inner) => return lower_node(arena, referenced_ids, None, inner),
+        AstNodeValue::Statement(inner) => return lower_node(arena, referenced_ids, inner),
 
         AstNodeValue::Declaration(_lvalue, rvalue) => {
             let lvalue = add_node(
                 arena,
                 IrNode::from_ast(node, IrNodeValue::VariableReference(node.id)),
             );
+            let rvalue = lower_node_alloc(arena, referenced_ids, rvalue);
             let statements = vec![
                 IrNode::from_ast(node, IrNodeValue::Declaration(node.id)),
-                lower_node(
-                    arena,
-                    referenced_ids,
-                    Some(AssignmentContext::Assign(lvalue)),
-                    rvalue,
-                ),
+                IrNode::from_ast(node, IrNodeValue::Assignment(lvalue, rvalue)),
             ];
             IrNodeValue::Sequence(statements)
         }
@@ -166,36 +141,50 @@ fn lower_node<'ast, 'ir>(
         ),
 
         AstNodeValue::Return(inner) => {
-            return lower_node(
-                arena,
-                referenced_ids,
-                Some(AssignmentContext::Return),
-                inner,
-            );
+            return lower_node(arena, referenced_ids, inner);
         }
-        AstNodeValue::BinExpr(BinOp::Assignment, left, right) => {
-            let left = lower_node_alloc(arena, referenced_ids, None, left);
-
-            return lower_node(
-                arena,
-                referenced_ids,
-                Some(AssignmentContext::Assign(left)),
-                right,
-            );
-        }
-
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
-            let left = lower_node_alloc(arena, referenced_ids, assignment, left);
+            let left = lower_node_alloc(arena, referenced_ids, left);
             let AstNodeValue::Name(name) = &right.value else {
                 unreachable!()
             };
             IrNodeValue::Dot(left, name.clone())
         }
         AstNodeValue::BinExpr(op, left, right) => {
-            let left = lower_node_alloc(arena, referenced_ids, assignment, left);
-            let right = lower_node_alloc(arena, referenced_ids, assignment, right);
+            let left = lower_node_alloc(arena, referenced_ids, left);
+            let right = lower_node_alloc(arena, referenced_ids, right);
 
             match op {
+                BinOp::AddAssign => IrNodeValue::Assignment(
+                    left,
+                    add_node(
+                        arena,
+                        IrNode::from_ast(&node, IrNodeValue::BinOp(IrBinOp::Add, left, right)),
+                    ),
+                ),
+                BinOp::SubtractAssign => IrNodeValue::Assignment(
+                    left,
+                    add_node(
+                        arena,
+                        IrNode::from_ast(&node, IrNodeValue::BinOp(IrBinOp::Subtract, left, right)),
+                    ),
+                ),
+                BinOp::MultiplyAssign => IrNodeValue::Assignment(
+                    left,
+                    add_node(
+                        arena,
+                        IrNode::from_ast(&node, IrNodeValue::BinOp(IrBinOp::Multiply, left, right)),
+                    ),
+                ),
+                BinOp::DivideAssign => IrNodeValue::Assignment(
+                    left,
+                    add_node(
+                        arena,
+                        IrNode::from_ast(&node, IrNodeValue::BinOp(IrBinOp::Divide, left, right)),
+                    ),
+                ),
+                BinOp::Assignment => IrNodeValue::Assignment(left, right),
+
                 BinOp::Add => IrNodeValue::BinOp(IrBinOp::Add, left, right),
                 BinOp::Subtract => IrNodeValue::BinOp(IrBinOp::Subtract, left, right),
                 BinOp::Multiply => IrNodeValue::BinOp(IrBinOp::Multiply, left, right),
@@ -209,14 +198,14 @@ fn lower_node<'ast, 'ir>(
                 BinOp::EqualTo => IrNodeValue::BinOp(IrBinOp::EqualTo, left, right),
                 BinOp::NotEquals => IrNodeValue::BinOp(IrBinOp::NotEquals, left, right),
                 BinOp::Index => IrNodeValue::Index(left, right),
-                BinOp::Dot | BinOp::Assignment => unreachable!(),
+                BinOp::Dot => unreachable!(),
             }
         }
         AstNodeValue::Call(func, params) => {
-            let func = lower_node_alloc(arena, referenced_ids, assignment, func);
+            let func = lower_node_alloc(arena, referenced_ids, func);
             let params = params
                 .iter()
-                .map(|param| lower_node(arena, referenced_ids, assignment, param))
+                .map(|param| lower_node(arena, referenced_ids, param))
                 .collect();
             IrNodeValue::Call(func, params)
         }
@@ -226,12 +215,7 @@ fn lower_node<'ast, 'ir>(
                 .expect("referenced fields to be filled in");
             let fields = fields
                 .iter()
-                .map(|(name, field)| {
-                    (
-                        name.clone(),
-                        lower_node(arena, referenced_ids, assignment, field),
-                    )
-                })
+                .map(|(name, field)| (name.clone(), lower_node(arena, referenced_ids, field)))
                 .collect();
             IrNodeValue::StructLiteral(*id, fields)
         }
@@ -246,15 +230,6 @@ fn lower_node<'ast, 'ir>(
         | AstNodeValue::SharedType(_)
         | AstNodeValue::ArrayType(_) => unreachable!("Can't have these in a function body"),
     };
-    let value = if let Some(assignment) = assignment {
-        let rvalue = add_node(arena, IrNode::from_ast(node, value));
-        match assignment {
-            AssignmentContext::Assign(lvalue) => IrNodeValue::Assignment(lvalue, rvalue),
-            AssignmentContext::Return => IrNodeValue::Return(rvalue),
-        }
-    } else {
-        value
-    };
 
     IrNode::from_ast(node, value)
 }
@@ -262,10 +237,9 @@ fn lower_node<'ast, 'ir>(
 fn lower_node_alloc<'ast, 'ir>(
     arena: &'ir Arena<IrNode<'ir>>,
     context: &HashMap<ID, ID>,
-    assignment: Option<AssignmentContext<'ir>>,
     node: &'ast AstNode<'ast>,
 ) -> &'ir IrNode<'ir> {
-    add_node(arena, lower_node(arena, context, assignment, node))
+    add_node(arena, lower_node(arena, context, node))
 }
 
 fn add_node<'a>(arena: &'a Arena<IrNode<'a>>, node: IrNode<'a>) -> &'a IrNode<'a> {

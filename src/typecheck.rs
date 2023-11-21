@@ -166,6 +166,7 @@ pub fn typecheck<'a>(
     let mut top_level_statements = Vec::new();
     let mut expression_types = HashMap::new();
     let mut referenced_ids = HashMap::new();
+    let mut top_level_scope = HashMap::new();
 
     for statement in file {
         match &statement.value {
@@ -187,7 +188,7 @@ pub fn typecheck<'a>(
                 typecheck_expression(
                     statement,
                     &[&context.name_to_expr],
-                    &mut HashMap::new(),
+                    &mut top_level_scope,
                     &mut expression_types,
                     &mut referenced_ids,
                     &context,
@@ -426,6 +427,44 @@ fn typecheck_expression<'a, 'b>(
                 referenced_id,
                 context,
             )?;
+
+            if !is_assignable_to(&left, &right) {
+                return Err(TypecheckError::TypeMismatch {
+                    received: right,
+                    expected: left,
+                });
+            }
+
+            ExpressionType::Primitive(PrimitiveType::Void)
+        }
+        AstNodeValue::BinExpr(
+            BinOp::AddAssign | BinOp::SubtractAssign | BinOp::MultiplyAssign | BinOp::DivideAssign,
+            left,
+            right,
+        ) => {
+            // TODO: ensure left is a valid lvalue
+            let left = typecheck_expression(
+                left,
+                outer_scopes,
+                current_scope,
+                expressions,
+                referenced_id,
+                context,
+            )?;
+            let right = typecheck_expression(
+                right,
+                outer_scopes,
+                current_scope,
+                expressions,
+                referenced_id,
+                context,
+            )?;
+
+            if !matches!(fully_dereference(&left), ExpressionType::Primitive(_))
+                || !matches!(fully_dereference(&right), ExpressionType::Primitive(_))
+            {
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
+            }
 
             if !is_assignable_to(&left, &right) {
                 return Err(TypecheckError::TypeMismatch {

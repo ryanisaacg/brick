@@ -178,7 +178,12 @@ pub enum BinOp {
     EqualTo,
     NotEquals,
     Index,
+
     Assignment,
+    AddAssign,
+    SubtractAssign,
+    MultiplyAssign,
+    DivideAssign,
 }
 
 #[derive(Debug, Error)]
@@ -861,6 +866,10 @@ fn expression_pratt<'a>(
 
             let bin_op = match value {
                 TokenValue::Assign => BinOp::Assignment,
+                TokenValue::PlusEquals => BinOp::AddAssign,
+                TokenValue::MinusEquals => BinOp::SubtractAssign,
+                TokenValue::AsteriskEquals => BinOp::MultiplyAssign,
+                TokenValue::ForwardSlashEquals => BinOp::DivideAssign,
                 TokenValue::LessThan => BinOp::LessThan,
                 TokenValue::GreaterThan => BinOp::GreaterThan,
                 TokenValue::LessEqualThan => BinOp::LessEqualThan,
@@ -917,7 +926,11 @@ fn postfix_binding_power(op: &TokenValue) -> Option<(u8, ())> {
 
 fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
     let res = match op {
-        TokenValue::Assign => (ASSIGNMENT, ASSIGNMENT - 1),
+        TokenValue::Assign
+        | TokenValue::PlusEquals
+        | TokenValue::MinusEquals
+        | TokenValue::AsteriskEquals
+        | TokenValue::ForwardSlashEquals => (ASSIGNMENT, ASSIGNMENT - 1),
         TokenValue::LessThan
         | TokenValue::GreaterThan
         | TokenValue::GreaterEqualThan
@@ -1257,129 +1270,3 @@ fn peek_for_closed(
 
     Ok(closed)
 }
-
-/*#[cfg(test)]
-mod test {
-    use matches::assert_matches;
-
-    use crate::arena::ArenaIter;
-
-    use super::*;
-
-    fn tokens(tokens: &[TokenValue]) -> impl '_ + Iterator<Item = Result<Token, LexError>> {
-        let provenance = SourceMarker::new("test", "test", 0, 0);
-        tokens.iter().map(move |token| {
-            Ok(Token {
-                value: token.clone(),
-                range: SourceRange::new(provenance, provenance),
-            })
-        })
-    }
-
-    // TODO: take ParsedSourceModule for these tests rather than the old raw AST
-
-    #[test]
-    fn adding() {
-        let ParsedSourceFile { nodes, .. } = parse(tokens(&[
-            TokenValue::Let,
-            TokenValue::Word("a".to_string()),
-            TokenValue::Equals,
-            TokenValue::OpenParen,
-            TokenValue::Int(15),
-            TokenValue::Minus,
-            TokenValue::Int(10),
-            TokenValue::CloseParen,
-            TokenValue::Plus,
-            TokenValue::Int(3),
-            TokenValue::Semicolon,
-            TokenValue::If,
-            TokenValue::True,
-            TokenValue::OpenBracket,
-            TokenValue::Word("a".to_string()),
-            TokenValue::Equals,
-            TokenValue::Int(3),
-            TokenValue::Semicolon,
-            TokenValue::CloseBracket,
-            TokenValue::Word("a".to_string()),
-        ]))
-        .unwrap();
-        let lines = nodes
-            .iter_mut()
-            .map(|(_id, statement)| {
-                ArenaIter::iter_from(&ast, *statement)
-                    .map(|(_, node)| &node.value)
-                    .collect()
-            })
-            .collect::<Vec<Vec<_>>>();
-        let matchable_nodes = lines.iter().map(|line| line.as_slice()).collect::<Vec<_>>();
-
-        use AstNodeValue::*;
-        assert_matches!(
-            matchable_nodes.as_slice(),
-            &[
-                &[
-                    Declaration(_, _),
-                    BinExpr(BinOp::Add, _, _),
-                    BinExpr(BinOp::Subtract, _, _),
-                    Int(15),
-                    Int(10),
-                    Int(3),
-                ],
-                &[
-                    If(..),
-                    Bool(true),
-                    Block(_),
-                    BinExpr(BinOp::Assignment, _, _),
-                    Name(_),
-                    Int(3),
-                ],
-                &[Name(_),],
-            ]
-        );
-    }
-
-    #[test]
-    fn function() {
-        let (statements, ast) = parse(tokens(&[
-            TokenValue::Function,
-            TokenValue::Word("f".to_string()),
-            TokenValue::OpenParen,
-            TokenValue::Word("argument".to_string()),
-            TokenValue::Colon,
-            TokenValue::Word("i64".to_string()),
-            TokenValue::CloseParen,
-            TokenValue::Colon,
-            TokenValue::Word("i64".to_string()),
-            TokenValue::OpenBracket,
-            TokenValue::Int(3),
-            TokenValue::Plus,
-            TokenValue::Int(5),
-            TokenValue::CloseBracket,
-        ]))
-        .unwrap();
-        let lines = statements
-            .iter()
-            .map(|statement| {
-                ArenaIter::iter_from(&ast, *statement)
-                    .map(|(_, node)| &node.value)
-                    .collect()
-            })
-            .collect::<Vec<Vec<_>>>();
-        let matchable_nodes = lines.iter().map(|line| line.as_slice()).collect::<Vec<_>>();
-
-        use AstNodeValue::*;
-        assert_matches!(
-            matchable_nodes.as_slice(),
-            &[&[
-                FunctionDeclaration(FunctionDeclarationValue {
-                    returns: Some(_),
-                    ..
-                }),
-                Block(_),
-                BinExpr(BinOp::Add, _, _),
-                Int(3),
-                Int(5),
-            ],]
-        );
-    }
-}*/

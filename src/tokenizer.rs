@@ -20,10 +20,16 @@ impl fmt::Display for Token {
 pub enum TokenValue {
     Word(String),
     Int(u64),
+
     Plus,
     Minus,
     Asterisk,
     ForwardSlash,
+    PlusEquals,
+    MinusEquals,
+    AsteriskEquals,
+    ForwardSlashEquals,
+
     Assign,
     Colon,
     Comma,
@@ -66,6 +72,10 @@ impl fmt::Display for TokenValue {
             Asterisk => write!(f, "*"),
             ForwardSlash => write!(f, "/"),
             Assign => write!(f, "="),
+            PlusEquals => write!(f, "+="),
+            MinusEquals => write!(f, "-="),
+            AsteriskEquals => write!(f, "*="),
+            ForwardSlashEquals => write!(f, "/="),
             Semicolon => write!(f, ";"),
             Comma => write!(f, ","),
             Colon => write!(f, ":"),
@@ -237,8 +247,38 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         TokenValue::GreaterThan
                     }
                 }
-                '+' => TokenValue::Plus,
-                '-' => TokenValue::Minus,
+                '+' => {
+                    if let Some('=') = self.source.peek() {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::PlusEquals
+                    } else {
+                        TokenValue::Plus
+                    }
+                }
+                '-' => {
+                    if let Some('=') = self.source.peek() {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::MinusEquals
+                    } else {
+                        TokenValue::Minus
+                    }
+                }
+                '*' => {
+                    if let Some('=') = self.source.peek() {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::AsteriskEquals
+                    } else {
+                        TokenValue::Asterisk
+                    }
+                }
+                '/' => {
+                    if let Some('=') = self.source.peek() {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::ForwardSlashEquals
+                    } else {
+                        TokenValue::ForwardSlash
+                    }
+                }
                 ',' => TokenValue::Comma,
                 ';' => TokenValue::Semicolon,
                 ':' => TokenValue::Colon,
@@ -249,8 +289,6 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 '}' => TokenValue::CloseBracket,
                 '[' => TokenValue::OpenSquare,
                 ']' => TokenValue::CloseSquare,
-                '*' => TokenValue::Asterisk,
-                '/' => TokenValue::ForwardSlash,
                 '\0' => return Some(Err(LexError::IllegalNullByte(start))),
                 ch if ch.is_whitespace() => return self.next(),
                 ch => return Some(Err(LexError::UnexpectedStart(ch, start))),
