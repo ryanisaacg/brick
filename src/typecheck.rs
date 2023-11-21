@@ -126,19 +126,24 @@ impl<'a> Declarations<'a> {
     }
 }
 
+pub struct TypecheckedFile<'a> {
+    pub expression_types: HashMap<ID, ExpressionType>,
+    pub referenced_ids: HashMap<ID, ID>,
+    pub functions: Vec<TypecheckedFunction<'a>>,
+    pub top_level_statements: Vec<&'a AstNode<'a>>,
+}
+
 pub struct TypecheckedFunction<'a> {
     pub id: ID,
     pub name: String,
     pub func: &'a FunctionDeclarationValue<'a>,
-    pub expression_types: HashMap<ID, ExpressionType>,
-    pub referenced_id: HashMap<ID, ID>,
 }
 
 // TODO: pass import namespace in
 pub fn typecheck<'a>(
     file: impl Iterator<Item = &'a AstNode<'a>>,
     declarations: &HashMap<String, ModuleDeclaration>,
-) -> Result<Vec<TypecheckedFunction<'a>>, TypecheckError<'a>> {
+) -> Result<TypecheckedFile<'a>, TypecheckError<'a>> {
     // TODO: verify validity of type and function declarations
 
     let mut name_to_expr = HashMap::new();
@@ -156,33 +161,56 @@ pub fn typecheck<'a>(
 
     // TODO: handle free-floating statements
 
-    let mut function_results = Vec::new();
+    let mut functions = Vec::new();
+    let mut top_level_statements = Vec::new();
+    let mut expression_types = HashMap::new();
+    let mut referenced_ids = HashMap::new();
 
     for statement in file {
         match &statement.value {
             AstNodeValue::FunctionDeclaration(func) => {
                 // TODO: bubble errors
-                let (expression_types, referenced_id) = typecheck_function(func, &context).unwrap();
-                function_results.push(TypecheckedFunction {
+                typecheck_function(func, &context, &mut expression_types, &mut referenced_ids)
+                    .unwrap();
+                functions.push(TypecheckedFunction {
                     id: statement.id,
                     name: func.name.clone(),
                     func,
-                    expression_types,
-                    referenced_id,
-                })
+                });
             }
-            _ => {}
+            // These nodes don't execute anything and therefore don't need to be typechecked
+            AstNodeValue::Import(_)
+            | AstNodeValue::StructDeclaration(_)
+            | AstNodeValue::ExternFunctionBinding(_) => {}
+            _ => {
+                typecheck_expression(
+                    statement,
+                    &[&context.name_to_expr],
+                    &mut HashMap::new(),
+                    &mut expression_types,
+                    &mut referenced_ids,
+                    &context,
+                )?;
+                top_level_statements.push(statement);
+            }
         }
     }
 
-    Ok(function_results)
+    Ok(TypecheckedFile {
+        expression_types,
+        referenced_ids,
+        functions,
+        top_level_statements,
+    })
 }
 
 // TODO: some sort of data structure to store the results?
 fn typecheck_function<'a, 'b>(
     function: &'a FunctionDeclarationValue<'a>,
     context: &Declarations,
-) -> Result<(HashMap<ID, ExpressionType>, HashMap<ID, ID>), TypecheckError<'a>> {
+    expressions: &'b mut HashMap<ID, ExpressionType>,
+    referenced_id: &'b mut HashMap<ID, ID>,
+) -> Result<(), TypecheckError<'a>> {
     let Some(function_type) = context.name_to_func(&function.name) else {
         panic!("expected function to be found in the module");
     };
@@ -193,20 +221,18 @@ fn typecheck_function<'a, 'b>(
         .map(|(name, param)| (name.name.clone(), (name.id, param.clone())))
         .collect();
 
-    let mut expressions = HashMap::new();
-    let mut referenced_id = HashMap::new();
     typecheck_expression(
         &function.body,
         &[&context.name_to_expr, &parameters],
         &mut HashMap::new(),
-        &mut expressions,
-        &mut referenced_id,
+        expressions,
+        referenced_id,
         context,
     )?;
     // TODO: ensure that the return type matches the function's declared return type
     let _cfg = build_control_flow_graph(&function.body);
 
-    Ok((expressions, referenced_id))
+    Ok(())
 }
 
 // TODO: allow ; to turn expressions into void
@@ -254,6 +280,7 @@ fn typecheck_expression<'a, 'b>(
 
             ExpressionType::Primitive(PrimitiveType::Void)
         }
+        // TODO: You can only from within a function
         AstNodeValue::Return(returned) => {
             typecheck_expression(
                 returned,

@@ -4,7 +4,7 @@ use brick::{interpret_code, Value};
 // TODO: assert matches?
 
 fn eval_expr(contents: &str) -> Vec<Value> {
-    interpret_code("test", format!("fn main() {{ {} }}", contents)).unwrap()
+    interpret_code("test", contents.to_string()).unwrap()
 }
 
 #[test]

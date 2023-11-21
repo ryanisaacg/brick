@@ -46,19 +46,34 @@ enum Numeric {
     Float(f64),
 }
 
-struct Context<'a> {
+pub struct Context<'a> {
     fns: &'a HashMap<ID, IrFunction<'a>>,
     params: &'a [Value],
     variables: HashMap<ID, Value>,
     value_stack: Vec<Value>,
 }
 
-enum EvaluationStop {
+impl<'a> Context<'a> {
+    pub fn new(fns: &'a HashMap<ID, IrFunction<'a>>) -> Context {
+        Context {
+            fns,
+            params: &[],
+            variables: HashMap::new(),
+            value_stack: Vec::new(),
+        }
+    }
+
+    pub fn values(self) -> Vec<Value> {
+        self.value_stack
+    }
+}
+
+pub enum EvaluationStop {
     Returned,
 }
 
 // Kinda a hack: when we return, unwind the stack via Result
-fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode<'a>) -> Result<(), EvaluationStop> {
+pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode<'a>) -> Result<(), EvaluationStop> {
     match &node.value {
         IrNodeValue::Parameter(idx, id) => {
             ctx.variables.insert(*id, ctx.params[*idx].clone());

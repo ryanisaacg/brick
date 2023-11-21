@@ -5,10 +5,10 @@ use std::{
     fs, io,
 };
 
-use id::ID;
 use imports::find_imports;
 pub use interpreter::Value;
-use ir::{lower_function, IrFunction, IrNode};
+use interpreter::{evaluate_node, Context};
+use ir::{IrModule, IrNode};
 use thiserror::Error;
 use typecheck::{
     resolve::{name_to_declaration, resolve_top_level_declarations},
@@ -29,7 +29,7 @@ pub mod typecheck;
 use parser::{AstNode, ParseError};
 use typed_arena::Arena;
 
-use crate::interpreter::evaluate_function;
+use crate::ir::lower_module;
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -45,14 +45,25 @@ pub fn interpret_code(
 ) -> Result<Vec<Value>, CompileError> {
     let ir_arena = Arena::new();
     // TODO: "main"?
-    let functions = compile_file(&ir_arena, "main", source_name, contents)?;
-    let main = functions
-        .iter()
-        .find(|(_, func)| func.name == "main")
-        .expect("function named main")
-        .0;
+    let modules = compile_file(&ir_arena, "main", source_name, contents)?;
+    let mut statements = Vec::new();
+    let mut functions = HashMap::new();
+    for (name, module) in modules {
+        // TODO: execute imported statements?
+        if name == "main" {
+            statements.extend(module.top_level_statements);
+        }
+        for function in module.functions {
+            functions.insert(function.id, function);
+        }
+    }
 
-    Ok(evaluate_function(&functions, *main, &[]))
+    let mut context = Context::new(&functions);
+    for statement in statements {
+        let _ = evaluate_node(&mut context, &statement);
+    }
+
+    Ok(context.values())
 }
 
 pub fn compile_file<'a>(
@@ -60,7 +71,7 @@ pub fn compile_file<'a>(
     module_name: &'a str,
     source_name: &'static str,
     contents: String,
-) -> Result<HashMap<ID, IrFunction<'a>>, CompileError> {
+) -> Result<HashMap<String, IrModule<'a>>, CompileError> {
     let parse_arena = Arena::new();
     let modules = collect_modules(&parse_arena, module_name.to_string(), source_name, contents)?;
 
@@ -72,12 +83,11 @@ pub fn compile_file<'a>(
     }
 
     let ir = modules
-        .values()
-        .flat_map(|module| typecheck(module.iter(), &declarations).unwrap())
         .into_iter()
-        .map(|func| {
-            let func = lower_function(ir_arena, func);
-            (func.id, func)
+        .map(|(name, contents)| {
+            let types = typecheck(contents.iter(), &declarations).unwrap();
+            let ir = lower_module(ir_arena, types);
+            (name, ir)
         })
         .collect();
 
