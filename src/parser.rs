@@ -173,6 +173,10 @@ pub enum BinOp {
     Divide,
     LessThan,
     GreaterThan,
+    LessEqualThan,
+    GreaterEqualThan,
+    EqualTo,
+    NotEquals,
     Index,
     Assignment,
 }
@@ -550,7 +554,7 @@ fn variable_declaration<'a>(
     )?;
     let cursor = assert_next_lexeme_eq(
         source.next(),
-        TokenValue::Equals,
+        TokenValue::Assign,
         provenance.end(),
         "expected = after let binding target",
     )?
@@ -856,9 +860,13 @@ fn expression_pratt<'a>(
                 expression_pratt(source, context, current.end(), right_binding, can_be_struct)?;
 
             let bin_op = match value {
-                TokenValue::Equals => BinOp::Assignment,
+                TokenValue::Assign => BinOp::Assignment,
                 TokenValue::LessThan => BinOp::LessThan,
                 TokenValue::GreaterThan => BinOp::GreaterThan,
+                TokenValue::LessEqualThan => BinOp::LessEqualThan,
+                TokenValue::GreaterEqualThan => BinOp::GreaterEqualThan,
+                TokenValue::EqualTo => BinOp::EqualTo,
+                TokenValue::NotEquals => BinOp::NotEquals,
                 TokenValue::Plus => BinOp::Add,
                 TokenValue::Minus => BinOp::Subtract,
                 TokenValue::Period => BinOp::Dot,
@@ -909,8 +917,13 @@ fn postfix_binding_power(op: &TokenValue) -> Option<(u8, ())> {
 
 fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
     let res = match op {
-        TokenValue::Equals => (ASSIGNMENT, ASSIGNMENT - 1),
-        TokenValue::LessThan | TokenValue::GreaterThan => (COMPARE, COMPARE - 1),
+        TokenValue::Assign => (ASSIGNMENT, ASSIGNMENT - 1),
+        TokenValue::LessThan
+        | TokenValue::GreaterThan
+        | TokenValue::GreaterEqualThan
+        | TokenValue::LessEqualThan
+        | TokenValue::NotEquals
+        | TokenValue::EqualTo => (COMPARE, COMPARE - 1),
         TokenValue::Plus | TokenValue::Minus => (SUM, SUM - 1),
         TokenValue::Asterisk | TokenValue::ForwardSlash => (FACTOR, FACTOR - 1),
         TokenValue::Period => (DOT - 1, DOT),

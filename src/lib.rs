@@ -34,6 +34,10 @@ pub enum CompileError {
     FilesystemError(io::Error, String),
 }
 
+pub fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
+    interpret_code("eval", source.to_string())
+}
+
 pub fn interpret_code(
     source_name: &'static str,
     contents: String,

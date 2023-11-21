@@ -24,7 +24,7 @@ pub enum TokenValue {
     Minus,
     Asterisk,
     ForwardSlash,
-    Equals,
+    Assign,
     Colon,
     Comma,
     Semicolon,
@@ -37,6 +37,10 @@ pub enum TokenValue {
     CloseSquare,
     LessThan,
     GreaterThan,
+    LessEqualThan,
+    GreaterEqualThan,
+    EqualTo,
+    NotEquals,
     If,
     While,
     Let,
@@ -61,7 +65,7 @@ impl fmt::Display for TokenValue {
             Minus => write!(f, "-"),
             Asterisk => write!(f, "*"),
             ForwardSlash => write!(f, "/"),
-            Equals => write!(f, "="),
+            Assign => write!(f, "="),
             Semicolon => write!(f, ";"),
             Comma => write!(f, ","),
             Colon => write!(f, ":"),
@@ -74,6 +78,10 @@ impl fmt::Display for TokenValue {
             CloseSquare => write!(f, "]"),
             LessThan => write!(f, "<"),
             GreaterThan => write!(f, ">"),
+            LessEqualThan => write!(f, "<="),
+            GreaterEqualThan => write!(f, ">="),
+            EqualTo => write!(f, "=="),
+            NotEquals => write!(f, "!="),
             Let => write!(f, "keyword let"),
             If => write!(f, "keyword if"),
             While => write!(f, "keyword while"),
@@ -197,9 +205,40 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
 
                     TokenValue::Int(number)
                 }
+                '!' => {
+                    if let Some('=') = self.source.peek() {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::NotEquals
+                    } else {
+                        todo!()
+                    }
+                }
+                '=' => {
+                    if let Some('=') = self.source.peek() {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::EqualTo
+                    } else {
+                        TokenValue::Assign
+                    }
+                }
+                '<' => {
+                    if let Some('=') = self.source.peek() {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::LessEqualThan
+                    } else {
+                        TokenValue::LessThan
+                    }
+                }
+                '>' => {
+                    if let Some('=') = self.source.peek() {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::GreaterEqualThan
+                    } else {
+                        TokenValue::GreaterThan
+                    }
+                }
                 '+' => TokenValue::Plus,
                 '-' => TokenValue::Minus,
-                '=' => TokenValue::Equals,
                 ',' => TokenValue::Comma,
                 ';' => TokenValue::Semicolon,
                 ':' => TokenValue::Colon,
@@ -208,8 +247,6 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 ')' => TokenValue::CloseParen,
                 '{' => TokenValue::OpenBracket,
                 '}' => TokenValue::CloseBracket,
-                '<' => TokenValue::LessThan,
-                '>' => TokenValue::GreaterThan,
                 '[' => TokenValue::OpenSquare,
                 ']' => TokenValue::CloseSquare,
                 '*' => TokenValue::Asterisk,

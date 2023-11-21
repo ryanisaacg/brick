@@ -372,7 +372,17 @@ fn typecheck_expression<'a, 'b>(
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
         }
-        AstNodeValue::BinExpr(BinOp::LessThan | BinOp::GreaterThan, left, right) => {
+        // TODO: non-numeric equality
+        AstNodeValue::BinExpr(
+            BinOp::LessThan
+            | BinOp::GreaterThan
+            | BinOp::LessEqualThan
+            | BinOp::GreaterEqualThan
+            | BinOp::EqualTo
+            | BinOp::NotEquals,
+            left,
+            right,
+        ) => {
             let left = typecheck_expression(
                 left,
                 outer_scopes,

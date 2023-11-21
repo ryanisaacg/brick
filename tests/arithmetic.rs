@@ -1,20 +1,16 @@
 use assert_matches::assert_matches;
-use brick::{interpret_code, Value};
+use brick::{eval, Value};
 
 // TODO: assert matches?
 
-fn eval_expr(contents: &str) -> Vec<Value> {
-    interpret_code("test", contents.to_string()).unwrap()
-}
-
 #[test]
 fn basic_precedence() {
-    let result = eval_expr("1 + 2 * 3");
+    let result = eval("1 + 2 * 3").unwrap();
     assert_matches!(&result[..], [Value::Int(7)]);
 }
 
 #[test]
 fn parens() {
-    let result = eval_expr("(1 + 2) * 3");
+    let result = eval("(1 + 2) * 3").unwrap();
     assert_matches!(&result[..], [Value::Int(9)]);
 }

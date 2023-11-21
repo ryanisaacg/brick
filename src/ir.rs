@@ -202,6 +202,12 @@ fn lower_node<'ast, 'ir>(
                 BinOp::Divide => IrNodeValue::BinOp(IrBinOp::Divide, left, right),
                 BinOp::LessThan => IrNodeValue::BinOp(IrBinOp::LessThan, left, right),
                 BinOp::GreaterThan => IrNodeValue::BinOp(IrBinOp::GreaterThan, left, right),
+                BinOp::LessEqualThan => IrNodeValue::BinOp(IrBinOp::LessEqualThan, left, right),
+                BinOp::GreaterEqualThan => {
+                    IrNodeValue::BinOp(IrBinOp::GreaterEqualThan, left, right)
+                }
+                BinOp::EqualTo => IrNodeValue::BinOp(IrBinOp::EqualTo, left, right),
+                BinOp::NotEquals => IrNodeValue::BinOp(IrBinOp::NotEquals, left, right),
                 BinOp::Index => IrNodeValue::Index(left, right),
                 BinOp::Dot | BinOp::Assignment => unreachable!(),
             }
@@ -323,6 +329,10 @@ pub enum IrBinOp {
     Divide,
     LessThan,
     GreaterThan,
+    LessEqualThan,
+    GreaterEqualThan,
+    EqualTo,
+    NotEquals,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
