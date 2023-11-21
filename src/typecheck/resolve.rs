@@ -88,8 +88,10 @@ pub fn resolve_type_name<'a>(
         AstNodeValue::Name(name) => match name.as_str() {
             "bool" => ExpressionType::Primitive(PrimitiveType::Bool),
             "void" => ExpressionType::Primitive(PrimitiveType::Void),
-            "i32" => ExpressionType::Primitive(PrimitiveType::Int),
-            "f32" => ExpressionType::Primitive(PrimitiveType::Float),
+            "i32" => ExpressionType::Primitive(PrimitiveType::Int32),
+            "f32" => ExpressionType::Primitive(PrimitiveType::Float32),
+            "i64" => ExpressionType::Primitive(PrimitiveType::Int64),
+            "f64" => ExpressionType::Primitive(PrimitiveType::Float64),
             other => ExpressionType::Named(
                 types
                     .get(other)

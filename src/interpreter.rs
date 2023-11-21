@@ -57,7 +57,7 @@ enum EvaluationStop {
     Returned,
 }
 
-// Kinda a hack: when we return, unwind the stack via R
+// Kinda a hack: when we return, unwind the stack via Result
 fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode<'a>) -> Result<(), EvaluationStop> {
     match &node.value {
         IrNodeValue::Parameter(idx, id) => {
@@ -174,8 +174,8 @@ fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode<'a>) -> Result<(), Eva
         IrNodeValue::While(cond, block) => loop {
             evaluate_node(ctx, cond)?;
             let Some(Value::Bool(cond)) = ctx.value_stack.pop() else {
-                    panic!("ICE: expected boolean");
-                };
+                panic!("ICE: expected boolean");
+            };
             if !cond {
                 break;
             }

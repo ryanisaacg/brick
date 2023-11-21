@@ -38,8 +38,6 @@ collections:
     - declaration syntax
     - typechecking
 
-ir:
-- lower code into SSA
-
 interpreter:
-- idk write it
+- reference support
+- array support

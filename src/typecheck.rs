@@ -62,9 +62,10 @@ pub struct FuncType {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
-    // TODO: long int, long float
-    Int,
-    Float,
+    Int32,
+    Float32,
+    Int64,
+    Float64,
     Bool,
     Void,
 }
@@ -271,8 +272,20 @@ fn typecheck_expression<'a, 'b>(
             referenced_id.insert(node.id, ref_id);
             expr
         }
-        AstNodeValue::Int(_) => ExpressionType::Primitive(PrimitiveType::Int),
-        AstNodeValue::Float(_) => ExpressionType::Primitive(PrimitiveType::Float),
+        AstNodeValue::Int(constant) => {
+            if i32::try_from(*constant).is_ok() {
+                ExpressionType::Primitive(PrimitiveType::Int32)
+            } else {
+                ExpressionType::Primitive(PrimitiveType::Int64)
+            }
+        }
+        AstNodeValue::Float(constant) => {
+            if *constant as f32 as f64 == *constant {
+                ExpressionType::Primitive(PrimitiveType::Float32)
+            } else {
+                ExpressionType::Primitive(PrimitiveType::Float64)
+            }
+        }
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let left = typecheck_expression(
