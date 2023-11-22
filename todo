@@ -18,9 +18,19 @@ semantic analysis:
 - handle return, break statements in CFG parsing
 - attach types to expressions, ensure they match properly
 
-sum types:
-- decide on some mechanism for sum types
-- implement em
+anonymous types:
+- anonymous struct
+- anonymous union
+
+unions:
+- are unions the right choice?? not 100% sure
+- union lvalues are special - can only be assigned to
+- match statement (destructure unions, return value if exhaustive)
+
+null:
+- basic null flow analysis - maybe a special operation to de-null stuff
+- ?. operator
+- ?? operator
 
 extern:
 - extern structs?
@@ -41,3 +51,6 @@ collections:
 interpreter:
 - reference support
 - array support
+- struct support
+- union support
+

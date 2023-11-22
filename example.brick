@@ -5,8 +5,9 @@ union Value {
 
 fn int(val: Value): i32 {
     add(val.int, 1)
+    val.int = null
 }
 
-fn add(x: i32?, y: i32) {
+fn add(x: i32?, y: i32?) {
 
 }
