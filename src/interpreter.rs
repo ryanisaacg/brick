@@ -206,7 +206,14 @@ pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode<'a>) -> Result<(),
             }
             evaluate_node(ctx, block)?;
         },
-        IrNodeValue::StructLiteral(_, _) => todo!(),
+        IrNodeValue::StructLiteral(_, fields) => {
+            let mut values = HashMap::new();
+            for (field, value) in fields.iter() {
+                evaluate_node(ctx, value)?;
+                values.insert(field.clone(), ctx.value_stack.pop().unwrap());
+            }
+            ctx.value_stack.push(Value::Struct(values));
+        }
 
         IrNodeValue::TakeUnique(_) => todo!(),
         IrNodeValue::TakeShared(_) => todo!(),

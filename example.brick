@@ -1,13 +1,13 @@
-union Value {
-    int(i32),
-    float(f32),
+struct Point {
+    x: f32,
+    y: f32,
 }
 
-fn int(val: Value): i32 {
-    add(val.int, 1)
-    val.int = null
+fn distance_2(a: Point, b: Point): f32 {
+    let xd = a.x - b.x;
+    let yd = a.y - b.y;
+
+    (xd * xd) + (yd * yd)
 }
 
-fn add(x: i32?, y: i32?) {
-
-}
+distance_2(Point { x: 1.0, y: 1.0 }, Point { x: 3.0, y: 1.0 })
