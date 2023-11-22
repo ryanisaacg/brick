@@ -13,6 +13,10 @@ function_header ::= "fn" word "(" function_args ")"
 maybe_extern ::= ε | "extern"
 
 struct ::= "struct" word "{" function_args "}"
+union ::= "union" word "{" union_variants "}"
+
+union_variants ::= union_variant | union_variant "," | union_variant "," union_variants
+union_variant ::= word "(" type ")" 
 
 function_args ::= word type_annotation |
     word type_annotation "," |

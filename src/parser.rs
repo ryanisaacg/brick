@@ -61,6 +61,12 @@ pub struct StructDeclarationValue<'a> {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct UnionDeclarationValue<'a> {
+    pub name: String,
+    pub variants: Vec<NameAndType<'a>>,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct IfDeclaration<'a> {
     pub condition: &'a mut AstNode<'a>,
     pub if_branch: &'a mut AstNode<'a>,
@@ -73,6 +79,7 @@ pub enum AstNodeValue<'a> {
     FunctionDeclaration(FunctionDeclarationValue<'a>),
     ExternFunctionBinding(ExternFunctionBindingValue<'a>),
     StructDeclaration(StructDeclarationValue<'a>),
+    UnionDeclaration(UnionDeclarationValue<'a>),
     Declaration(String, &'a mut AstNode<'a>),
     Import(String),
     Return(&'a mut AstNode<'a>),
@@ -153,13 +160,16 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                     children.push(expression);
                 }
             }
-            Name(_)
-            | Import(_)
-            | StructDeclaration { .. }
-            | Int(_)
-            | Float(_)
-            | Bool(_)
-            | ExternFunctionBinding { .. } => {}
+            StructDeclaration(StructDeclarationValue { fields, .. })
+            | ExternFunctionBinding(ExternFunctionBindingValue { params: fields, .. })
+            | UnionDeclaration(UnionDeclarationValue {
+                variants: fields, ..
+            }) => {
+                for field in fields.iter() {
+                    children.push(field.type_);
+                }
+            }
+            Name(_) | Import(_) | Int(_) | Float(_) | Bool(_) => {}
         }
     }
 }
@@ -242,6 +252,7 @@ fn statement<'a>(
             | TokenValue::Function
             | TokenValue::Extern
             | TokenValue::Struct
+            | TokenValue::Union
             | TokenValue::Return => {
                 let Token { range, value, .. } = already_peeked_token(source)?;
                 let cursor = range.end();
@@ -272,6 +283,7 @@ fn statement<'a>(
                     TokenValue::Extern => extern_function_declaration(source, context, cursor)?,
                     TokenValue::Function => function_declaration(source, context, cursor)?,
                     TokenValue::Struct => struct_declaration(source, context, cursor)?,
+                    TokenValue::Union => union_declaration(source, context, cursor)?,
                     TokenValue::Return => {
                         let statement = return_declaration(source, context, cursor)?;
                         assert_next_lexeme_eq(
@@ -327,7 +339,7 @@ fn struct_declaration<'a>(
         source.next(),
         TokenValue::OpenBracket,
         provenance.end(),
-        "expected open parenthesis to start parameters",
+        "expected open bracket to start fields",
     )?
     .range
     .end();
@@ -365,6 +377,62 @@ fn struct_declaration<'a>(
 
     Ok(AstNode::new(
         AstNodeValue::StructDeclaration(StructDeclarationValue { name, fields }),
+        provenance,
+    ))
+}
+
+fn union_declaration<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    cursor: SourceMarker,
+) -> Result<AstNode<'a>, ParseError> {
+    let (name, mut provenance) = word(source, cursor, "expected name after 'union'")?;
+    let mut cursor = assert_next_lexeme_eq(
+        source.next(),
+        TokenValue::OpenBracket,
+        provenance.end(),
+        "expected open bracket to start variants",
+    )?
+    .range
+    .end();
+
+    let mut variants = Vec::new();
+
+    let mut closed = false;
+    while !closed {
+        let (name, name_range) = word(source, cursor, "expected variant name")?;
+        let paren = assert_next_lexeme_eq(
+            source.next(),
+            TokenValue::OpenParen,
+            name_range.end(),
+            "expected ( after variant name",
+        )?;
+        let ty = type_expression(source, context, paren.range.end())?;
+        let paren = assert_next_lexeme_eq(
+            source.next(),
+            TokenValue::CloseParen,
+            ty.provenance.end(),
+            "expected ) after variant type",
+        )?;
+        variants.push(NameAndType {
+            id: ID::new(),
+            name,
+            type_: add_node(context, ty),
+        });
+
+        let (should_end, range) = comma_or_end_list(
+            source,
+            TokenValue::CloseBracket,
+            paren.range.end(),
+            "expected either more variants or close bracket",
+        )?;
+        closed = should_end;
+        cursor = range.end();
+    }
+    provenance.set_end(cursor);
+
+    Ok(AstNode::new(
+        AstNodeValue::UnionDeclaration(UnionDeclarationValue { name, variants }),
         provenance,
     ))
 }

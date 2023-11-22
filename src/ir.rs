@@ -225,6 +225,7 @@ fn lower_node<'ast, 'ir>(
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)
+        | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::Import(_)
         | AstNodeValue::UniqueType(_)
         | AstNodeValue::SharedType(_)

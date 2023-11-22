@@ -67,7 +67,11 @@ fn create_graph_for_node<'a>(
     use AstNodeValue::*;
 
     match &current.value {
-        FunctionDeclaration(_) | ExternFunctionBinding(_) | StructDeclaration(_) | Import(_) => {
+        FunctionDeclaration(_)
+        | ExternFunctionBinding(_)
+        | StructDeclaration(_)
+        | Import(_)
+        | UnionDeclaration(_) => {
             panic!("TODO: handle class of top level declaration inside statement?")
         }
         UniqueType(_) | SharedType(_) | ArrayType(_) => {

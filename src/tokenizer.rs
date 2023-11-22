@@ -21,6 +21,7 @@ pub enum TokenValue {
     Word(String),
     Int(u64),
 
+    // Math operators
     Plus,
     Minus,
     Asterisk,
@@ -30,23 +31,31 @@ pub enum TokenValue {
     AsteriskEquals,
     ForwardSlashEquals,
 
-    Assign,
-    Colon,
-    Comma,
-    Semicolon,
-    Period,
-    OpenParen,
-    CloseParen,
-    OpenBracket,
-    CloseBracket,
-    OpenSquare,
-    CloseSquare,
     LessThan,
     GreaterThan,
     LessEqualThan,
     GreaterEqualThan,
     EqualTo,
     NotEquals,
+
+    // Misc operators
+    Period,
+
+    // Markers
+    Assign,
+    Colon,
+    Comma,
+    Semicolon,
+
+    // Braces
+    OpenParen,
+    CloseParen,
+    OpenBracket,
+    CloseBracket,
+    OpenSquare,
+    CloseSquare,
+
+    // Keywords
     If,
     While,
     Let,
@@ -55,6 +64,7 @@ pub enum TokenValue {
     Function,
     Import,
     Struct,
+    Union,
     Unique,
     Shared,
     Return,
@@ -100,6 +110,7 @@ impl fmt::Display for TokenValue {
             Function => write!(f, "keyword fn"),
             Import => write!(f, "keyword import"),
             Struct => write!(f, "keyword struct"),
+            Union => write!(f, "keyword union"),
             Unique => write!(f, "keyword unique"),
             Shared => write!(f, "keyword shared"),
             Return => write!(f, "keyword return"),
@@ -190,6 +201,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "fn" => TokenValue::Function,
                         "import" => TokenValue::Import,
                         "struct" => TokenValue::Struct,
+                        "union" => TokenValue::Union,
                         "unique" => TokenValue::Unique,
                         "shared" => TokenValue::Shared,
                         "return" => TokenValue::Return,

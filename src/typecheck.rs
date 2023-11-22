@@ -30,6 +30,7 @@ pub enum PointerKind {
 pub enum ModuleDeclaration {
     Func(FuncType),
     Struct(StructType),
+    Union(UnionType),
 }
 
 impl ModuleDeclaration {
@@ -37,6 +38,7 @@ impl ModuleDeclaration {
         match self {
             ModuleDeclaration::Func(inner) => inner.id,
             ModuleDeclaration::Struct(inner) => inner.id,
+            ModuleDeclaration::Union(inner) => inner.id,
         }
     }
 
@@ -44,6 +46,7 @@ impl ModuleDeclaration {
         match self {
             ModuleDeclaration::Func(inner) => ExpressionType::Named(inner.id),
             ModuleDeclaration::Struct(inner) => ExpressionType::Named(inner.id),
+            ModuleDeclaration::Union(inner) => ExpressionType::Named(inner.id),
         }
     }
 }
@@ -59,6 +62,12 @@ pub struct FuncType {
     pub id: ID,
     pub params: Vec<ExpressionType>,
     pub returns: ExpressionType,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct UnionType {
+    pub id: ID,
+    pub variants: HashMap<String, ExpressionType>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -183,6 +192,7 @@ pub fn typecheck<'a>(
             // These nodes don't execute anything and therefore don't need to be typechecked
             AstNodeValue::Import(_)
             | AstNodeValue::StructDeclaration(_)
+            | AstNodeValue::UnionDeclaration(_)
             | AstNodeValue::ExternFunctionBinding(_) => {}
             _ => {
                 typecheck_expression(
@@ -251,6 +261,7 @@ fn typecheck_expression<'a, 'b>(
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)
+        | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::Import(_) => {
             unimplemented!("Can't do this inside a function");
         }

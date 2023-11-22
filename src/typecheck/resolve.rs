@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use crate::parser::{
     AstNode, AstNodeValue, ExternFunctionBindingValue, FunctionDeclarationValue, NameAndType,
-    StructDeclarationValue,
+    StructDeclarationValue, UnionDeclarationValue,
 };
 
 use super::{
     ExpressionType, FuncType, ModuleDeclaration, PointerKind, PrimitiveType, StructType,
-    TypecheckError,
+    TypecheckError, UnionType,
 };
 
 pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, ModuleDeclaration> {
@@ -15,6 +15,7 @@ pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, ModuleDeclarati
     for statement in source.iter() {
         match &statement.value {
             AstNodeValue::StructDeclaration(StructDeclarationValue { name, .. })
+            | AstNodeValue::UnionDeclaration(UnionDeclarationValue { name, .. })
             | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
             | AstNodeValue::ExternFunctionBinding(ExternFunctionBindingValue { name, .. }) => {
                 names_to_declarations.insert(name.clone(), statement);
@@ -50,6 +51,21 @@ pub fn resolve_top_level_declarations(
                                 .collect::<Result<HashMap<_, _>, _>>()?,
                         })
                     }
+                    AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, .. }) => {
+                        ModuleDeclaration::Union(UnionType {
+                            id: node.id,
+                            variants: variants
+                                .iter()
+                                .map(|NameAndType { id: _, name, type_ }| {
+                                    Ok((
+                                        name.clone(),
+                                        resolve_type_name(&names_to_declarations, type_)?,
+                                    ))
+                                })
+                                .collect::<Result<HashMap<_, _>, _>>()?,
+                        })
+                    }
+                    // TODO: union
                     AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
                         params,
                         returns,
@@ -112,6 +128,7 @@ pub fn resolve_type_name(
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)
+        | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::Declaration(_, _)
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
