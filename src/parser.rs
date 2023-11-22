@@ -750,6 +750,7 @@ fn expression_pratt<'a>(
     can_be_struct: bool,
 ) -> Result<AstNode<'a>, ParseError> {
     let Token { value, range } = token(source, start, "expected expression")?;
+    let start = range.start();
     let cursor = range.end();
     let mut left = match value {
         // TODO: should this be treated as a unary operator instead?
@@ -769,30 +770,25 @@ fn expression_pratt<'a>(
             left
         }
         TokenValue::OpenSquare => array_literal(source, context, cursor, can_be_struct)?,
-        token @ (TokenValue::If | TokenValue::While) => if_or_while(source, context, token, start)?,
-        TokenValue::OpenBracket => block(source, context, start)?,
+        token @ (TokenValue::If | TokenValue::While) => {
+            if_or_while(source, context, token, cursor)?
+        }
+        TokenValue::OpenBracket => block(source, context, cursor)?,
         // Atoms
-        TokenValue::True => AstNode::new(AstNodeValue::Bool(true), SourceRange::new(start, cursor)),
-        TokenValue::False => {
-            AstNode::new(AstNodeValue::Bool(false), SourceRange::new(start, cursor))
-        }
-        TokenValue::Word(word) => {
-            AstNode::new(AstNodeValue::Name(word), SourceRange::new(start, cursor))
-        }
-        TokenValue::Null => AstNode::new(AstNodeValue::Null, SourceRange::new(start, cursor)),
-        TokenValue::Int(int) => try_decimal(source, int as i64, SourceRange::new(start, cursor))?,
+        TokenValue::True => AstNode::new(AstNodeValue::Bool(true), range),
+        TokenValue::False => AstNode::new(AstNodeValue::Bool(false), range),
+        TokenValue::Word(word) => AstNode::new(AstNodeValue::Name(word), range),
+        TokenValue::Null => AstNode::new(AstNodeValue::Null, range),
+        TokenValue::Int(int) => try_decimal(source, int as i64, range)?,
         // Prefix operator
         value => {
             let Some(((), right_binding)) = prefix_binding_power(&value) else {
                 return Err(ParseError::UnexpectedToken(
-                    Box::new(Token {
-                        value,
-                        range: SourceRange::new(start, cursor),
-                    }),
+                    Box::new(Token { value, range }),
                     "expected an expression",
                 ));
             };
-            let right = expression_pratt(source, context, start, right_binding, can_be_struct)?;
+            let right = expression_pratt(source, context, cursor, right_binding, can_be_struct)?;
             let end = right.provenance.end();
             let right = add_node(context, right);
             AstNode::new(
@@ -801,7 +797,7 @@ fn expression_pratt<'a>(
                     TokenValue::Unique => AstNodeValue::TakeUnique(right),
                     other => unreachable!("prefix operator {:?}", other),
                 },
-                SourceRange::new(start, end),
+                SourceRange::new(range.start(), end),
             )
         }
     };
