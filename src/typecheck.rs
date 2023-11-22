@@ -19,6 +19,8 @@ pub enum ExpressionType {
     Named(ID),
     Pointer(PointerKind, Box<ExpressionType>),
     Array(Box<ExpressionType>),
+    Null,
+    Nullable(Box<ExpressionType>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -77,6 +79,7 @@ pub enum PrimitiveType {
     Int64,
     Float64,
     Bool,
+    // TODO: take out of PrimitiveType
     Void,
 }
 
@@ -265,7 +268,10 @@ fn typecheck_expression<'a, 'b>(
         | AstNodeValue::Import(_) => {
             unimplemented!("Can't do this inside a function");
         }
-        AstNodeValue::UniqueType(_) | AstNodeValue::SharedType(_) | AstNodeValue::ArrayType(_) => {
+        AstNodeValue::UniqueType(_)
+        | AstNodeValue::SharedType(_)
+        | AstNodeValue::ArrayType(_)
+        | AstNodeValue::NullableType(_) => {
             panic!("illegal type expression in function body");
         }
         AstNodeValue::Statement(inner) => {
@@ -326,6 +332,7 @@ fn typecheck_expression<'a, 'b>(
                 ExpressionType::Primitive(PrimitiveType::Float64)
             }
         }
+        AstNodeValue::Null => ExpressionType::Null,
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let left = typecheck_expression(
@@ -339,16 +346,26 @@ fn typecheck_expression<'a, 'b>(
             let ExpressionType::Named(id) = left else {
                 panic!("TODO: left side of dot operator");
             };
-            // TODO: fallible
-            let struct_type = context.id_to_struct(&id);
             let AstNodeValue::Name(name) = &right.value else {
                 panic!("TODO: right side of dot operator");
             };
-            struct_type
-                .fields
-                .get(name)
-                .expect("TODO: field is present")
-                .clone()
+            // TODO: fallible
+            let lhs_type = context.decl(&id);
+            match lhs_type {
+                Some(ModuleDeclaration::Struct(lhs_type)) => lhs_type
+                    .fields
+                    .get(name)
+                    .expect("TODO: field is present")
+                    .clone(),
+                Some(ModuleDeclaration::Union(lhs_type)) => ExpressionType::Nullable(Box::new(
+                    lhs_type
+                        .variants
+                        .get(name)
+                        .expect("TODO: variant is present")
+                        .clone(),
+                )),
+                _ => todo!("illegal lhs type"),
+            }
         }
         AstNodeValue::BinExpr(BinOp::Index, _, _) => todo!(),
         AstNodeValue::BinExpr(
@@ -733,13 +750,17 @@ fn resolve_name(
 
 // TODO
 fn is_assignable_to(left: &ExpressionType, right: &ExpressionType) -> bool {
+    use ExpressionType::*;
+
     match (left, right) {
-        (
-            ExpressionType::Pointer(left_ty, left_inner),
-            ExpressionType::Pointer(right_ty, right_inner),
-        ) => left_ty == right_ty && is_assignable_to(left_inner, right_inner),
-        (left, ExpressionType::Pointer(_, right_inner)) => is_assignable_to(left, right_inner),
-        (ExpressionType::Pointer(_, _), _right) => false,
+        (Pointer(left_ty, left_inner), Pointer(right_ty, right_inner)) => {
+            left_ty == right_ty && is_assignable_to(left_inner, right_inner)
+        }
+        (left, Pointer(_, right_inner)) => is_assignable_to(left, right_inner),
+        (Pointer(_, _), _right) => false,
+        (Nullable(_), Null) => true,
+        (Nullable(left), Nullable(right)) => is_assignable_to(left, right),
+        (Nullable(left), right) => is_assignable_to(left, right),
         (left, right) => left == right,
     }
 }

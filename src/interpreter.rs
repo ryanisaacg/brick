@@ -7,6 +7,7 @@ use crate::{
 
 #[derive(Clone, Debug)]
 pub enum Value {
+    Null,
     Int(i64),
     Float(f64),
     Bool(bool),
@@ -178,6 +179,7 @@ pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode<'a>) -> Result<(),
         IrNodeValue::Int(val) => ctx.value_stack.push(Value::Int(*val)),
         IrNodeValue::Float(val) => ctx.value_stack.push(Value::Float(*val)),
         IrNodeValue::Bool(val) => ctx.value_stack.push(Value::Bool(*val)),
+        IrNodeValue::Null => ctx.value_stack.push(Value::Null),
         IrNodeValue::Sequence(nodes) => {
             for node in nodes.iter() {
                 evaluate_node(ctx, node)?;

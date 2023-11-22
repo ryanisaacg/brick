@@ -74,7 +74,7 @@ fn create_graph_for_node<'a>(
         | UnionDeclaration(_) => {
             panic!("TODO: handle class of top level declaration inside statement?")
         }
-        UniqueType(_) | SharedType(_) | ArrayType(_) => {
+        UniqueType(_) | SharedType(_) | ArrayType(_) | NullableType(_) => {
             panic!("Can't handle type nodes inside statement")
         }
         Return(expr) => {
@@ -86,7 +86,7 @@ fn create_graph_for_node<'a>(
             // TODO: what should the exit be?
             (start_inner, end_inner)
         }
-        Name(_) | Int(_) | Float(_) | Bool(_) => {
+        Name(_) | Int(_) | Float(_) | Bool(_) | Null => {
             let node = graph.add_node(CfgNode::BasicBlock(current));
             (node, node)
         }

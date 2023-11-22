@@ -46,6 +46,7 @@ pub enum TokenValue {
     Colon,
     Comma,
     Semicolon,
+    QuestionMark,
 
     // Braces
     OpenParen,
@@ -69,6 +70,7 @@ pub enum TokenValue {
     Shared,
     Return,
     Extern,
+    Null,
 }
 
 impl fmt::Display for TokenValue {
@@ -102,6 +104,7 @@ impl fmt::Display for TokenValue {
             GreaterEqualThan => write!(f, ">="),
             EqualTo => write!(f, "=="),
             NotEquals => write!(f, "!="),
+            QuestionMark => write!(f, "?"),
             Let => write!(f, "keyword let"),
             If => write!(f, "keyword if"),
             While => write!(f, "keyword while"),
@@ -115,6 +118,7 @@ impl fmt::Display for TokenValue {
             Shared => write!(f, "keyword shared"),
             Return => write!(f, "keyword return"),
             Extern => write!(f, "keyword extern"),
+            Null => write!(f, "keyword null"),
         }
     }
 }
@@ -206,6 +210,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "shared" => TokenValue::Shared,
                         "return" => TokenValue::Return,
                         "extern" => TokenValue::Extern,
+                        "null" => TokenValue::Null,
                         _ => TokenValue::Word(word),
                     }
                 }
@@ -235,6 +240,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         todo!()
                     }
                 }
+                '?' => TokenValue::QuestionMark,
                 '=' => {
                     if let Some('=') = self.source.peek() {
                         end = Some(self.next_char().unwrap().1);

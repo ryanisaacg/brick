@@ -81,6 +81,7 @@ fn lower_node<'ast, 'ir>(
         AstNodeValue::Int(x) => IrNodeValue::Int(*x),
         AstNodeValue::Float(x) => IrNodeValue::Float(*x),
         AstNodeValue::Bool(x) => IrNodeValue::Bool(*x),
+        AstNodeValue::Null => IrNodeValue::Null,
 
         AstNodeValue::While(cond, body) => {
             // TODO: can you assign out of a while?
@@ -229,6 +230,7 @@ fn lower_node<'ast, 'ir>(
         | AstNodeValue::Import(_)
         | AstNodeValue::UniqueType(_)
         | AstNodeValue::SharedType(_)
+        | AstNodeValue::NullableType(_)
         | AstNodeValue::ArrayType(_) => unreachable!("Can't have these in a function body"),
     };
 
@@ -279,6 +281,7 @@ pub enum IrNodeValue<'a> {
     Int(i64),
     Float(f64),
     Bool(bool),
+    Null,
 
     TakeUnique(&'a IrNode<'a>),
     TakeShared(&'a IrNode<'a>),

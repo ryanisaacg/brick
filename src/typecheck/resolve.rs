@@ -125,6 +125,9 @@ pub fn resolve_type_name(
         AstNodeValue::ArrayType(inner) => {
             ExpressionType::Array(Box::new(resolve_type_name(types, inner)?))
         }
+        AstNodeValue::NullableType(inner) => {
+            ExpressionType::Nullable(Box::new(resolve_type_name(types, inner)?))
+        }
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)
@@ -134,6 +137,7 @@ pub fn resolve_type_name(
         | AstNodeValue::Return(_)
         | AstNodeValue::Statement(_)
         | AstNodeValue::Int(_)
+        | AstNodeValue::Null
         | AstNodeValue::Float(_)
         | AstNodeValue::Bool(_)
         | AstNodeValue::BinExpr(_, _, _)

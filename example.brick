@@ -3,6 +3,10 @@ union Value {
     float(f32),
 }
 
-fn add(a: Value, b: Value): Value {
+fn int(val: Value): i32 {
+    add(val.int, 1)
 }
 
+fn add(x: i32?, y: i32) {
+
+}

@@ -92,6 +92,7 @@ pub enum AstNodeValue<'a> {
     Int(i64),
     Float(f64),
     Bool(bool),
+    Null,
     BinExpr(BinOp, &'a mut AstNode<'a>, &'a mut AstNode<'a>),
     If(IfDeclaration<'a>),
     While(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
@@ -110,6 +111,7 @@ pub enum AstNodeValue<'a> {
     UniqueType(&'a mut AstNode<'a>),
     SharedType(&'a mut AstNode<'a>),
     ArrayType(&'a mut AstNode<'a>),
+    NullableType(&'a mut AstNode<'a>),
 }
 
 impl<'a> ArenaNode<'a> for AstNode<'a> {
@@ -124,6 +126,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
             | ArrayLiteralLength(child, _)
             | UniqueType(child)
             | SharedType(child)
+            | NullableType(child)
             | Return(child)
             | Statement(child)
             | ArrayType(child) => {
@@ -169,7 +172,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                     children.push(field.type_);
                 }
             }
-            Name(_) | Import(_) | Int(_) | Float(_) | Bool(_) => {}
+            Name(_) | Import(_) | Int(_) | Float(_) | Bool(_) | Null => {}
         }
     }
 }
@@ -674,19 +677,19 @@ fn type_expression<'a>(
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let next = token(source, cursor, "expected type")?;
-    match next.value {
+    let node = match next.value {
         ptr @ (TokenValue::Unique | TokenValue::Shared) => {
             let subtype = type_expression(source, context, next.range.end())?;
             let end = subtype.provenance.end();
             let subtype = add_node(context, subtype);
-            Ok(AstNode::new(
+            AstNode::new(
                 match ptr {
                     TokenValue::Unique => AstNodeValue::UniqueType(subtype),
                     TokenValue::Shared => AstNodeValue::SharedType(subtype),
                     _ => unreachable!(),
                 },
                 SourceRange::new(next.range.start(), end),
-            ))
+            )
         }
         TokenValue::OpenSquare => {
             let subtype = type_expression(source, context, next.range.end())?;
@@ -698,16 +701,33 @@ fn type_expression<'a>(
                 "expected ] after array type",
             )?;
             let subtype = add_node(context, subtype);
-            Ok(AstNode::new(
+            AstNode::new(
                 AstNodeValue::ArrayType(subtype),
                 SourceRange::new(next.range.start(), end),
+            )
+        }
+        TokenValue::Word(name) => AstNode::new(AstNodeValue::Name(name), next.range),
+        _ => {
+            return Err(ParseError::UnexpectedToken(
+                Box::new(next),
+                "expected either 'unique' or type name",
             ))
         }
-        TokenValue::Word(name) => Ok(AstNode::new(AstNodeValue::Name(name), next.range)),
-        _ => Err(ParseError::UnexpectedToken(
-            Box::new(next),
-            "expected either 'unique' or type name",
-        )),
+    };
+
+    if matches!(
+        peek_token_optional(source)?,
+        Some(Token {
+            value: TokenValue::QuestionMark,
+            ..
+        })
+    ) {
+        let question_mark = already_peeked_token(source)?;
+        let inner = add_node(context, node);
+        let provenance = SourceRange::new(inner.provenance.start(), question_mark.range.end());
+        Ok(AstNode::new(AstNodeValue::NullableType(inner), provenance))
+    } else {
+        Ok(node)
     }
 }
 
@@ -759,6 +779,7 @@ fn expression_pratt<'a>(
         TokenValue::Word(word) => {
             AstNode::new(AstNodeValue::Name(word), SourceRange::new(start, cursor))
         }
+        TokenValue::Null => AstNode::new(AstNodeValue::Null, SourceRange::new(start, cursor)),
         TokenValue::Int(int) => try_decimal(source, int as i64, SourceRange::new(start, cursor))?,
         // Prefix operator
         value => {

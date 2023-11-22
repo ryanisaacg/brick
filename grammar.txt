@@ -1,6 +1,7 @@
 word ::= /[A-Za-z_][A-Za-z_0-9]/
 integer ::= /[0-9_]/
 float ::= integer | integer "." integer
+null_literal ::= "null"
 
 statement ::= import | declaration | assignment | function | expression | expression ";"
 import ::= "import" word
@@ -23,9 +24,9 @@ function_args ::= word type_annotation |
     word type_annotation "," function_args
 
 type_annotation ::= ":" type
-type ::= word | "unique" type | "shared" type | "[" type "]"
+type ::= word | "unique" type | "shared" type | "[" type "]" | type "?"
 
-expression ::= if_expr | while_expr | block | operator | call | "(" expression ")" | array_literal | struct_literal
+expression ::= if_expr | while_expr | block | operator | call | "(" expression ")" | array_literal | struct_literal | null_literal
 operator ::= assignment | reference | numeric | boolean | dot
 assignment ::= expression "=" expression
 reference ::= "shared" expression | "unique" expression
