@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use typed_arena::Arena;
-
 use crate::{
     id::ID,
     parser::{AstNode, AstNodeValue, BinOp, IfDeclaration},
@@ -10,16 +8,13 @@ use crate::{
 
 // TODO: should the IR be a stack machine?
 
-pub struct IrModule<'a> {
-    pub top_level_statements: Vec<IrNode<'a>>,
+pub struct IrModule {
+    pub top_level_statements: Vec<IrNode>,
     // TODO: include imports, structs, and extern function declaration
-    pub functions: Vec<IrFunction<'a>>,
+    pub functions: Vec<IrFunction>,
 }
 
-pub fn lower_module<'ast, 'ir>(
-    arena: &'ir Arena<IrNode<'ir>>,
-    module: TypecheckedFile<'ast>,
-) -> IrModule<'ir> {
+pub fn lower_module<'ast>(module: TypecheckedFile<'ast>) -> IrModule {
     let TypecheckedFile {
         expression_types: _,
         referenced_ids,
@@ -29,20 +24,19 @@ pub fn lower_module<'ast, 'ir>(
     IrModule {
         functions: functions
             .into_iter()
-            .map(|func| lower_function(arena, &referenced_ids, func))
+            .map(|func| lower_function(&referenced_ids, func))
             .collect(),
         top_level_statements: top_level_statements
             .into_iter()
-            .map(|stmt| lower_node(arena, &referenced_ids, &stmt))
+            .map(|stmt| lower_node(&referenced_ids, &stmt))
             .collect(),
     }
 }
 
-fn lower_function<'ast, 'ir>(
-    arena: &'ir Arena<IrNode<'ir>>,
+fn lower_function<'ast>(
     referenced_ids: &HashMap<ID, ID>,
     func: TypecheckedFunction<'ast>,
-) -> IrFunction<'ir> {
+) -> IrFunction {
     let mut instructions: Vec<_> = func
         .func
         .params
@@ -53,7 +47,7 @@ fn lower_function<'ast, 'ir>(
             value: IrNodeValue::Parameter(i, param.id),
         })
         .collect();
-    instructions.push(lower_node(arena, &referenced_ids, func.func.body));
+    instructions.push(lower_node(&referenced_ids, func.func.body));
     IrFunction {
         id: func.id,
         name: func.name,
@@ -66,17 +60,13 @@ fn lower_function<'ast, 'ir>(
 
 // TODO: include types in all IR nodes?
 
-pub struct IrFunction<'a> {
+pub struct IrFunction {
     pub id: ID,
     pub name: String,
-    pub body: IrNode<'a>,
+    pub body: IrNode,
 }
 
-fn lower_node<'ast, 'ir>(
-    arena: &'ir Arena<IrNode<'ir>>,
-    referenced_ids: &HashMap<ID, ID>,
-    node: &'ast AstNode<'ast>,
-) -> IrNode<'ir> {
+fn lower_node<'ast>(referenced_ids: &HashMap<ID, ID>, node: &'ast AstNode<'ast>) -> IrNode {
     let value = match &node.value {
         AstNodeValue::Int(x) => IrNodeValue::Int(*x),
         AstNodeValue::Float(x) => IrNodeValue::Float(*x),
@@ -85,14 +75,14 @@ fn lower_node<'ast, 'ir>(
 
         AstNodeValue::While(cond, body) => {
             // TODO: can you assign out of a while?
-            let cond = lower_node_alloc(arena, referenced_ids, cond);
-            let body = lower_node_alloc(arena, referenced_ids, body);
+            let cond = lower_node_alloc(referenced_ids, cond);
+            let body = lower_node_alloc(referenced_ids, body);
             IrNodeValue::While(cond, body)
         }
         AstNodeValue::Block(contents) => {
             let contents = contents
                 .iter()
-                .map(|node| lower_node(arena, referenced_ids, node))
+                .map(|node| lower_node(referenced_ids, node))
                 .collect();
 
             IrNodeValue::Sequence(contents)
@@ -103,32 +93,32 @@ fn lower_node<'ast, 'ir>(
             if_branch,
             else_branch,
         }) => {
-            let condition = lower_node_alloc(arena, referenced_ids, condition);
-            let if_branch = lower_node_alloc(arena, referenced_ids, if_branch);
+            let condition = lower_node_alloc(referenced_ids, condition);
+            let if_branch = lower_node_alloc(referenced_ids, if_branch);
             let else_branch = else_branch
                 .as_ref()
-                .map(|else_branch| lower_node_alloc(arena, referenced_ids, else_branch));
+                .map(|else_branch| lower_node_alloc(referenced_ids, else_branch));
 
             IrNodeValue::If(condition, if_branch, else_branch)
         }
 
         AstNodeValue::TakeUnique(inner) => {
-            IrNodeValue::TakeUnique(lower_node_alloc(arena, referenced_ids, inner))
+            IrNodeValue::TakeUnique(lower_node_alloc(referenced_ids, inner))
         }
         AstNodeValue::TakeShared(inner) => {
-            IrNodeValue::Return(lower_node_alloc(arena, referenced_ids, inner))
+            IrNodeValue::Return(lower_node_alloc(referenced_ids, inner))
         }
 
         // Statement doesn't actually add a node - the inner expression
         // has what really counts
-        AstNodeValue::Statement(inner) => return lower_node(arena, referenced_ids, inner),
+        AstNodeValue::Statement(inner) => return lower_node(referenced_ids, inner),
 
         AstNodeValue::Declaration(_lvalue, rvalue) => {
-            let lvalue = add_node(
-                arena,
-                IrNode::from_ast(node, IrNodeValue::VariableReference(node.id)),
-            );
-            let rvalue = lower_node_alloc(arena, referenced_ids, rvalue);
+            let lvalue = Box::new(IrNode::from_ast(
+                node,
+                IrNodeValue::VariableReference(node.id),
+            ));
+            let rvalue = lower_node_alloc(referenced_ids, rvalue);
             let statements = vec![
                 IrNode::from_ast(node, IrNodeValue::Declaration(node.id)),
                 IrNode::from_ast(node, IrNodeValue::Assignment(lvalue, rvalue)),
@@ -142,47 +132,47 @@ fn lower_node<'ast, 'ir>(
         ),
 
         AstNodeValue::Return(inner) => {
-            return lower_node(arena, referenced_ids, inner);
+            return lower_node(referenced_ids, inner);
         }
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
-            let left = lower_node_alloc(arena, referenced_ids, left);
+            let left = lower_node_alloc(referenced_ids, left);
             let AstNodeValue::Name(name) = &right.value else {
                 unreachable!()
             };
             IrNodeValue::Dot(left, name.clone())
         }
         AstNodeValue::BinExpr(op, left, right) => {
-            let left = lower_node_alloc(arena, referenced_ids, left);
-            let right = lower_node_alloc(arena, referenced_ids, right);
+            let left = lower_node_alloc(referenced_ids, left);
+            let right = lower_node_alloc(referenced_ids, right);
 
             match op {
                 BinOp::AddAssign => IrNodeValue::Assignment(
-                    left,
-                    add_node(
-                        arena,
-                        IrNode::from_ast(&node, IrNodeValue::BinOp(IrBinOp::Add, left, right)),
-                    ),
+                    left.clone(),
+                    Box::new(IrNode::from_ast(
+                        &node,
+                        IrNodeValue::BinOp(IrBinOp::Add, left, right),
+                    )),
                 ),
                 BinOp::SubtractAssign => IrNodeValue::Assignment(
-                    left,
-                    add_node(
-                        arena,
-                        IrNode::from_ast(&node, IrNodeValue::BinOp(IrBinOp::Subtract, left, right)),
-                    ),
+                    left.clone(),
+                    Box::new(IrNode::from_ast(
+                        &node,
+                        IrNodeValue::BinOp(IrBinOp::Subtract, left, right),
+                    )),
                 ),
                 BinOp::MultiplyAssign => IrNodeValue::Assignment(
-                    left,
-                    add_node(
-                        arena,
-                        IrNode::from_ast(&node, IrNodeValue::BinOp(IrBinOp::Multiply, left, right)),
-                    ),
+                    left.clone(),
+                    Box::new(IrNode::from_ast(
+                        &node,
+                        IrNodeValue::BinOp(IrBinOp::Multiply, left, right),
+                    )),
                 ),
                 BinOp::DivideAssign => IrNodeValue::Assignment(
-                    left,
-                    add_node(
-                        arena,
-                        IrNode::from_ast(&node, IrNodeValue::BinOp(IrBinOp::Divide, left, right)),
-                    ),
+                    left.clone(),
+                    Box::new(IrNode::from_ast(
+                        &node,
+                        IrNodeValue::BinOp(IrBinOp::Divide, left, right),
+                    )),
                 ),
                 BinOp::Assignment => IrNodeValue::Assignment(left, right),
 
@@ -203,10 +193,10 @@ fn lower_node<'ast, 'ir>(
             }
         }
         AstNodeValue::Call(func, params) => {
-            let func = lower_node_alloc(arena, referenced_ids, func);
+            let func = lower_node_alloc(referenced_ids, func);
             let params = params
                 .iter()
-                .map(|param| lower_node(arena, referenced_ids, param))
+                .map(|param| lower_node(referenced_ids, param))
                 .collect();
             IrNodeValue::Call(func, params)
         }
@@ -216,7 +206,7 @@ fn lower_node<'ast, 'ir>(
                 .expect("referenced fields to be filled in");
             let fields = fields
                 .iter()
-                .map(|(name, field)| (name.clone(), lower_node(arena, referenced_ids, field)))
+                .map(|(name, field)| (name.clone(), lower_node(referenced_ids, field)))
                 .collect();
             IrNodeValue::StructLiteral(*id, fields)
         }
@@ -238,31 +228,28 @@ fn lower_node<'ast, 'ir>(
 }
 
 fn lower_node_alloc<'ast, 'ir>(
-    arena: &'ir Arena<IrNode<'ir>>,
     context: &HashMap<ID, ID>,
     node: &'ast AstNode<'ast>,
-) -> &'ir IrNode<'ir> {
-    add_node(arena, lower_node(arena, context, node))
+) -> Box<IrNode> {
+    Box::new(lower_node(context, node))
 }
 
-fn add_node<'a>(arena: &'a Arena<IrNode<'a>>, node: IrNode<'a>) -> &'a IrNode<'a> {
-    arena.alloc(node)
-}
-
-pub struct IrNode<'a> {
+#[derive(Clone, Debug, PartialEq)]
+pub struct IrNode {
     pub id: ID,
-    pub value: IrNodeValue<'a>,
+    pub value: IrNodeValue,
 }
 
-impl<'a> IrNode<'a> {
-    pub fn from_ast(ast: &AstNode<'_>, value: IrNodeValue<'a>) -> IrNode<'a> {
+impl IrNode {
+    pub fn from_ast(ast: &AstNode<'_>, value: IrNodeValue) -> IrNode {
         IrNode { id: ast.id, value }
     }
 }
 
 // TODO: should struct fields also be referred to via opaque IDs?
 
-pub enum IrNodeValue<'a> {
+#[derive(Clone, Debug, PartialEq)]
+pub enum IrNodeValue {
     /// Give the Nth parameter the given ID
     Parameter(usize, ID),
     VariableReference(ID),
@@ -270,33 +257,33 @@ pub enum IrNodeValue<'a> {
     // TODO: insert destructors
     Destructor(ID),
 
-    Call(&'a IrNode<'a>, Vec<IrNode<'a>>),
-    Dot(&'a IrNode<'a>, String),
-    Assignment(&'a IrNode<'a>, &'a IrNode<'a>),
-    Index(&'a IrNode<'a>, &'a IrNode<'a>),
-    BinOp(IrBinOp, &'a IrNode<'a>, &'a IrNode<'a>),
+    Call(Box<IrNode>, Vec<IrNode>),
+    Dot(Box<IrNode>, String),
+    Assignment(Box<IrNode>, Box<IrNode>),
+    Index(Box<IrNode>, Box<IrNode>),
+    BinOp(IrBinOp, Box<IrNode>, Box<IrNode>),
 
-    Return(&'a IrNode<'a>),
+    Return(Box<IrNode>),
 
     Int(i64),
     Float(f64),
     Bool(bool),
     Null,
 
-    TakeUnique(&'a IrNode<'a>),
-    TakeShared(&'a IrNode<'a>),
-    Dereference(&'a IrNode<'a>),
+    TakeUnique(Box<IrNode>),
+    TakeShared(Box<IrNode>),
+    Dereference(Box<IrNode>),
 
     /// Like a Block in that it's a collection of nodes, but the IR
     /// doesn't care about scoping or expressions
-    Sequence(Vec<IrNode<'a>>),
+    Sequence(Vec<IrNode>),
 
     // Expressions
-    If(&'a IrNode<'a>, &'a IrNode<'a>, Option<&'a IrNode<'a>>),
-    While(&'a IrNode<'a>, &'a IrNode<'a>),
-    StructLiteral(ID, HashMap<String, IrNode<'a>>),
-    ArrayLiteral(Vec<IrNode<'a>>),
-    ArrayLiteralLength(&'a IrNode<'a>, u64),
+    If(Box<IrNode>, Box<IrNode>, Option<Box<IrNode>>),
+    While(Box<IrNode>, Box<IrNode>),
+    StructLiteral(ID, HashMap<String, IrNode>),
+    ArrayLiteral(Vec<IrNode>),
+    ArrayLiteralLength(Box<IrNode>, u64),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

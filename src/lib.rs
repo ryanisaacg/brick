@@ -7,7 +7,7 @@ use std::{
 
 pub use interpreter::Value;
 use interpreter::{evaluate_node, Context};
-use ir::{IrModule, IrNode};
+use ir::IrModule;
 use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck};
 
@@ -42,9 +42,8 @@ pub fn interpret_code(
     source_name: &'static str,
     contents: String,
 ) -> Result<Vec<Value>, CompileError> {
-    let ir_arena = Arena::new();
     // TODO: "main"?
-    let modules = compile_file(&ir_arena, "main", source_name, contents)?;
+    let modules = compile_file("main", source_name, contents)?;
     let mut statements = Vec::new();
     let mut functions = HashMap::new();
     for (name, module) in modules {
@@ -66,24 +65,25 @@ pub fn interpret_code(
 }
 
 pub fn compile_file<'a>(
-    ir_arena: &'a Arena<IrNode<'a>>,
     module_name: &'a str,
     source_name: &'static str,
     contents: String,
-) -> Result<HashMap<String, IrModule<'a>>, CompileError> {
+) -> Result<HashMap<String, IrModule>, CompileError> {
+    use rayon::prelude::*;
+
     let parse_arena = Arena::new();
     let modules = collect_modules(&parse_arena, module_name.to_string(), source_name, contents)?;
 
-    let mut declarations = HashMap::new();
-    for (_name, module) in modules.iter() {
-        declarations.extend(resolve_module(&module[..]).into_iter());
-    }
+    let declarations = modules
+        .par_iter()
+        .flat_map(|(_name, module)| resolve_module(&module[..]).into_par_iter())
+        .collect::<HashMap<_, _>>();
 
     let ir = modules
-        .iter()
-        .map(|(name, contents)| {
+        .par_iter()
+        .map(move |(name, contents)| {
             let types = typecheck(contents.iter(), &declarations).unwrap();
-            let ir = lower_module(ir_arena, types);
+            let ir = lower_module(types);
             (name.clone(), ir)
         })
         .collect();

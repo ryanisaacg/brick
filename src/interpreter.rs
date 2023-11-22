@@ -25,8 +25,8 @@ impl Value {
     }
 }
 
-pub fn evaluate_function<'a>(
-    fns: &HashMap<ID, IrFunction<'a>>,
+pub fn evaluate_function(
+    fns: &HashMap<ID, IrFunction>,
     function_to_run: ID,
     params: &[Value],
 ) -> Vec<Value> {
@@ -48,14 +48,14 @@ enum Numeric {
 }
 
 pub struct Context<'a> {
-    fns: &'a HashMap<ID, IrFunction<'a>>,
+    fns: &'a HashMap<ID, IrFunction>,
     params: &'a [Value],
     variables: HashMap<ID, Value>,
     value_stack: Vec<Value>,
 }
 
 impl<'a> Context<'a> {
-    pub fn new(fns: &'a HashMap<ID, IrFunction<'a>>) -> Context {
+    pub fn new(fns: &'a HashMap<ID, IrFunction>) -> Context {
         Context {
             fns,
             params: &[],
@@ -74,7 +74,7 @@ pub enum EvaluationStop {
 }
 
 // Kinda a hack: when we return, unwind the stack via Result
-pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode<'a>) -> Result<(), EvaluationStop> {
+pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode) -> Result<(), EvaluationStop> {
     match &node.value {
         IrNodeValue::Parameter(idx, id) => {
             ctx.variables.insert(*id, ctx.params[*idx].clone());
