@@ -1,15 +1,9 @@
-extern fn print(val: f32);
+extern fn read(): i32;
+extern fn write(val: i32);
 
-struct Point {
-    x: f32,
-    y: f32,
+let x = read();
+while x > 0 {
+    write(x * 2);
+    x = read();
 }
 
-fn distance_2(a: Point, b: Point): f32 {
-    let xd = a.x - b.x;
-    let yd = a.y - b.y;
-
-    (xd * xd) + (yd * yd)
-}
-
-print(distance_2(Point { x: 1.0, y: 1.0 }, Point { x: 3.0, y: 1.0 }))
