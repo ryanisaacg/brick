@@ -17,6 +17,13 @@ fn main() {
         println!("{}", input);
         vec![]
     });
+    bindings.insert("print".to_string(), &|values| {
+        let Value::String(input) = &values[0] else {
+            panic!("expected string");
+        };
+        println!("{}", input);
+        vec![]
+    });
 
     println!(
         "{:?}",

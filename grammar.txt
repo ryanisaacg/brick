@@ -2,6 +2,8 @@ word ::= /[A-Za-z_][A-Za-z_0-9]/
 integer ::= /[0-9_]/
 float ::= integer | integer "." integer
 null_literal ::= "null"
+char_literal ::= "'" /[^']/ "'"
+string_literal ::= "\"" /[^"]/* "\""
 
 statement ::= import | declaration | assignment | function | expression | expression ";"
 import ::= "import" word
@@ -26,7 +28,7 @@ function_args ::= word type_annotation |
 type_annotation ::= ":" type
 type ::= word | "unique" type | "shared" type | "[" type "]" | type "?"
 
-expression ::= if_expr | while_expr | block | operator | call | "(" expression ")" | array_literal | struct_literal | null_literal
+expression ::= if_expr | while_expr | block | operator | call | "(" expression ")" | array_literal | struct_literal
 operator ::= assignment | reference | numeric | boolean | dot
 assignment ::= expression "=" expression
 reference ::= "shared" expression | "unique" expression
@@ -45,7 +47,7 @@ struct_literal ::= atom | word "{" struct_literal_params "}"
         word "," struct_literal_params |
         word ":" expression | word ":" expression "," |
         word ":" expression "," struct_literal_params
-atom ::= word | integer | "-"integer | float | "-"float
+atom ::= word | integer | "-"integer | float | "-"float | null_literal | char_literal | string_literal
 
 if_expr ::= "if" expression block
 while_expr ::= "while" expression block

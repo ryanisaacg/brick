@@ -20,6 +20,8 @@ impl fmt::Display for Token {
 pub enum TokenValue {
     Word(String),
     Int(u64),
+    CharacterLiteral(char),
+    StringLiteral(String),
 
     // Math operators
     Plus,
@@ -79,6 +81,8 @@ impl fmt::Display for TokenValue {
         match self {
             Word(word) => write!(f, "word {}", word),
             Int(int) => write!(f, "int {}", int),
+            CharacterLiteral(c) => write!(f, "character literal {}", c),
+            StringLiteral(s) => write!(f, "string literal {}", s),
             Plus => write!(f, "+"),
             Minus => write!(f, "-"),
             Asterisk => write!(f, "*"),
@@ -129,6 +133,8 @@ pub enum LexError {
     UnexpectedStart(char, SourceMarker),
     #[error("illegal null byte in source code at {0}")]
     IllegalNullByte(SourceMarker),
+    #[error("unterminated literal in source code starting at {0}")]
+    UnterminatedLiteral(SourceMarker),
 }
 
 pub fn lex<'a>(
@@ -308,6 +314,31 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 '[' => TokenValue::OpenSquare,
                 ']' => TokenValue::CloseSquare,
                 '\0' => return Some(Err(LexError::IllegalNullByte(start))),
+                '\'' => {
+                    let Some((value, idx)) = self.next_char() else {
+                        return Some(Err(LexError::UnterminatedLiteral(start)));
+                    };
+                    // TODO: handle escape sequences
+                    let Some(('\'', end_pos)) = self.next_char() else {
+                        return Some(Err(LexError::UnterminatedLiteral(idx)));
+                    };
+                    end = Some(end_pos);
+
+                    TokenValue::CharacterLiteral(value)
+                }
+                '"' => {
+                    let mut string = String::new();
+                    loop {
+                        let Some((next, pos)) = self.next_char() else {
+                            return Some(Err(LexError::UnterminatedLiteral(start)));
+                        };
+                        end = Some(pos);
+                        if next == '"' {
+                            break TokenValue::StringLiteral(string);
+                        }
+                        string.push(next);
+                    }
+                }
                 ch if ch.is_whitespace() => return self.next(),
                 ch => return Some(Err(LexError::UnexpectedStart(ch, start))),
             };

@@ -107,6 +107,8 @@ pub fn resolve_type_name(
             "f32" => ExpressionType::Primitive(PrimitiveType::Float32),
             "i64" => ExpressionType::Primitive(PrimitiveType::Int64),
             "f64" => ExpressionType::Primitive(PrimitiveType::Float64),
+            "char" => ExpressionType::Primitive(PrimitiveType::Char),
+            "string" => ExpressionType::Primitive(PrimitiveType::String),
             other => ExpressionType::Named(
                 types
                     .get(other)
@@ -149,7 +151,9 @@ pub fn resolve_type_name(
         | AstNodeValue::StructLiteral { .. }
         | AstNodeValue::ArrayLiteral(_)
         | AstNodeValue::ArrayLiteralLength(_, _)
-        | AstNodeValue::Block(_) => {
+        | AstNodeValue::Block(_)
+        | AstNodeValue::StringLiteral(_)
+        | AstNodeValue::CharLiteral(_) => {
             // TODO: report error
             panic!("Illegal in expression name");
         }

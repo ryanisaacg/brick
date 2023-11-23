@@ -10,9 +10,10 @@ arithmetic:
 - automatically promote integers to equivalent floats
 
 strings:
-- string and character literals in the parser
-- string types
+- escape sequences
 - string manipulation
+- interpolation literals
+- multiline literals
 
 semantic analysis:
 - handle return, break statements in CFG parsing

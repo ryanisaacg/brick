@@ -1,6 +1,8 @@
 extern fn read(): i32;
 extern fn write(val: i32);
+extern fn print(str: string);
 
+print("Hello, world!");
 let x = read();
 while x > 0 {
     write(x * 2);

@@ -11,6 +11,8 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Bool(bool),
+    Char(char),
+    String(String),
     Array(Vec<Value>),
     Struct(HashMap<String, Value>),
 }
@@ -191,6 +193,8 @@ pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode) -> Result<(), Eva
         IrNodeValue::Float(val) => ctx.value_stack.push(Value::Float(*val)),
         IrNodeValue::Bool(val) => ctx.value_stack.push(Value::Bool(*val)),
         IrNodeValue::Null => ctx.value_stack.push(Value::Null),
+        IrNodeValue::StringLiteral(val) => ctx.value_stack.push(Value::String(val.clone())),
+        IrNodeValue::CharLiteral(val) => ctx.value_stack.push(Value::Char(*val)),
         IrNodeValue::Sequence(nodes) => {
             for node in nodes.iter() {
                 evaluate_node(ctx, node)?;

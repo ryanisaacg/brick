@@ -86,7 +86,7 @@ fn create_graph_for_node<'a>(
             // TODO: what should the exit be?
             (start_inner, end_inner)
         }
-        Name(_) | Int(_) | Float(_) | Bool(_) | Null => {
+        Name(_) | Int(_) | Float(_) | Bool(_) | Null | CharLiteral(_) | StringLiteral(_) => {
             let node = graph.add_node(CfgNode::BasicBlock(current));
             (node, node)
         }

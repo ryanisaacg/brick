@@ -92,6 +92,8 @@ pub enum AstNodeValue<'a> {
     Int(i64),
     Float(f64),
     Bool(bool),
+    CharLiteral(char),
+    StringLiteral(String),
     Null,
     BinExpr(BinOp, &'a mut AstNode<'a>, &'a mut AstNode<'a>),
     If(IfDeclaration<'a>),
@@ -172,7 +174,8 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                     children.push(field.type_);
                 }
             }
-            Name(_) | Import(_) | Int(_) | Float(_) | Bool(_) | Null => {}
+            Name(_) | Import(_) | Int(_) | Float(_) | Bool(_) | Null | CharLiteral(_)
+            | StringLiteral(_) => {}
         }
     }
 }
@@ -779,6 +782,8 @@ fn expression_pratt<'a>(
         TokenValue::False => AstNode::new(AstNodeValue::Bool(false), range),
         TokenValue::Word(word) => AstNode::new(AstNodeValue::Name(word), range),
         TokenValue::Null => AstNode::new(AstNodeValue::Null, range),
+        TokenValue::CharacterLiteral(c) => AstNode::new(AstNodeValue::CharLiteral(c), range),
+        TokenValue::StringLiteral(s) => AstNode::new(AstNodeValue::StringLiteral(s), range),
         TokenValue::Int(int) => try_decimal(source, int as i64, range)?,
         // Prefix operator
         value => {

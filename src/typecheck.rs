@@ -74,6 +74,8 @@ pub struct UnionType {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
+    Char,
+    String,
     Int32,
     Float32,
     Int64,
@@ -332,6 +334,8 @@ fn typecheck_expression<'a, 'b>(
                 ExpressionType::Primitive(PrimitiveType::Float64)
             }
         }
+        AstNodeValue::StringLiteral(_) => ExpressionType::Primitive(PrimitiveType::String),
+        AstNodeValue::CharLiteral(_) => ExpressionType::Primitive(PrimitiveType::Char),
         AstNodeValue::Null => ExpressionType::Null,
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {

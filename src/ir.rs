@@ -72,6 +72,8 @@ fn lower_node<'ast>(referenced_ids: &HashMap<ID, ID>, node: &'ast AstNode<'ast>)
         AstNodeValue::Float(x) => IrNodeValue::Float(*x),
         AstNodeValue::Bool(x) => IrNodeValue::Bool(*x),
         AstNodeValue::Null => IrNodeValue::Null,
+        AstNodeValue::CharLiteral(x) => IrNodeValue::CharLiteral(*x),
+        AstNodeValue::StringLiteral(x) => IrNodeValue::StringLiteral(x.clone()),
 
         AstNodeValue::While(cond, body) => {
             // TODO: can you assign out of a while?
@@ -269,6 +271,8 @@ pub enum IrNodeValue {
     Float(f64),
     Bool(bool),
     Null,
+    CharLiteral(char),
+    StringLiteral(String),
 
     TakeUnique(Box<IrNode>),
     TakeShared(Box<IrNode>),
