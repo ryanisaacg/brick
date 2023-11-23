@@ -1,14 +1,8 @@
-extern fn connect(): bool;
+extern fn print(val: f32);
 
 struct Point {
     x: f32,
     y: f32,
-}
-
-fn test() {
-    if connect() {
-        1 + 1;
-    }
 }
 
 fn distance_2(a: Point, b: Point): f32 {
@@ -18,8 +12,4 @@ fn distance_2(a: Point, b: Point): f32 {
     (xd * xd) + (yd * yd)
 }
 
-if connect() {
-    distance_2(Point { x: 1.0, y: 1.0 }, Point { x: 3.0, y: 1.0 })
-} else {
-    1.0
-}
+print(distance_2(Point { x: 1.0, y: 1.0 }, Point { x: 3.0, y: 1.0 }))

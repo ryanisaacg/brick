@@ -3,7 +3,13 @@ use std::{collections::HashMap, fs::read_to_string};
 
 fn main() {
     let mut bindings: HashMap<String, &ExternBinding> = HashMap::new();
-    bindings.insert("connect".to_string(), &|_| vec![Value::Bool(false)]);
+    bindings.insert("print".to_string(), &|values| {
+        let Value::Float(input) = values[0] else {
+            panic!("expected float");
+        };
+        println!("{}", input);
+        vec![]
+    });
 
     println!(
         "{:?}",
