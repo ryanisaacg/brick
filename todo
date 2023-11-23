@@ -42,8 +42,8 @@ errors:
 - functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
 
 extern:
-- extern structs?
 - extern functions are unsafe
+- externs can only do C FFI stuff, for ease of wasm backend
 
 unsafe:
 - functions can be declared unsafe

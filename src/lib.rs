@@ -6,10 +6,10 @@ use std::{
 };
 
 pub use interpreter::Value;
-use interpreter::{evaluate_node, Context};
+use interpreter::{evaluate_node, Context, ExternBinding, Function};
 use ir::IrModule;
 use thiserror::Error;
-use typecheck::{resolve::resolve_module, typecheck};
+use typecheck::{resolve::resolve_module, typecheck, ModuleDeclaration};
 
 mod arena;
 mod id;
@@ -35,24 +35,36 @@ pub enum CompileError {
 }
 
 pub fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
-    interpret_code("eval", source.to_string())
+    interpret_code("eval", source.to_string(), HashMap::new())
 }
 
+// TODO: move this to a separate crate
 pub fn interpret_code(
     source_name: &'static str,
     contents: String,
+    bindings: HashMap<String, &ExternBinding>,
 ) -> Result<Vec<Value>, CompileError> {
     // TODO: "main"?
-    let modules = compile_file("main", source_name, contents)?;
+    let CompilationResults {
+        modules,
+        declarations,
+    } = compile_file("main", source_name, contents)?;
     let mut statements = Vec::new();
     let mut functions = HashMap::new();
+
     for (name, module) in modules {
         // TODO: execute imported statements?
         if name == "main" {
             statements.extend(module.top_level_statements);
         }
         for function in module.functions {
-            functions.insert(function.id, function);
+            functions.insert(function.id, Function::Ir(function));
+        }
+    }
+    for (name, implementation) in bindings {
+        if let Some(decl) = declarations.get(&name) {
+            let id = decl.id();
+            functions.insert(id, Function::Extern(implementation));
         }
     }
 
@@ -64,11 +76,16 @@ pub fn interpret_code(
     Ok(context.values())
 }
 
+pub struct CompilationResults {
+    pub modules: HashMap<String, IrModule>,
+    pub declarations: HashMap<String, ModuleDeclaration>,
+}
+
 pub fn compile_file<'a>(
     module_name: &'a str,
     source_name: &'static str,
     contents: String,
-) -> Result<HashMap<String, IrModule>, CompileError> {
+) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
     let parse_arena = Arena::new();
@@ -79,16 +96,19 @@ pub fn compile_file<'a>(
         .flat_map(|(_name, module)| resolve_module(&module[..]).into_par_iter())
         .collect::<HashMap<_, _>>();
 
-    let ir = modules
+    let modules = modules
         .par_iter()
-        .map(move |(name, contents)| {
+        .map(|(name, contents)| {
             let types = typecheck(contents.iter(), &declarations).unwrap();
             let ir = lower_module(types);
             (name.clone(), ir)
         })
         .collect();
 
-    Ok(ir)
+    Ok(CompilationResults {
+        modules,
+        declarations,
+    })
 }
 
 struct ParseQueueEntry {

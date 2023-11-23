@@ -25,21 +25,32 @@ impl Value {
     }
 }
 
-pub fn evaluate_function(
-    fns: &HashMap<ID, IrFunction>,
+pub type ExternBinding = dyn Fn(&[Value]) -> Vec<Value>;
+
+pub enum Function<'a> {
+    Ir(IrFunction),
+    Extern(&'a ExternBinding),
+}
+
+pub fn evaluate_function<'a>(
+    fns: &HashMap<ID, Function<'a>>,
     function_to_run: ID,
     params: &[Value],
 ) -> Vec<Value> {
     let function = fns.get(&function_to_run).expect("function to exist in map");
-    let mut ctx = Context {
-        fns,
-        params,
-        variables: HashMap::new(),
-        value_stack: Vec::new(),
-    };
-    let _ = evaluate_node(&mut ctx, &function.body);
-
-    ctx.value_stack
+    match function {
+        Function::Ir(func) => {
+            let mut ctx = Context {
+                fns,
+                params,
+                variables: HashMap::new(),
+                value_stack: Vec::new(),
+            };
+            let _ = evaluate_node(&mut ctx, &func.body);
+            ctx.value_stack
+        }
+        Function::Extern(ext) => ext(params),
+    }
 }
 
 enum Numeric {
@@ -48,14 +59,14 @@ enum Numeric {
 }
 
 pub struct Context<'a> {
-    fns: &'a HashMap<ID, IrFunction>,
+    fns: &'a HashMap<ID, Function<'a>>,
     params: &'a [Value],
     variables: HashMap<ID, Value>,
     value_stack: Vec<Value>,
 }
 
 impl<'a> Context<'a> {
-    pub fn new(fns: &'a HashMap<ID, IrFunction>) -> Context {
+    pub fn new(fns: &'a HashMap<ID, Function<'a>>) -> Context {
         Context {
             fns,
             params: &[],
