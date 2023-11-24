@@ -42,7 +42,7 @@ pub fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
 pub fn interpret_code(
     source_name: &'static str,
     contents: String,
-    bindings: HashMap<String, &ExternBinding>,
+    bindings: HashMap<String, Box<ExternBinding>>,
 ) -> Result<Vec<Value>, CompileError> {
     // TODO: "main"?
     let CompilationResults {
