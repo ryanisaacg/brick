@@ -6,7 +6,6 @@ namespaces:
 - do em
 
 arithmetic:
-- add type level support for f64 and i64
 - automatically promote integers to equivalent floats
 
 strings:
@@ -17,7 +16,6 @@ strings:
 
 semantic analysis:
 - handle return, break statements in CFG parsing
-- attach types to expressions, ensure they match properly
 
 anonymous types:
 - anonymous struct
@@ -35,6 +33,8 @@ null:
 - basic null flow analysis - maybe a special operation to de-null stuff
 - ?. operator
 - ?? operator
+- ! operator (maybe?)
+- null-to-error
 
 errors:
 - functions can define `throws`
@@ -63,5 +63,4 @@ interpreter:
 - reference support
 - array support
 - union support
-- extern support
 
