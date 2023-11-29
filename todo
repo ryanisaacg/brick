@@ -2,8 +2,16 @@ import support:
 - allow imports to have nested paths
 - allow imports to include a list of things, with an optional catch-all
 
-namespaces:
-- do em
+modules:
+- modules exist and can be indexed via the dot operator
+- imports automatically creating modules of their contents
+
+interfaces:
+- interfaces exist and can be declared with associated functions
+- structs can have associated functions
+- structs can be converted to interfaces
+- unions can be converted to interfaces
+- modules can be converted to interfaces
 
 arithmetic:
 - add type level support for f64 and i64
@@ -22,6 +30,8 @@ semantic analysis:
 anonymous types:
 - anonymous struct
 - anonymous union
+- anonymous module
+- anonymous interface
 
 unions:
 - are unions the right choice?? not 100% sure
