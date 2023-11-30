@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     id::ID,
     parser::{AstNode, AstNodeValue, BinOp, IfDeclaration},
-    typecheck::{TypecheckedFile, TypecheckedFunction},
+    typecheck::{ExpressionType, StaticDeclaration, TypecheckedFile, TypecheckedFunction},
 };
 
 // TODO: should the IR be a stack machine?
@@ -14,9 +14,12 @@ pub struct IrModule {
     pub functions: Vec<IrFunction>,
 }
 
-pub fn lower_module<'ast>(module: TypecheckedFile<'ast>) -> IrModule {
+pub fn lower_module<'ast>(
+    module: TypecheckedFile<'ast>,
+    declarations: &HashMap<ID, &'ast StaticDeclaration>,
+) -> IrModule {
     let TypecheckedFile {
-        expression_types: _,
+        expression_types,
         referenced_ids,
         functions,
         top_level_statements,
@@ -24,16 +27,18 @@ pub fn lower_module<'ast>(module: TypecheckedFile<'ast>) -> IrModule {
     IrModule {
         functions: functions
             .into_iter()
-            .map(|func| lower_function(&referenced_ids, func))
+            .map(|func| lower_function(&expression_types, declarations, &referenced_ids, func))
             .collect(),
         top_level_statements: top_level_statements
             .into_iter()
-            .map(|stmt| lower_node(&referenced_ids, &stmt))
+            .map(|stmt| lower_node(&expression_types, declarations, &referenced_ids, &stmt))
             .collect(),
     }
 }
 
 fn lower_function<'ast>(
+    types: &HashMap<ID, ExpressionType>,
+    decls: &HashMap<ID, &'ast StaticDeclaration>,
     referenced_ids: &HashMap<ID, ID>,
     func: TypecheckedFunction<'ast>,
 ) -> IrFunction {
@@ -47,7 +52,7 @@ fn lower_function<'ast>(
             value: IrNodeValue::Parameter(i, param.id),
         })
         .collect();
-    instructions.push(lower_node(&referenced_ids, func.func.body));
+    instructions.push(lower_node(types, decls, &referenced_ids, func.func.body));
     IrFunction {
         id: func.id,
         name: func.name,
@@ -60,13 +65,19 @@ fn lower_function<'ast>(
 
 // TODO: include types in all IR nodes?
 
+#[derive(Clone, Debug)]
 pub struct IrFunction {
     pub id: ID,
     pub name: String,
     pub body: IrNode,
 }
 
-fn lower_node<'ast>(referenced_ids: &HashMap<ID, ID>, node: &'ast AstNode<'ast>) -> IrNode {
+fn lower_node<'ast>(
+    types: &HashMap<ID, ExpressionType>,
+    decls: &HashMap<ID, &'ast StaticDeclaration>,
+    referenced_ids: &HashMap<ID, ID>,
+    node: &'ast AstNode<'ast>,
+) -> IrNode {
     let value = match &node.value {
         AstNodeValue::Int(x) => IrNodeValue::Int(*x),
         AstNodeValue::Float(x) => IrNodeValue::Float(*x),
@@ -77,14 +88,14 @@ fn lower_node<'ast>(referenced_ids: &HashMap<ID, ID>, node: &'ast AstNode<'ast>)
 
         AstNodeValue::While(cond, body) => {
             // TODO: can you assign out of a while?
-            let cond = lower_node_alloc(referenced_ids, cond);
-            let body = lower_node_alloc(referenced_ids, body);
+            let cond = lower_node_alloc(types, decls, referenced_ids, cond);
+            let body = lower_node_alloc(types, decls, referenced_ids, body);
             IrNodeValue::While(cond, body)
         }
         AstNodeValue::Block(contents) => {
             let contents = contents
                 .iter()
-                .map(|node| lower_node(referenced_ids, node))
+                .map(|node| lower_node(types, decls, referenced_ids, node))
                 .collect();
 
             IrNodeValue::Sequence(contents)
@@ -95,32 +106,32 @@ fn lower_node<'ast>(referenced_ids: &HashMap<ID, ID>, node: &'ast AstNode<'ast>)
             if_branch,
             else_branch,
         }) => {
-            let condition = lower_node_alloc(referenced_ids, condition);
-            let if_branch = lower_node_alloc(referenced_ids, if_branch);
+            let condition = lower_node_alloc(types, decls, referenced_ids, condition);
+            let if_branch = lower_node_alloc(types, decls, referenced_ids, if_branch);
             let else_branch = else_branch
                 .as_ref()
-                .map(|else_branch| lower_node_alloc(referenced_ids, else_branch));
+                .map(|else_branch| lower_node_alloc(types, decls, referenced_ids, else_branch));
 
             IrNodeValue::If(condition, if_branch, else_branch)
         }
 
         AstNodeValue::TakeUnique(inner) => {
-            IrNodeValue::TakeUnique(lower_node_alloc(referenced_ids, inner))
+            IrNodeValue::TakeUnique(lower_node_alloc(types, decls, referenced_ids, inner))
         }
         AstNodeValue::TakeShared(inner) => {
-            IrNodeValue::Return(lower_node_alloc(referenced_ids, inner))
+            IrNodeValue::Return(lower_node_alloc(types, decls, referenced_ids, inner))
         }
 
         // Statement doesn't actually add a node - the inner expression
         // has what really counts
-        AstNodeValue::Statement(inner) => return lower_node(referenced_ids, inner),
+        AstNodeValue::Statement(inner) => return lower_node(types, decls, referenced_ids, inner),
 
         AstNodeValue::Declaration(_lvalue, rvalue) => {
             let lvalue = Box::new(IrNode::from_ast(
                 node,
                 IrNodeValue::VariableReference(node.id),
             ));
-            let rvalue = lower_node_alloc(referenced_ids, rvalue);
+            let rvalue = lower_node_alloc(types, decls, referenced_ids, rvalue);
             let statements = vec![
                 IrNode::from_ast(node, IrNodeValue::Declaration(node.id)),
                 IrNode::from_ast(node, IrNodeValue::Assignment(lvalue, rvalue)),
@@ -134,18 +145,31 @@ fn lower_node<'ast>(referenced_ids: &HashMap<ID, ID>, node: &'ast AstNode<'ast>)
         ),
 
         AstNodeValue::Return(inner) => {
-            return lower_node(referenced_ids, inner);
+            return lower_node(types, decls, referenced_ids, inner);
         }
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
-            let left = lower_node_alloc(referenced_ids, left);
+            let Some(ExpressionType::DeclaredType(expr_ty)) = types.get(&left.id) else {
+                panic!("expected left side of dot to be declared type");
+            };
             let AstNodeValue::Name(name) = &right.value else {
                 unreachable!()
             };
-            IrNodeValue::Dot(left, name.clone())
+            if let Some(StaticDeclaration::Module(module)) = decls.get(expr_ty) {
+                IrNodeValue::VariableReference(
+                    module
+                        .exports
+                        .get(name)
+                        .expect("module export to exist")
+                        .id(),
+                )
+            } else {
+                let left = lower_node_alloc(types, decls, referenced_ids, left);
+                IrNodeValue::Access(left, name.clone())
+            }
         }
         AstNodeValue::BinExpr(op, left, right) => {
-            let left = lower_node_alloc(referenced_ids, left);
-            let right = lower_node_alloc(referenced_ids, right);
+            let left = lower_node_alloc(types, decls, referenced_ids, left);
+            let right = lower_node_alloc(types, decls, referenced_ids, right);
 
             match op {
                 BinOp::AddAssign => IrNodeValue::Assignment(
@@ -195,10 +219,10 @@ fn lower_node<'ast>(referenced_ids: &HashMap<ID, ID>, node: &'ast AstNode<'ast>)
             }
         }
         AstNodeValue::Call(func, params) => {
-            let func = lower_node_alloc(referenced_ids, func);
+            let func = lower_node_alloc(types, decls, referenced_ids, func);
             let params = params
                 .iter()
-                .map(|param| lower_node(referenced_ids, param))
+                .map(|param| lower_node(types, decls, referenced_ids, param))
                 .collect();
             IrNodeValue::Call(func, params)
         }
@@ -208,7 +232,12 @@ fn lower_node<'ast>(referenced_ids: &HashMap<ID, ID>, node: &'ast AstNode<'ast>)
                 .expect("referenced fields to be filled in");
             let fields = fields
                 .iter()
-                .map(|(name, field)| (name.clone(), lower_node(referenced_ids, field)))
+                .map(|(name, field)| {
+                    (
+                        name.clone(),
+                        lower_node(types, decls, referenced_ids, field),
+                    )
+                })
                 .collect();
             IrNodeValue::StructLiteral(*id, fields)
         }
@@ -230,10 +259,12 @@ fn lower_node<'ast>(referenced_ids: &HashMap<ID, ID>, node: &'ast AstNode<'ast>)
 }
 
 fn lower_node_alloc<'ast, 'ir>(
+    types: &HashMap<ID, ExpressionType>,
+    decls: &HashMap<ID, &'ast StaticDeclaration>,
     context: &HashMap<ID, ID>,
     node: &'ast AstNode<'ast>,
 ) -> Box<IrNode> {
-    Box::new(lower_node(context, node))
+    Box::new(lower_node(types, decls, context, node))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -260,7 +291,7 @@ pub enum IrNodeValue {
     Destructor(ID),
 
     Call(Box<IrNode>, Vec<IrNode>),
-    Dot(Box<IrNode>, String),
+    Access(Box<IrNode>, String),
     Assignment(Box<IrNode>, Box<IrNode>),
     Index(Box<IrNode>, Box<IrNode>),
     BinOp(IrBinOp, Box<IrNode>, Box<IrNode>),

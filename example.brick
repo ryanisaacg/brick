@@ -1,11 +1,9 @@
-extern fn read(): i32;
-extern fn write(val: i32);
-extern fn print(str: string);
+import stdio
 
-print("Hello, world!");
-let x = read();
+(stdio.print)("I will double your numbers");
+let x = (stdio.read)();
 while x > 0 {
-    write(x * 2);
-    x = read();
+    (stdio.write)(x * 2);
+    x = (stdio.read)();
 }
 

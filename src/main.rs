@@ -1,9 +1,9 @@
 use brick::{interpret_code, interpreter::ExternBinding, Value};
-use std::{collections::HashMap, fs::read_to_string, future::Future, io::stdin};
+use std::{collections::HashMap, fs::read_to_string, future::Future, io::stdin, sync::Arc};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let mut bindings: HashMap<String, Box<ExternBinding>> = HashMap::new();
+    let mut bindings = HashMap::new();
     bindings.insert(
         "read".to_string(),
         ext_fn(|_| async {
@@ -61,9 +61,9 @@ async fn main() {
     );
 }
 
-fn ext_fn<F>(closure: impl Fn(Vec<Value>) -> F + Send + Sync + 'static) -> Box<ExternBinding>
+fn ext_fn<F>(closure: impl Fn(Vec<Value>) -> F + Send + Sync + 'static) -> Arc<ExternBinding>
 where
     F: Future<Output = Vec<Value>> + Send + Sync + 'static,
 {
-    Box::new(move |x| Box::pin(closure(x)))
+    Arc::new(move |x| Box::pin(closure(x)))
 }

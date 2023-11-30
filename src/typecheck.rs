@@ -16,7 +16,7 @@ pub mod resolve;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpressionType {
     Primitive(PrimitiveType),
-    Named(ID),
+    DeclaredType(ID),
     Pointer(PointerKind, Box<ExpressionType>),
     Array(Box<ExpressionType>),
     Null,
@@ -29,28 +29,42 @@ pub enum PointerKind {
     Unique,
 }
 
-pub enum ModuleDeclaration {
+#[derive(Debug, PartialEq, Eq)]
+pub enum StaticDeclaration {
     Func(FuncType),
     Struct(StructType),
     Union(UnionType),
+    Module(ModuleType),
 }
 
-impl ModuleDeclaration {
+impl StaticDeclaration {
     pub fn id(&self) -> ID {
         match self {
-            ModuleDeclaration::Func(inner) => inner.id,
-            ModuleDeclaration::Struct(inner) => inner.id,
-            ModuleDeclaration::Union(inner) => inner.id,
+            StaticDeclaration::Func(inner) => inner.id,
+            StaticDeclaration::Struct(inner) => inner.id,
+            StaticDeclaration::Union(inner) => inner.id,
+            StaticDeclaration::Module(inner) => inner.id,
         }
     }
 
     pub fn expr(&self) -> ExpressionType {
-        match self {
-            ModuleDeclaration::Func(inner) => ExpressionType::Named(inner.id),
-            ModuleDeclaration::Struct(inner) => ExpressionType::Named(inner.id),
-            ModuleDeclaration::Union(inner) => ExpressionType::Named(inner.id),
+        ExpressionType::DeclaredType(self.id())
+    }
+
+    pub fn visit<'a>(&'a self, visitor: &mut impl FnMut(&'a StaticDeclaration)) {
+        visitor(self);
+        if let StaticDeclaration::Module(module) = self {
+            for child in module.exports.values() {
+                child.visit(visitor);
+            }
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ModuleType {
+    pub id: ID,
+    pub exports: HashMap<String, StaticDeclaration>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -108,16 +122,16 @@ pub enum TypecheckError {
 
 struct Declarations<'a> {
     name_to_expr: HashMap<String, (ID, ExpressionType)>,
-    id_to_decl: HashMap<ID, &'a ModuleDeclaration>,
+    id_to_decl: HashMap<ID, &'a StaticDeclaration>,
 }
 
 impl<'a> Declarations<'a> {
-    fn decl(&self, id: &ID) -> Option<&ModuleDeclaration> {
+    fn decl(&self, id: &ID) -> Option<&StaticDeclaration> {
         self.id_to_decl.get(id).copied()
     }
 
     fn name_to_func(&self, name: &str) -> Option<&FuncType> {
-        if let (_, ExpressionType::Named(id)) = self.name_to_expr.get(name)? {
+        if let (_, ExpressionType::DeclaredType(id)) = self.name_to_expr.get(name)? {
             Some(self.id_to_func(&id))
         } else {
             None
@@ -127,7 +141,7 @@ impl<'a> Declarations<'a> {
     fn id_to_func(&self, id: &ID) -> &FuncType {
         let expr = self.decl(id).expect("function with ID should exist");
         match expr {
-            ModuleDeclaration::Func(inner) => inner,
+            StaticDeclaration::Func(inner) => inner,
             _ => panic!("ID unexpectedly pointed to non-function"),
         }
     }
@@ -135,7 +149,7 @@ impl<'a> Declarations<'a> {
     fn id_to_struct(&self, id: &ID) -> &StructType {
         let expr = self.decl(id).expect("struct with ID should exist");
         match expr {
-            ModuleDeclaration::Struct(inner) => inner,
+            StaticDeclaration::Struct(inner) => inner,
             _ => panic!("ID unexpectedly pointed to non-struct"),
         }
     }
@@ -157,7 +171,7 @@ pub struct TypecheckedFunction<'a> {
 // TODO: pass import namespace in
 pub fn typecheck<'a>(
     file: impl Iterator<Item = &'a AstNode<'a>>,
-    declarations: &HashMap<String, ModuleDeclaration>,
+    declarations: &HashMap<String, StaticDeclaration>,
 ) -> Result<TypecheckedFile<'a>, TypecheckError> {
     // TODO: verify validity of type and function declarations
 
@@ -166,7 +180,9 @@ pub fn typecheck<'a>(
 
     for (name, value) in declarations {
         name_to_expr.insert(name.clone(), (value.id(), value.expr()));
-        id_to_decl.insert(value.id(), value);
+        value.visit(&mut |decl| {
+            id_to_decl.insert(decl.id(), decl);
+        });
     }
 
     let context = Declarations {
@@ -347,7 +363,7 @@ fn typecheck_expression<'a, 'b>(
                 referenced_id,
                 context,
             )?;
-            let ExpressionType::Named(id) = left else {
+            let ExpressionType::DeclaredType(id) = left else {
                 panic!("TODO: left side of dot operator");
             };
             let AstNodeValue::Name(name) = &right.value else {
@@ -356,18 +372,23 @@ fn typecheck_expression<'a, 'b>(
             // TODO: fallible
             let lhs_type = context.decl(&id);
             match lhs_type {
-                Some(ModuleDeclaration::Struct(lhs_type)) => lhs_type
+                Some(StaticDeclaration::Struct(lhs_type)) => lhs_type
                     .fields
                     .get(name)
                     .expect("TODO: field is present")
                     .clone(),
-                Some(ModuleDeclaration::Union(lhs_type)) => ExpressionType::Nullable(Box::new(
+                Some(StaticDeclaration::Union(lhs_type)) => ExpressionType::Nullable(Box::new(
                     lhs_type
                         .variants
                         .get(name)
                         .expect("TODO: variant is present")
                         .clone(),
                 )),
+                Some(StaticDeclaration::Module(lhs_type)) => lhs_type
+                    .exports
+                    .get(name)
+                    .expect("TODO: export is present")
+                    .expr(),
                 _ => todo!("illegal lhs type"),
             }
         }
@@ -624,7 +645,7 @@ fn typecheck_expression<'a, 'b>(
             expr_ty
         }
         AstNodeValue::Call(func, args) => {
-            let ExpressionType::Named(func) = typecheck_expression(
+            let ExpressionType::DeclaredType(func) = typecheck_expression(
                 func,
                 outer_scopes,
                 current_scope,
@@ -661,7 +682,7 @@ fn typecheck_expression<'a, 'b>(
             func.returns.clone()
         }
         AstNodeValue::StructLiteral { name, fields } => {
-            let (ref_id, ExpressionType::Named(struct_type_id)) =
+            let (ref_id, ExpressionType::DeclaredType(struct_type_id)) =
                 resolve_name(name, current_scope, outer_scopes)
                     .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?
             else {
@@ -694,7 +715,7 @@ fn typecheck_expression<'a, 'b>(
                 }
             }
 
-            ExpressionType::Named(struct_type_id)
+            ExpressionType::DeclaredType(struct_type_id)
         }
         // TODO: assert that this is an lvalue
         AstNodeValue::TakeUnique(inner) => ExpressionType::Pointer(

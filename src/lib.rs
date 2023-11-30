@@ -9,7 +9,7 @@ pub use interpreter::Value;
 use interpreter::{evaluate_node, Context, ExternBinding, Function};
 use ir::IrModule;
 use thiserror::Error;
-use typecheck::{resolve::resolve_module, typecheck, ModuleDeclaration};
+use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
 
 mod arena;
 mod id;
@@ -24,7 +24,7 @@ pub mod typecheck;
 use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
-use crate::ir::lower_module;
+use crate::{id::ID, ir::lower_module, typecheck::ModuleType};
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -42,7 +42,7 @@ pub async fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
 pub async fn interpret_code(
     source_name: &'static str,
     contents: String,
-    bindings: HashMap<String, Box<ExternBinding>>,
+    mut bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
 ) -> Result<Vec<Value>, CompileError> {
     // TODO: "main"?
     let CompilationResults {
@@ -61,16 +61,22 @@ pub async fn interpret_code(
             functions.insert(function.id, Function::Ir(function));
         }
     }
-    for (name, implementation) in bindings {
-        if let Some(decl) = declarations.get(&name) {
-            let id = decl.id();
-            functions.insert(id, Function::Extern(implementation));
+    let module = StaticDeclaration::Module(ModuleType { id: ID::new(), exports: declarations });
+    module.visit(&mut |decl| {
+        if let StaticDeclaration::Module(ModuleType { exports, .. }) = decl {
+            for (name, decl) in exports.iter() {
+                if let Some(implementation) = bindings.remove(name) {
+                    let id = decl.id();
+                    functions.insert(id, Function::Extern(implementation));
+                }
+            }
         }
-    }
+    });
 
-    let mut context = Context::new(&functions);
+    let mut context = Context::new(vec![]);
+    context.add_fns(&functions);
     for statement in statements {
-        let _ = evaluate_node(&mut context, &statement).await;
+        let _ = evaluate_node(&functions, &mut context, &statement).await;
     }
 
     Ok(context.values())
@@ -78,7 +84,7 @@ pub async fn interpret_code(
 
 pub struct CompilationResults {
     pub modules: HashMap<String, IrModule>,
-    pub declarations: HashMap<String, ModuleDeclaration>,
+    pub declarations: HashMap<String, StaticDeclaration>,
 }
 
 pub fn compile_file<'a>(
@@ -93,14 +99,22 @@ pub fn compile_file<'a>(
 
     let declarations = modules
         .par_iter()
-        .flat_map(|(_name, module)| resolve_module(&module[..]).into_par_iter())
+        .map(|(name, module)| {
+            let name = name.clone();
+            let module = StaticDeclaration::Module(ModuleType {
+                id: ID::new(),
+                exports: resolve_module(&module[..]),
+            });
+            (name, module)
+        })
         .collect::<HashMap<_, _>>();
+    let id_decls: HashMap<_, _> = declarations.values().map(|decl| (decl.id(), decl)).collect();
 
     let modules = modules
         .par_iter()
         .map(|(name, contents)| {
             let types = typecheck(contents.iter(), &declarations).unwrap();
-            let ir = lower_module(types);
+            let ir = lower_module(types, &id_decls);
             (name.clone(), ir)
         })
         .collect();

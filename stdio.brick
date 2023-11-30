@@ -1,0 +1,3 @@
+extern fn read(): i32;
+extern fn write(val: i32);
+extern fn print(str: string);

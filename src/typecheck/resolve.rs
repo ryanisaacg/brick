@@ -6,11 +6,11 @@ use crate::parser::{
 };
 
 use super::{
-    ExpressionType, FuncType, ModuleDeclaration, PointerKind, PrimitiveType, StructType,
+    ExpressionType, FuncType, PointerKind, PrimitiveType, StaticDeclaration, StructType,
     TypecheckError, UnionType,
 };
 
-pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, ModuleDeclaration> {
+pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, StaticDeclaration> {
     let mut names_to_declarations = HashMap::new();
     for statement in source.iter() {
         match &statement.value {
@@ -30,7 +30,7 @@ pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, ModuleDeclarati
 // TODO
 pub fn resolve_top_level_declarations(
     names_to_declarations: &HashMap<String, &AstNode<'_>>,
-) -> Result<HashMap<String, ModuleDeclaration>, TypecheckError> {
+) -> Result<HashMap<String, StaticDeclaration>, TypecheckError> {
     names_to_declarations
         .iter()
         .map(|(name, node)| {
@@ -38,7 +38,7 @@ pub fn resolve_top_level_declarations(
                 name.clone(),
                 match &node.value {
                     AstNodeValue::StructDeclaration(StructDeclarationValue { fields, .. }) => {
-                        ModuleDeclaration::Struct(StructType {
+                        StaticDeclaration::Struct(StructType {
                             id: node.id,
                             fields: fields
                                 .iter()
@@ -52,7 +52,7 @@ pub fn resolve_top_level_declarations(
                         })
                     }
                     AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, .. }) => {
-                        ModuleDeclaration::Union(UnionType {
+                        StaticDeclaration::Union(UnionType {
                             id: node.id,
                             variants: variants
                                 .iter()
@@ -75,7 +75,7 @@ pub fn resolve_top_level_declarations(
                         params,
                         returns,
                         ..
-                    }) => ModuleDeclaration::Func(FuncType {
+                    }) => StaticDeclaration::Func(FuncType {
                         id: node.id,
                         params: params
                             .iter()
@@ -109,7 +109,7 @@ pub fn resolve_type_name(
             "f64" => ExpressionType::Primitive(PrimitiveType::Float64),
             "char" => ExpressionType::Primitive(PrimitiveType::Char),
             "string" => ExpressionType::Primitive(PrimitiveType::String),
-            other => ExpressionType::Named(
+            other => ExpressionType::DeclaredType(
                 types
                     .get(other)
                     .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?
