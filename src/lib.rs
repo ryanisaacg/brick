@@ -34,12 +34,12 @@ pub enum CompileError {
     FilesystemError(io::Error, String),
 }
 
-pub fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
-    interpret_code("eval", source.to_string(), HashMap::new())
+pub async fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
+    interpret_code("eval", source.to_string(), HashMap::new()).await
 }
 
 // TODO: move this to a separate crate
-pub fn interpret_code(
+pub async fn interpret_code(
     source_name: &'static str,
     contents: String,
     bindings: HashMap<String, Box<ExternBinding>>,
@@ -70,7 +70,7 @@ pub fn interpret_code(
 
     let mut context = Context::new(&functions);
     for statement in statements {
-        let _ = evaluate_node(&mut context, &statement);
+        let _ = evaluate_node(&mut context, &statement).await;
     }
 
     Ok(context.values())

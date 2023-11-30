@@ -29,7 +29,8 @@ impl Value {
     }
 }
 
-pub type ExternBinding = dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Vec<Value>> + Send>> + Send + Sync;
+pub type ExternBinding =
+    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Vec<Value>> + Send>> + Send + Sync;
 
 pub enum Function {
     Ir(IrFunction),
