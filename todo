@@ -14,7 +14,6 @@ interfaces:
 - modules can be converted to interfaces
 
 arithmetic:
-- add type level support for f64 and i64
 - automatically promote integers to equivalent floats
 
 strings:
@@ -25,7 +24,6 @@ strings:
 
 semantic analysis:
 - handle return, break statements in CFG parsing
-- attach types to expressions, ensure they match properly
 
 anonymous types:
 - anonymous struct
@@ -35,7 +33,7 @@ anonymous types:
 
 unions:
 - are unions the right choice?? not 100% sure
-- rename to enum?
+- rename to enum? variant?
 - union lvalues are special - can only be assigned to
 - unions can extend unions (refer to fields with nested access?)
 - unions can have empty variants
@@ -45,6 +43,8 @@ null:
 - basic null flow analysis - maybe a special operation to de-null stuff
 - ?. operator
 - ?? operator
+- ! operator (maybe?)
+- null-to-error
 
 errors:
 - functions can define `throws`
@@ -52,6 +52,23 @@ errors:
 - try operator returns an error if one exists
 - functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
 - allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
+
+borrow checker:
+- enforce uniqueness of unique borrows
+- can't use original binding when borrowed
+- can't store borrows in types, or return them
+
+coroutines:
+- decide on some coroutine facility
+- coroutines hold parameter borrows for their lifetime
+
+generic programming:
+- functions can take type parameters and typecheck properly
+- types can be parameterized
+- structs and unions can have associated functions
+- there are interfaces which can require specific associated functions
+- structs and unions can be passed in place of an interface
+- interfaces can constrain generic parameters
 
 extern:
 - extern functions are unsafe
@@ -73,5 +90,7 @@ interpreter:
 - reference support
 - array support
 - union support
-- extern support
+
+units of measure:
+- design some system to separate units of measure into various domains (e.g. a "screen pixel" different from a "logical pixel")
 

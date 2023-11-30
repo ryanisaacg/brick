@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, future::Future, pin::Pin};
+
+use async_recursion::async_recursion;
 
 use crate::{
     id::ID,
@@ -27,17 +29,18 @@ impl Value {
     }
 }
 
-pub type ExternBinding = dyn Fn(&[Value]) -> Vec<Value>;
+pub type ExternBinding =
+    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Vec<Value>> + Send>> + Send + Sync;
 
-pub enum Function<'a> {
+pub enum Function {
     Ir(IrFunction),
-    Extern(&'a ExternBinding),
+    Extern(Box<ExternBinding>),
 }
 
-pub fn evaluate_function<'a>(
-    fns: &HashMap<ID, Function<'a>>,
+pub async fn evaluate_function<'a>(
+    fns: &HashMap<ID, Function>,
     function_to_run: ID,
-    params: &[Value],
+    params: Vec<Value>,
 ) -> Vec<Value> {
     let function = fns.get(&function_to_run).expect("function to exist in map");
     match function {
@@ -51,7 +54,7 @@ pub fn evaluate_function<'a>(
             let _ = evaluate_node(&mut ctx, &func.body);
             ctx.value_stack
         }
-        Function::Extern(ext) => ext(params),
+        Function::Extern(ext) => ext(params).await,
     }
 }
 
@@ -61,17 +64,17 @@ enum Numeric {
 }
 
 pub struct Context<'a> {
-    fns: &'a HashMap<ID, Function<'a>>,
-    params: &'a [Value],
+    fns: &'a HashMap<ID, Function>,
+    params: Vec<Value>,
     variables: HashMap<ID, Value>,
     value_stack: Vec<Value>,
 }
 
 impl<'a> Context<'a> {
-    pub fn new(fns: &'a HashMap<ID, Function<'a>>) -> Context {
+    pub fn new(fns: &'a HashMap<ID, Function>) -> Context {
         Context {
             fns,
-            params: &[],
+            params: Vec::new(),
             variables: HashMap::new(),
             value_stack: Vec::new(),
         }
@@ -87,7 +90,8 @@ pub enum EvaluationStop {
 }
 
 // Kinda a hack: when we return, unwind the stack via Result
-pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode) -> Result<(), EvaluationStop> {
+#[async_recursion]
+pub async fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode) -> Result<(), EvaluationStop> {
     match &node.value {
         IrNodeValue::Parameter(idx, id) => {
             ctx.variables.insert(*id, ctx.params[*idx].clone());
@@ -107,16 +111,16 @@ pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode) -> Result<(), Eva
             };
             // TODO: reverse order?
             for param in params.iter().rev() {
-                evaluate_node(ctx, param)?;
+                evaluate_node(ctx, param).await?;
             }
             let params: Vec<_> = (0..params.len())
                 .map(|_| ctx.value_stack.pop().expect("param on stack"))
                 .collect();
-            let results = evaluate_function(ctx.fns, *fn_id, &params[..]);
-            ctx.value_stack.extend(results.into_iter());
+            let results = evaluate_function(ctx.fns, *fn_id, params);
+            ctx.value_stack.extend(results.await.into_iter());
         }
         IrNodeValue::Dot(val, name) => {
-            evaluate_node(ctx, val)?;
+            evaluate_node(ctx, val).await?;
             let Some(Value::Struct(val)) = ctx.value_stack.pop() else {
                 panic!("ICE: left side of '.' must be struct");
             };
@@ -125,7 +129,7 @@ pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode) -> Result<(), Eva
                 .push(val.get(name).expect("field must be present").clone());
         }
         IrNodeValue::Assignment(lvalue, rvalue) => {
-            evaluate_node(ctx, rvalue)?;
+            evaluate_node(ctx, rvalue).await?;
             // TODO: more lvalues
             let IrNodeValue::VariableReference(id) = &lvalue.value else {
                 todo!("complex lvalues");
@@ -139,8 +143,8 @@ pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode) -> Result<(), Eva
         }
         // TODO: floating arithmetic
         IrNodeValue::BinOp(op, left, right) => {
-            evaluate_node(ctx, right)?;
-            evaluate_node(ctx, left)?;
+            evaluate_node(ctx, right).await?;
+            evaluate_node(ctx, left).await?;
             let left = ctx
                 .value_stack
                 .pop()
@@ -186,7 +190,7 @@ pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode) -> Result<(), Eva
             ctx.value_stack.push(val);
         }
         IrNodeValue::Return(val) => {
-            evaluate_node(ctx, val)?;
+            evaluate_node(ctx, val).await?;
             return Err(EvaluationStop::Returned);
         }
         IrNodeValue::Int(val) => ctx.value_stack.push(Value::Int(*val)),
@@ -197,34 +201,34 @@ pub fn evaluate_node<'a>(ctx: &mut Context<'a>, node: &IrNode) -> Result<(), Eva
         IrNodeValue::CharLiteral(val) => ctx.value_stack.push(Value::Char(*val)),
         IrNodeValue::Sequence(nodes) => {
             for node in nodes.iter() {
-                evaluate_node(ctx, node)?;
+                evaluate_node(ctx, node).await?;
             }
         }
         IrNodeValue::If(cond, if_branch, else_branch) => {
-            evaluate_node(ctx, cond)?;
+            evaluate_node(ctx, cond).await?;
             let Some(Value::Bool(cond)) = ctx.value_stack.pop() else {
                 panic!("ICE: expected boolean");
             };
             if cond {
-                evaluate_node(ctx, if_branch)?;
+                evaluate_node(ctx, if_branch).await?;
             } else if let Some(else_branch) = else_branch {
-                evaluate_node(ctx, else_branch)?;
+                evaluate_node(ctx, else_branch).await?;
             }
         }
         IrNodeValue::While(cond, block) => loop {
-            evaluate_node(ctx, cond)?;
+            evaluate_node(ctx, cond).await?;
             let Some(Value::Bool(cond)) = ctx.value_stack.pop() else {
                 panic!("ICE: expected boolean");
             };
             if !cond {
                 break;
             }
-            evaluate_node(ctx, block)?;
+            evaluate_node(ctx, block).await?;
         },
         IrNodeValue::StructLiteral(_, fields) => {
             let mut values = HashMap::new();
             for (field, value) in fields.iter() {
-                evaluate_node(ctx, value)?;
+                evaluate_node(ctx, value).await?;
                 values.insert(field.clone(), ctx.value_stack.pop().unwrap());
             }
             ctx.value_stack.push(Value::Struct(values));
