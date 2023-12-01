@@ -1,9 +1,9 @@
 import stdio
 
-(stdio.print)("I will double your numbers");
-let x = (stdio.read)();
+stdio.print("I will double your numbers");
+let x = stdio.read();
 while x > 0 {
-    (stdio.write)(x * 2);
-    x = (stdio.read)();
+    stdio.write(x * 2);
+    x = stdio.read();
 }
 

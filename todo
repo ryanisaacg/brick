@@ -2,9 +2,6 @@ import support:
 - allow imports to have nested paths (sugar for recursively expanding?)
 - allow imports to include a list of things, with an optional catch-all
 
-grammar:
-- a.b() should be parsed as (a.b)() not a.(b())
-
 modules:
 - modules can be indexed in a type expression context
 - modules can be indexed in a struct / variant literal context
