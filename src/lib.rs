@@ -113,7 +113,7 @@ pub fn compile_file<'a>(
     let modules = modules
         .par_iter()
         .map(|(name, contents)| {
-            let types = typecheck(contents.iter(), &declarations).unwrap();
+            let types = typecheck(contents.iter(), name, &declarations).unwrap();
             let ir = lower_module(types, &id_decls);
             (name.clone(), ir)
         })

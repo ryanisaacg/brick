@@ -171,6 +171,7 @@ pub struct TypecheckedFunction<'a> {
 // TODO: pass import namespace in
 pub fn typecheck<'a>(
     file: impl Iterator<Item = &'a AstNode<'a>>,
+    current_module_name: &str,
     declarations: &HashMap<String, StaticDeclaration>,
 ) -> Result<TypecheckedFile<'a>, TypecheckError> {
     // TODO: verify validity of type and function declarations
@@ -179,7 +180,16 @@ pub fn typecheck<'a>(
     let mut id_to_decl = HashMap::new();
 
     for (name, value) in declarations {
-        name_to_expr.insert(name.clone(), (value.id(), value.expr()));
+        match value {
+            StaticDeclaration::Module(module) if current_module_name == name => {
+                for (name, value) in module.exports.iter() {
+                    name_to_expr.insert(name.clone(), (value.id(), value.expr()));
+                }
+            }
+            _ => {
+                name_to_expr.insert(name.clone(), (value.id(), value.expr()));
+            }
+        }
         value.visit(&mut |decl| {
             id_to_decl.insert(decl.id(), decl);
         });
@@ -245,7 +255,7 @@ fn typecheck_function<'a, 'b>(
     referenced_id: &'b mut HashMap<ID, ID>,
 ) -> Result<(), TypecheckError> {
     let Some(function_type) = context.name_to_func(&function.name) else {
-        panic!("expected function to be found in the module");
+        panic!("expected function to be found in the context");
     };
     let parameters = function
         .params
