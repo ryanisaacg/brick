@@ -1,8 +1,8 @@
 use assert_matches::assert_matches;
 use brick::{eval, Value};
 
-#[test]
-fn assignment() {
+#[tokio::test]
+async fn assignment() {
     let result = eval(
         r#"
         let x = 1;
@@ -10,23 +10,25 @@ fn assignment() {
         x
     "#,
     )
+    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int(3)]);
 }
 
-#[test]
+#[tokio::test]
 #[should_panic]
-fn declaration_not_assignment() {
+async fn declaration_not_assignment() {
     eval(
         r#"
         let x += 1;
     "#,
     )
+    .await
     .unwrap();
 }
 
-#[test]
-fn numeric_assignment() {
+#[tokio::test]
+async fn numeric_assignment() {
     let result = eval(
         r#"
     let x = 1;
@@ -37,6 +39,7 @@ fn numeric_assignment() {
     x
     "#,
     )
+    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int(4)]);
 }
