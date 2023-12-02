@@ -31,7 +31,7 @@ impl Value {
 }
 
 pub type ExternBinding =
-    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Vec<Value>> + Send>> + Send + Sync;
+    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>> + Send + Sync;
 
 #[derive(Clone)]
 pub enum Function {
@@ -52,13 +52,15 @@ pub async fn evaluate_function(
     fns: &HashMap<ID, Function>,
     function: &Function,
     params: Vec<Value>,
-) -> Vec<Value> {
+) -> Option<Value> {
     match function {
         Function::Ir(func) => {
             let mut ctx = Context::new(params);
             ctx.add_fns(fns);
-            let _ = evaluate_node(fns, &mut ctx, &func.body);
-            ctx.value_stack
+            match evaluate_node(fns, &mut ctx, &func.body).await {
+                Ok(_) => ctx.value_stack.pop(),
+                Err(EvaluationStop::Returned(val)) => Some(val),
+            }
         }
         Function::Extern(ext) => ext(params).await,
     }
@@ -96,7 +98,7 @@ impl Context {
 }
 
 pub enum EvaluationStop {
-    Returned,
+    Returned(Value),
 }
 
 // Kinda a hack: when we return, unwind the stack via Result
@@ -201,7 +203,7 @@ pub async fn evaluate_node(fns: &HashMap<ID, Function>, ctx: &mut Context, node:
         }
         IrNodeValue::Return(val) => {
             evaluate_node(fns, ctx, val).await?;
-            return Err(EvaluationStop::Returned);
+            return Err(EvaluationStop::Returned(dbg!(ctx.value_stack.pop().expect("value on stack"))));
         }
         IrNodeValue::Int(val) => ctx.value_stack.push(Value::Int(*val)),
         IrNodeValue::Float(val) => ctx.value_stack.push(Value::Float(*val)),

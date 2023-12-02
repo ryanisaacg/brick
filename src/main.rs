@@ -11,7 +11,7 @@ async fn main() {
             stdin()
                 .read_line(&mut input)
                 .expect("should be able to read from stdin");
-            vec![Value::Int(input.trim().parse().expect("should be an int"))]
+            Some(Value::Int(input.trim().parse().expect("should be an int")))
         }),
     );
     bindings.insert(
@@ -21,7 +21,7 @@ async fn main() {
                 panic!("expected int");
             };
             println!("{}", input);
-            vec![]
+            None
         }),
     );
     bindings.insert(
@@ -35,7 +35,7 @@ async fn main() {
             stdin()
                 .read_line(&mut input)
                 .expect("should be able to read from stdin");
-            vec![Value::String(input.trim().to_string())]
+            Some(Value::String(input.trim().to_string()))
         }),
     );
     bindings.insert(
@@ -45,7 +45,7 @@ async fn main() {
                 panic!("expected string");
             };
             println!("{}", input);
-            vec![]
+            None
         }),
     );
 
@@ -63,7 +63,7 @@ async fn main() {
 
 fn ext_fn<F>(closure: impl Fn(Vec<Value>) -> F + Send + Sync + 'static) -> Arc<ExternBinding>
 where
-    F: Future<Output = Vec<Value>> + Send + Sync + 'static,
+    F: Future<Output = Option<Value>> + Send + Sync + 'static,
 {
     Arc::new(move |x| Box::pin(closure(x)))
 }
