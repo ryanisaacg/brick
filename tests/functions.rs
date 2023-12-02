@@ -35,3 +35,16 @@ fib(5)
     .unwrap();
     assert_matches!(&result[..], [Value::Int(5)]);
 }
+
+#[tokio::test]
+#[should_panic]
+async fn return_mismatch() {
+    eval(r#"
+fn function(): i32 {
+    "not an i32"
+}
+"#)
+    .await
+    .unwrap();
+}
+

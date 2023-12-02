@@ -264,7 +264,7 @@ fn typecheck_function<'a, 'b>(
         .map(|(name, param)| (name.name.clone(), (name.id, param.clone())))
         .collect();
 
-    typecheck_expression(
+    let return_value = typecheck_expression(
         &function.body,
         &[&context.name_to_expr, &parameters],
         &mut HashMap::new(),
@@ -272,8 +272,16 @@ fn typecheck_function<'a, 'b>(
         referenced_id,
         context,
     )?;
-    // TODO: ensure that the return type matches the function's declared return type
     let _cfg = build_control_flow_graph(&function.body);
+    // TODO: check all the return values for matching
+    // TODO: check to see reachability
+
+    if !is_assignable_to(&function_type.returns, &return_value) {
+        return Err(TypecheckError::TypeMismatch {
+            expected: function_type.returns.clone(),
+            received: return_value,
+        });
+    }
 
     Ok(())
 }
