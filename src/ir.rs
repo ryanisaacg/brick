@@ -145,7 +145,7 @@ fn lower_node<'ast>(
         ),
 
         AstNodeValue::Return(inner) => {
-            return lower_node(types, decls, referenced_ids, inner);
+            IrNodeValue::Return(lower_node_alloc(types, decls, referenced_ids, inner))
         }
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let Some(ExpressionType::DeclaredType(expr_ty)) = types.get(&left.id) else {
