@@ -7,6 +7,10 @@ modules:
 - modules can be indexed in a struct / variant literal context
 - modules can be declared explicitly
 
+returns:
+- typecheck returns
+- allow void returns
+
 interfaces:
 - interfaces exist and can be declared with associated functions
 - structs can have associated functions
