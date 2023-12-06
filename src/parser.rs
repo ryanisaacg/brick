@@ -48,7 +48,7 @@ pub struct FunctionDeclarationValue<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct ExternFunctionBindingValue<'a> {
+pub struct FunctionHeaderValue<'a> {
     pub name: String,
     pub params: Vec<NameAndType<'a>>,
     pub returns: Option<&'a mut AstNode<'a>>,
@@ -58,6 +58,7 @@ pub struct ExternFunctionBindingValue<'a> {
 pub struct StructDeclarationValue<'a> {
     pub name: String,
     pub fields: Vec<NameAndType<'a>>,
+    pub associated_functions: Vec<AstNode<'a>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -70,6 +71,7 @@ pub struct UnionDeclarationValue<'a> {
 pub struct InterfaceDeclarationValue<'a> {
     pub name: String,
     pub fields: Vec<NameAndType<'a>>,
+    pub associated_functions: Vec<AstNode<'a>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -83,10 +85,11 @@ pub struct IfDeclaration<'a> {
 pub enum AstNodeValue<'a> {
     // Statements
     FunctionDeclaration(FunctionDeclarationValue<'a>),
-    ExternFunctionBinding(ExternFunctionBindingValue<'a>),
+    ExternFunctionBinding(FunctionHeaderValue<'a>),
     StructDeclaration(StructDeclarationValue<'a>),
     UnionDeclaration(UnionDeclarationValue<'a>),
     InterfaceDeclaration(InterfaceDeclarationValue<'a>),
+    RequiredFunction(FunctionHeaderValue<'a>),
     Declaration(String, &'a mut AstNode<'a>),
     Import(String),
     Return(&'a mut AstNode<'a>),
@@ -130,7 +133,6 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
 
         match &self.value {
             Declaration(_, child)
-            | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { body: child, .. })
             | TakeShared(child)
             | TakeUnique(child)
             | ArrayLiteralLength(child, _)
@@ -179,8 +181,34 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                     children.push(expression);
                 }
             }
+            AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+                body,
+                params,
+                returns,
+                ..
+            }) => {
+                children.push(*body);
+                for param in params.iter() {
+                    children.push(param.type_);
+                }
+                if let Some(returns) = returns {
+                    children.push(*returns);
+                }
+            }
+            ExternFunctionBinding(FunctionHeaderValue {
+                params, returns, ..
+            })
+            | RequiredFunction(FunctionHeaderValue {
+                params, returns, ..
+            }) => {
+                for param in params.iter() {
+                    children.push(param.type_);
+                }
+                if let Some(returns) = returns {
+                    children.push(*returns);
+                }
+            }
             StructDeclaration(StructDeclarationValue { fields, .. })
-            | ExternFunctionBinding(ExternFunctionBindingValue { params: fields, .. })
             | InterfaceDeclaration(InterfaceDeclarationValue { fields, .. })
             | UnionDeclaration(UnionDeclarationValue {
                 variants: fields, ..
@@ -358,10 +386,15 @@ fn struct_declaration<'a>(
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let (name, provenance) = word(source, cursor, "expected name after 'struct'")?;
-    let (end, fields) = interface_or_struct_body(source, context, provenance.end())?;
+    let (end, fields, associated_functions) =
+        interface_or_struct_body(source, context, provenance.end(), false)?;
 
     Ok(AstNode::new(
-        AstNodeValue::StructDeclaration(StructDeclarationValue { name, fields }),
+        AstNodeValue::StructDeclaration(StructDeclarationValue {
+            name,
+            fields,
+            associated_functions,
+        }),
         SourceRange::new(cursor, end),
     ))
 }
@@ -372,10 +405,15 @@ fn interface_declaration<'a>(
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let (name, provenance) = word(source, cursor, "expected name after 'interface'")?;
-    let (end, fields) = interface_or_struct_body(source, context, provenance.end())?;
+    let (end, fields, associated_functions) =
+        interface_or_struct_body(source, context, provenance.end(), true)?;
 
     Ok(AstNode::new(
-        AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue { name, fields }),
+        AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
+            name,
+            fields,
+            associated_functions,
+        }),
         SourceRange::new(cursor, end),
     ))
 }
@@ -384,7 +422,8 @@ fn interface_or_struct_body<'a>(
     source: &mut TokenIter,
     context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
-) -> Result<(SourceMarker, Vec<NameAndType<'a>>), ParseError> {
+    is_interface: bool,
+) -> Result<(SourceMarker, Vec<NameAndType<'a>>, Vec<AstNode<'a>>), ParseError> {
     let mut cursor = assert_next_lexeme_eq(
         source.next(),
         TokenValue::OpenBracket,
@@ -395,36 +434,95 @@ fn interface_or_struct_body<'a>(
     .end();
 
     let mut fields = Vec::new();
-    let mut closed = peek_for_closed(
-        source,
-        TokenValue::CloseBracket,
-        cursor,
-        "expected either fields or close bracket",
-    )?;
+    let mut associated_functions = Vec::new();
 
-    while !closed {
-        let (name, range, type_hint) =
-            name_and_type_hint(source, context, cursor, "expected parameter")?;
-        cursor = range.end();
-        let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
-        let kind = add_node(context, kind);
-        fields.push(NameAndType {
-            id: ID::new(),
-            name,
-            type_: kind,
-        });
-
-        let (should_end, range) = comma_or_end_list(
+    loop {
+        if peek_for_closed(
             source,
             TokenValue::CloseBracket,
             cursor,
             "expected either fields or close bracket",
-        )?;
-        closed = should_end;
-        cursor = range.end();
+        )? {
+            break;
+        }
+
+        if peek_token(source, cursor, "expected associated function, field, or }")?.value
+            == TokenValue::Function
+        {
+            let start = cursor;
+            let token = already_peeked_token(source)?;
+            cursor = token.range.end();
+            let FunctionHeader {
+                name,
+                params,
+                returns,
+                end,
+            } = function_header(source, context, cursor)?;
+            cursor = end;
+
+            let next = peek_token(source, cursor, "expected ',', }, or body")?;
+            if is_interface
+                && (next.value == TokenValue::Comma || next.value == TokenValue::CloseBracket)
+            {
+                if next.value == TokenValue::Comma {
+                    already_peeked_token(source)?;
+                }
+                associated_functions.push(AstNode::new(
+                    AstNodeValue::RequiredFunction(FunctionHeaderValue {
+                        name,
+                        params,
+                        returns,
+                    }),
+                    SourceRange::new(start, cursor),
+                ));
+            } else {
+                let token = assert_next_lexeme_eq(
+                    source.next(),
+                    TokenValue::OpenBracket,
+                    cursor,
+                    "expected open bracket to start function body",
+                )?;
+                cursor = token.range.end();
+                // TODO: if it's an interface, possible required function
+                let body = block(source, context, cursor)?;
+                cursor = body.provenance.end();
+                associated_functions.push(AstNode::new(
+                    AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+                        name,
+                        params,
+                        returns,
+                        body: add_node(context, body),
+                        is_extern: true,
+                    }),
+                    SourceRange::new(start, cursor),
+                ));
+            }
+        } else {
+            let (name, range, type_hint) =
+                name_and_type_hint(source, context, cursor, "expected parameter")?;
+            cursor = range.end();
+            let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
+            let kind = add_node(context, kind);
+            fields.push(NameAndType {
+                id: ID::new(),
+                name,
+                type_: kind,
+            });
+
+            let (should_end, range) = comma_or_end_list(
+                source,
+                TokenValue::CloseBracket,
+                cursor,
+                "expected either fields, comma, or close bracket",
+            )?;
+            if should_end {
+                break;
+            }
+            cursor = range.end();
+        }
     }
 
-    Ok((cursor, fields))
+    Ok((cursor, fields, associated_functions))
 }
 
 fn union_declaration<'a>(
@@ -506,7 +604,7 @@ fn extern_function_declaration<'a>(
     let next = token(source, end, "expected ; or { after extern fn decl")?;
     let (value, end) = match &next.value {
         TokenValue::Semicolon => (
-            AstNodeValue::ExternFunctionBinding(ExternFunctionBindingValue {
+            AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
                 name,
                 params,
                 returns,

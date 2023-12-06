@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::parser::{
-    AstNode, AstNodeValue, ExternFunctionBindingValue, FunctionDeclarationValue,
+    AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
     InterfaceDeclarationValue, NameAndType, StructDeclarationValue, UnionDeclarationValue,
 };
 
@@ -18,7 +18,7 @@ pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, StaticDeclarati
             | AstNodeValue::UnionDeclaration(UnionDeclarationValue { name, .. })
             | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue { name, .. })
             | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
-            | AstNodeValue::ExternFunctionBinding(ExternFunctionBindingValue { name, .. }) => {
+            | AstNodeValue::ExternFunctionBinding(FunctionHeaderValue { name, .. }) => {
                 names_to_declarations.insert(name.clone(), statement);
             }
             _ => {}
@@ -37,78 +37,110 @@ pub fn resolve_top_level_declarations(
         .map(|(name, node)| {
             Ok((
                 name.clone(),
-                match &node.value {
-                    AstNodeValue::StructDeclaration(StructDeclarationValue { fields, .. }) => {
-                        StaticDeclaration::Struct(StructType {
-                            id: node.id,
-                            fields: fields
-                                .iter()
-                                .map(|NameAndType { id: _, name, type_ }| {
-                                    Ok((
-                                        name.clone(),
-                                        resolve_type_name(&names_to_declarations, type_)?,
-                                    ))
-                                })
-                                .collect::<Result<HashMap<_, _>, _>>()?,
-                        })
-                    }
-                    AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
-                        fields,
-                        ..
-                    }) => StaticDeclaration::Interface(InterfaceType {
-                        id: node.id,
-                        fields: fields
-                            .iter()
-                            .map(|NameAndType { id: _, name, type_ }| {
-                                Ok((
-                                    name.clone(),
-                                    resolve_type_name(&names_to_declarations, type_)?,
-                                ))
-                            })
-                            .collect::<Result<HashMap<_, _>, _>>()?,
-                    }),
-                    AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, .. }) => {
-                        StaticDeclaration::Union(UnionType {
-                            id: node.id,
-                            variants: variants
-                                .iter()
-                                .map(|NameAndType { id: _, name, type_ }| {
-                                    Ok((
-                                        name.clone(),
-                                        resolve_type_name(&names_to_declarations, type_)?,
-                                    ))
-                                })
-                                .collect::<Result<HashMap<_, _>, _>>()?,
-                        })
-                    }
-                    // TODO: union
-                    AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-                        params,
-                        returns,
-                        ..
-                    })
-                    | AstNodeValue::ExternFunctionBinding(ExternFunctionBindingValue {
-                        params,
-                        returns,
-                        ..
-                    }) => StaticDeclaration::Func(FuncType {
-                        id: node.id,
-                        params: params
-                            .iter()
-                            .map(|NameAndType { type_, .. }| {
-                                resolve_type_name(&names_to_declarations, type_)
-                            })
-                            .collect::<Result<Vec<_>, _>>()?,
-                        returns: returns
-                            .as_ref()
-                            .map(|returns| resolve_type_name(&names_to_declarations, returns))
-                            .unwrap_or(Ok(ExpressionType::Primitive(PrimitiveType::Void)))?,
-                    }),
-                    _ => panic!("internal compiler error: unexpected decl node"),
-                },
+                resolve_declaration(names_to_declarations, &node)?,
             ))
         })
         .collect::<Result<HashMap<_, _>, _>>()
+}
+
+fn resolve_declaration(
+    names_to_declarations: &HashMap<String, &AstNode<'_>>,
+    node: &AstNode<'_>,
+) -> Result<StaticDeclaration, TypecheckError> {
+    Ok(match &node.value {
+        AstNodeValue::StructDeclaration(StructDeclarationValue {
+            fields,
+            associated_functions,
+            ..
+        })
+        | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
+            fields,
+            associated_functions,
+            ..
+        }) => {
+            let fields = fields.iter().map(|NameAndType { id: _, name, type_ }| {
+                Ok((
+                    name.clone(),
+                    resolve_type_name(&names_to_declarations, type_)?,
+                ))
+            });
+            let associated_functions = associated_functions
+                .iter()
+                .map(|node| {
+                    Ok(match &node.value {
+                        AstNodeValue::RequiredFunction(FunctionHeaderValue { name, .. }) => (
+                            name.clone(),
+                            resolve_declaration(names_to_declarations, node)?,
+                        ),
+                        AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+                            name,
+                            ..
+                        }) => (
+                            name.clone(),
+                            resolve_declaration(names_to_declarations, node)?,
+                        ),
+                        _ => panic!(
+                            "Associated function should not be anything but function declaration"
+                        ),
+                    })
+                })
+                .collect::<Result<HashMap<_, _>, _>>()?;
+            let fields = fields
+                .chain(associated_functions.iter().map(|(name, decl)| {
+                    Ok((name.clone(), ExpressionType::DeclaredType(decl.id())))
+                }))
+                .collect::<Result<_, _>>()?;
+
+            if let AstNodeValue::StructDeclaration(_) = &node.value {
+                StaticDeclaration::Struct(StructType {
+                    id: node.id,
+                    fields,
+                    associated_functions,
+                })
+            } else {
+                StaticDeclaration::Interface(InterfaceType {
+                    id: node.id,
+                    fields,
+                    associated_functions,
+                })
+            }
+        }
+        AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, .. }) => {
+            StaticDeclaration::Union(UnionType {
+                id: node.id,
+                variants: variants
+                    .iter()
+                    .map(|NameAndType { id: _, name, type_ }| {
+                        Ok((
+                            name.clone(),
+                            resolve_type_name(&names_to_declarations, type_)?,
+                        ))
+                    })
+                    .collect::<Result<HashMap<_, _>, _>>()?,
+            })
+        }
+        // TODO: union
+        AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+            params, returns, ..
+        })
+        | AstNodeValue::RequiredFunction(FunctionHeaderValue {
+            params, returns, ..
+        })
+        | AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
+            params, returns, ..
+        }) => StaticDeclaration::Func(FuncType {
+            id: node.id,
+            params: params
+                .iter()
+                .map(|NameAndType { type_, .. }| resolve_type_name(&names_to_declarations, type_))
+                .collect::<Result<Vec<_>, _>>()?,
+            returns: returns
+                .as_ref()
+                .map(|returns| resolve_type_name(&names_to_declarations, returns))
+                .unwrap_or(Ok(ExpressionType::Primitive(PrimitiveType::Void)))?,
+        }),
+        _ => panic!("internal compiler error: unexpected decl node"),
+    })
 }
 
 pub fn resolve_type_name(
@@ -147,6 +179,7 @@ pub fn resolve_type_name(
             ExpressionType::Nullable(Box::new(resolve_type_name(types, inner)?))
         }
         AstNodeValue::FunctionDeclaration(_)
+        | AstNodeValue::RequiredFunction(_)
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)
         | AstNodeValue::UnionDeclaration(_)

@@ -55,10 +55,25 @@ impl StaticDeclaration {
 
     pub fn visit<'a>(&'a self, visitor: &mut impl FnMut(&'a StaticDeclaration)) {
         visitor(self);
-        if let StaticDeclaration::Module(module) = self {
-            for child in module.exports.values() {
-                child.visit(visitor);
+        match self {
+            StaticDeclaration::Module(module) => {
+                for child in module.exports.values() {
+                    child.visit(visitor);
+                }
             }
+            StaticDeclaration::Struct(StructType {
+                associated_functions,
+                ..
+            })
+            | StaticDeclaration::Interface(InterfaceType {
+                associated_functions,
+                ..
+            }) => {
+                for child in associated_functions.values() {
+                    child.visit(visitor);
+                }
+            }
+            StaticDeclaration::Func(_) | StaticDeclaration::Union(_) => {}
         }
     }
 }
@@ -73,6 +88,7 @@ pub struct ModuleType {
 pub struct StructType {
     pub id: ID,
     pub fields: HashMap<String, ExpressionType>,
+    pub associated_functions: HashMap<String, StaticDeclaration>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -92,6 +108,7 @@ pub struct UnionType {
 pub struct InterfaceType {
     pub id: ID,
     pub fields: HashMap<String, ExpressionType>,
+    pub associated_functions: HashMap<String, StaticDeclaration>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -308,6 +325,7 @@ fn typecheck_expression<'a, 'b>(
     let ty = match &node.value {
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
+        | AstNodeValue::RequiredFunction(_)
         | AstNodeValue::StructDeclaration(_)
         | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::InterfaceDeclaration(_)

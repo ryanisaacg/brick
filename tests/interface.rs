@@ -16,3 +16,28 @@ fn length2(vector: Vector): f32 {
     .unwrap();
 }
 
+#[tokio::test]
+async fn associated_functions() {
+    eval(r#"
+interface HasArea {
+    fn area(): f32,
+}
+
+struct Square {
+    size: f32,
+
+    fn area(self: Square): f32 {
+        self.size * self.size
+    }
+}
+
+fn area_2(shape: HasArea): f32 {
+    let area = shape.area();
+    area * area
+}
+
+"#)
+    .await
+    .unwrap();
+}
+

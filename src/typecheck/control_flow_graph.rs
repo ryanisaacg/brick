@@ -144,6 +144,7 @@ fn create_graph_for_node<'a>(
     match &current.value {
         FunctionDeclaration(_)
         | ExternFunctionBinding(_)
+        | RequiredFunction(_)
         | StructDeclaration(_)
         | InterfaceDeclaration(_)
         | Import(_)

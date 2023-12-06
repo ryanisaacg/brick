@@ -13,18 +13,21 @@ assignment ::= word "=" expression ";"
 function ::= maybe_extern function_header type_annotation block
 external_function_declaration ::= "extern" function_header ";"
 function_header ::= "fn" word "(" function_args ")"
+    function_args ::= word type_annotation |
+        word type_annotation "," |
+        word type_annotation "," function_args
 maybe_extern ::= ε | "extern"
 
-struct ::= "struct" word "{" function_args "}"
+struct ::= "struct" word "{" fields "}"
+    struct_fields ::= struct_field | struct_field "," | struct_field "," struct_fields
+    struct_field ::= word type_annotation | function
+interface ::= "interface" word "{" fields "}"
+    interface_fields ::= interface_field | interface_field "," | interface_field "," interface_fields
+    interface_field ::= word type_annotation | function_header | function
+
 union ::= "union" word "{" union_variants "}"
-interface ::= "interface" word "{" function_args "}"
-
-union_variants ::= union_variant | union_variant "," | union_variant "," union_variants
-union_variant ::= word "(" type ")" 
-
-function_args ::= word type_annotation |
-    word type_annotation "," |
-    word type_annotation "," function_args
+    union_variants ::= union_variant | union_variant "," | union_variant "," union_variants
+    union_variant ::= word "(" type ")" 
 
 type_annotation ::= ":" type
 type ::= word | "unique" type | "shared" type | "[" type "]" | type "?"
