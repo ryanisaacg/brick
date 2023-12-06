@@ -41,3 +41,19 @@ fn area_2(shape: HasArea): f32 {
     .unwrap();
 }
 
+#[tokio::test]
+#[should_panic]
+async fn bad_associated_functions() {
+    eval(r#"
+struct Square {
+    size: f32,
+
+    fn area(self: Square): string {
+        self.size * self.size
+    }
+}
+"#)
+    .await
+    .unwrap();
+}
+

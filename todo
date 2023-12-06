@@ -16,8 +16,13 @@ returns:
 
 interfaces:
 - structs:
+    - struct associated functions work:
+        - they are lowered to IR
+        - they can be called in the interperter
     - struct associated functions support "self"
-    - struct associated functions work
+        - self can be declared as a typeless parameter syntactically
+        - self typechecks correctly
+        - IR transforms code properly to pass self into the function
     - structs can be converted to interfaces
 - unions:
     - unions can be converted to interfaces

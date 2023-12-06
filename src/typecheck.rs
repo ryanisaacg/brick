@@ -4,7 +4,10 @@ use thiserror::Error;
 
 use crate::{
     id::ID,
-    parser::{AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration},
+    parser::{
+        AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
+        InterfaceDeclarationValue, StructDeclarationValue,
+    },
     provenance::SourceRange,
 };
 
@@ -155,14 +158,6 @@ impl<'a> Declarations<'a> {
         self.id_to_decl.get(id).copied()
     }
 
-    fn name_to_func(&self, name: &str) -> Option<&FuncType> {
-        if let (_, ExpressionType::DeclaredType(id)) = self.name_to_expr.get(name)? {
-            Some(self.id_to_func(&id))
-        } else {
-            None
-        }
-    }
-
     fn id_to_func(&self, id: &ID) -> &FuncType {
         let expr = self.decl(id).expect("function with ID should exist");
         match expr {
@@ -184,6 +179,7 @@ pub struct TypecheckedFile<'a> {
     pub expression_types: HashMap<ID, ExpressionType>,
     pub referenced_ids: HashMap<ID, ID>,
     pub functions: Vec<TypecheckedFunction<'a>>,
+    pub associated_functions: HashMap<ID, Vec<TypecheckedFunction<'a>>>,
     pub top_level_statements: Vec<&'a AstNode<'a>>,
 }
 
@@ -232,57 +228,119 @@ pub fn typecheck<'a>(
     let mut expression_types = HashMap::new();
     let mut referenced_ids = HashMap::new();
     let mut top_level_scope = HashMap::new();
+    let mut associated_functions = HashMap::new();
 
     for statement in file {
-        match &statement.value {
-            AstNodeValue::FunctionDeclaration(func) => {
-                // TODO: bubble errors
-                typecheck_function(func, &context, &mut expression_types, &mut referenced_ids)
-                    .unwrap();
-                functions.push(TypecheckedFunction {
-                    id: statement.id,
-                    name: func.name.clone(),
-                    func,
-                });
-            }
-            // These nodes don't execute anything and therefore don't need to be typechecked
-            AstNodeValue::Import(_)
-            | AstNodeValue::StructDeclaration(_)
-            | AstNodeValue::UnionDeclaration(_)
-            | AstNodeValue::InterfaceDeclaration(_)
-            | AstNodeValue::ExternFunctionBinding(_) => {}
-            _ => {
-                typecheck_expression(
-                    statement,
-                    &[&context.name_to_expr],
-                    &mut top_level_scope,
-                    &mut expression_types,
-                    &mut referenced_ids,
-                    &context,
-                )?;
-                top_level_statements.push(statement);
-            }
-        }
+        typecheck_node(
+            statement,
+            &context,
+            // filled-in metadata
+            &mut top_level_scope,
+            &mut expression_types,
+            &mut referenced_ids,
+            // multi-return
+            &mut functions,
+            &mut top_level_statements,
+            &mut associated_functions,
+        )?;
     }
 
     Ok(TypecheckedFile {
         expression_types,
         referenced_ids,
         functions,
+        associated_functions,
         top_level_statements,
     })
 }
 
-// TODO: some sort of data structure to store the results?
-fn typecheck_function<'a, 'b>(
-    function: &'a FunctionDeclarationValue<'a>,
+fn typecheck_node<'ast>(
+    statement: &'ast AstNode<'ast>,
     context: &Declarations,
-    expressions: &'b mut HashMap<ID, ExpressionType>,
-    referenced_id: &'b mut HashMap<ID, ID>,
+    top_level_scope: &mut HashMap<String, (ID, ExpressionType)>,
+    expression_types: &mut HashMap<ID, ExpressionType>,
+    referenced_ids: &mut HashMap<ID, ID>,
+    functions: &mut Vec<TypecheckedFunction<'ast>>,
+    top_level_statements: &mut Vec<&AstNode<'ast>>,
+    associated_functions_for_type: &mut HashMap<ID, Vec<TypecheckedFunction<'ast>>>,
 ) -> Result<(), TypecheckError> {
-    let Some(function_type) = context.name_to_func(&function.name) else {
-        panic!("expected function to be found in the context");
-    };
+    match &statement.value {
+        AstNodeValue::FunctionDeclaration(func) => {
+            // TODO: bubble errors
+            typecheck_function(
+                &statement.id,
+                func,
+                context,
+                expression_types,
+                referenced_ids,
+            )
+            .unwrap();
+            functions.push(TypecheckedFunction {
+                id: statement.id,
+                name: func.name.clone(),
+                func,
+            });
+        }
+        AstNodeValue::StructDeclaration(StructDeclarationValue {
+            associated_functions,
+            ..
+        })
+        | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
+            associated_functions,
+            ..
+        }) => {
+            let associated_functions = associated_functions
+                .iter()
+                .filter_map(|function| {
+                    let AstNodeValue::FunctionDeclaration(func) = &function.value else {
+                        return None;
+                    };
+                    typecheck_function(
+                        &function.id,
+                        func,
+                        context,
+                        expression_types,
+                        referenced_ids,
+                    )
+                    .unwrap();
+                    Some(TypecheckedFunction {
+                        id: statement.id,
+                        name: func.name.clone(),
+                        func,
+                    })
+                })
+                .collect();
+            associated_functions_for_type.insert(statement.id, associated_functions);
+        }
+        // These nodes don't execute anything and therefore don't need to be typechecked
+        AstNodeValue::Import(_)
+        | AstNodeValue::UnionDeclaration(_)
+        | AstNodeValue::ExternFunctionBinding(_) => {}
+        _ => {
+            typecheck_expression(
+                statement,
+                &[&context.name_to_expr],
+                top_level_scope,
+                expression_types,
+                referenced_ids,
+                &context,
+            )?;
+            top_level_statements.push(statement);
+        }
+    }
+
+    Ok(())
+}
+
+// TODO: some sort of data structure to store the results?
+fn typecheck_function<'ast, 'meta>(
+    id: &ID,
+    function: &'ast FunctionDeclarationValue<'ast>,
+    context: &Declarations,
+    expressions: &'meta mut HashMap<ID, ExpressionType>,
+    referenced_id: &'meta mut HashMap<ID, ID>,
+) -> Result<(), TypecheckError> {
+    let function_type = context.id_to_func(id);
     let parameters = function
         .params
         .iter()

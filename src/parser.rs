@@ -483,7 +483,6 @@ fn interface_or_struct_body<'a>(
                     "expected open bracket to start function body",
                 )?;
                 cursor = token.range.end();
-                // TODO: if it's an interface, possible required function
                 let body = block(source, context, cursor)?;
                 cursor = body.provenance.end();
                 associated_functions.push(AstNode::new(

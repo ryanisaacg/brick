@@ -21,6 +21,7 @@ pub fn lower_module<'ast>(
     let TypecheckedFile {
         expression_types,
         referenced_ids,
+        associated_functions: _, // TODO
         functions,
         top_level_statements,
     } = module;
