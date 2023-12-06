@@ -735,6 +735,7 @@ fn typecheck_expression<'a, 'b>(
 
             ExpressionType::DeclaredType(struct_type_id)
         }
+        AstNodeValue::DictLiteral(_entries) => todo!(),
         // TODO: assert that this is an lvalue
         AstNodeValue::TakeUnique(inner) => ExpressionType::Pointer(
             PointerKind::Unique,

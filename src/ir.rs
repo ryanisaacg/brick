@@ -241,6 +241,7 @@ fn lower_node<'ast>(
                 .collect();
             IrNodeValue::StructLiteral(*id, fields)
         }
+        AstNodeValue::DictLiteral(_) => todo!(),
         AstNodeValue::ArrayLiteral(_) => todo!(),
         AstNodeValue::ArrayLiteralLength(_, _) => todo!(),
 

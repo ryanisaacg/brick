@@ -105,6 +105,7 @@ pub enum AstNodeValue<'a> {
         name: String,
         fields: HashMap<String, AstNode<'a>>,
     },
+    DictLiteral(Vec<(AstNode<'a>, AstNode<'a>)>),
     ArrayLiteral(Vec<AstNode<'a>>),
     ArrayLiteralLength(&'a mut AstNode<'a>, u64),
     Block(Vec<AstNode<'a>>),
@@ -157,6 +158,12 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
             StructLiteral { fields, .. } => {
                 for expression in fields.values() {
                     children.push(expression);
+                }
+            }
+            DictLiteral(entries) => {
+                for (left, right) in entries.iter() {
+                    children.push(left);
+                    children.push(right);
                 }
             }
             Call(function, parameters) => {
@@ -772,6 +779,7 @@ fn expression_pratt<'a>(
 
             left
         }
+        TokenValue::Dict => dict_literal(source, context, cursor)?,
         TokenValue::OpenSquare => array_literal(source, context, cursor, can_be_struct)?,
         token @ (TokenValue::If | TokenValue::While) => {
             if_or_while(source, context, token, cursor)?
@@ -872,6 +880,7 @@ fn expression_pratt<'a>(
                     );
                 }
                 TokenValue::OpenBracket if can_be_struct => {
+                    // TODO: extract struct literals into their own method
                     let mut end = range.end();
                     let mut fields = HashMap::new();
 
@@ -909,9 +918,12 @@ fn expression_pratt<'a>(
                             end = argument.provenance.end();
                             fields.insert(field, argument);
 
-                            if let TokenValue::Comma =
-                                peek_token(source, end, "expected comma or ) to end function call")?
-                                    .value
+                            if let TokenValue::Comma = peek_token(
+                                source,
+                                end,
+                                "expected comma or } to end struct literal",
+                            )?
+                            .value
                             {
                                 source.next();
                             } else {
@@ -1104,6 +1116,91 @@ fn array_literal<'a>(
             "expected comma, semicolon or ]",
         )),
     }
+}
+
+fn dict_literal<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    start: SourceMarker,
+) -> Result<AstNode<'a>, ParseError> {
+    let token = assert_next_lexeme_eq(
+        source.next(),
+        TokenValue::OpenSquare,
+        start,
+        "expected [ to start dict literal",
+    )?;
+    let mut cursor = token.range.end();
+    let mut entries = Vec::new();
+    loop {
+        let key = match peek_token(source, cursor, "expected } or next field")?.value {
+            TokenValue::CloseBracket => {
+                source.next();
+                break;
+            }
+            TokenValue::OpenSquare => {
+                let key = expression(source, context, cursor, true)?;
+                let token = assert_next_lexeme_eq(
+                    source.next(),
+                    TokenValue::CloseSquare,
+                    cursor,
+                    "Expected ] after key expression",
+                )?;
+                cursor = token.range.end();
+
+                key
+            }
+            _ => {
+                let (key, key_range) = word(source, cursor, "expected key in dict literal")?;
+                cursor = key_range.end();
+
+                if let lex @ (TokenValue::Comma | TokenValue::CloseBracket) =
+                    &peek_token(source, cursor, "expected comma or } to end struct literal")?.value
+                {
+                    let lex = lex.clone();
+                    let token = already_peeked_token(source)?;
+                    cursor = token.range.end();
+
+                    let value = AstNode::new(AstNodeValue::Name(key.clone()), key_range.clone());
+                    let key = AstNode::new(AstNodeValue::StringLiteral(key), key_range);
+
+                    entries.push((key, value));
+
+                    if lex == TokenValue::Comma {
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+
+                AstNode::new(AstNodeValue::StringLiteral(key), key_range)
+            }
+        };
+        let token = assert_next_lexeme_eq(
+            source.next(),
+            TokenValue::Colon,
+            cursor,
+            "Expected : after key in dict",
+        )?;
+        cursor = token.range.end();
+        let value = expression(source, context, cursor, true)?;
+        cursor = value.provenance.end();
+        entries.push((key, value));
+        let (did_end, range) = comma_or_end_list(
+            source,
+            TokenValue::CloseSquare,
+            cursor,
+            "expected , or ] in dict literal",
+        )?;
+        cursor = range.end();
+        if did_end {
+            break;
+        }
+    }
+
+    Ok(AstNode::new(
+        AstNodeValue::DictLiteral(entries),
+        SourceRange::new(start, cursor),
+    ))
 }
 
 fn if_or_while<'a>(

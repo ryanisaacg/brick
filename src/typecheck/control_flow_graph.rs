@@ -174,7 +174,8 @@ fn create_graph_for_node<'a>(
         | ArrayLiteral(_)
         | ArrayLiteralLength(_, _)
         | Declaration(_, _)
-        | Block(_) => {
+        | Block(_)
+        | DictLiteral(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));
             let mut current_node = start;
             let mut children = Vec::new();

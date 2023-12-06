@@ -153,9 +153,10 @@ pub fn resolve_type_name(
         | AstNodeValue::ArrayLiteralLength(_, _)
         | AstNodeValue::Block(_)
         | AstNodeValue::StringLiteral(_)
-        | AstNodeValue::CharLiteral(_) => {
+        | AstNodeValue::CharLiteral(_)
+        | AstNodeValue::DictLiteral(_) => {
             // TODO: report error
-            panic!("Illegal in expression name");
+            panic!("Illegal in type name");
         }
     })
 }

@@ -48,8 +48,7 @@ null:
 - basic null flow analysis - maybe a special operation to de-null stuff
 - ?. operator
 - ?? operator
-- ! operator (maybe?)
-- null-to-error
+- ! operator, which throws if the value is an error
 
 errors:
 - functions can define `throws`
@@ -88,8 +87,9 @@ collections:
 - index operator
 - array literals typechecking
 - dicts:
-    - declaration syntax
+    - dict type syntax
     - typechecking
+    - interpreter
 
 interpreter:
 - reference support

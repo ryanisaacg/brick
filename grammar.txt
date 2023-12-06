@@ -42,6 +42,9 @@ call ::=  expression "(" call_param ")" | expression "(" call_param ")" |
         expression "," call_param
 array_literal ::= "[" expression ";" integer "]" | "[" array_literal_items "]"
     array_literal_items = expression | expression "," | expression "," array_literal_items
+dict_literal ::= dict "{" dict_literal_params "}"
+    dict_entry ::= word | word ":" expression" | "[" expression "]" ":" expression
+    dict_literal_params ::= dict_entry | dict_entry "," | dict_entry "," dict_entry
 struct_literal ::= atom | word "{" struct_literal_params "}"
     struct_literal_params ::= word | word "," |
         word "," struct_literal_params |
