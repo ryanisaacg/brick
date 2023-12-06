@@ -1,3 +1,6 @@
+syntax:
+- remove ; and , requirements?
+
 import support:
 - allow imports to have nested paths (sugar for recursively expanding?)
 - allow imports to include a list of things, with an optional catch-all
