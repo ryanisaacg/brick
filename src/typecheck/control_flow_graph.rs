@@ -145,6 +145,7 @@ fn create_graph_for_node<'a>(
         FunctionDeclaration(_)
         | ExternFunctionBinding(_)
         | StructDeclaration(_)
+        | InterfaceDeclaration(_)
         | Import(_)
         | UnionDeclaration(_) => {
             panic!("TODO: handle class of top level declaration inside statement?")

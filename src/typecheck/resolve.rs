@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use crate::parser::{
-    AstNode, AstNodeValue, ExternFunctionBindingValue, FunctionDeclarationValue, NameAndType,
-    StructDeclarationValue, UnionDeclarationValue,
+    AstNode, AstNodeValue, ExternFunctionBindingValue, FunctionDeclarationValue,
+    InterfaceDeclarationValue, NameAndType, StructDeclarationValue, UnionDeclarationValue,
 };
 
 use super::{
-    ExpressionType, FuncType, PointerKind, PrimitiveType, StaticDeclaration, StructType,
-    TypecheckError, UnionType,
+    ExpressionType, FuncType, InterfaceType, PointerKind, PrimitiveType, StaticDeclaration,
+    StructType, TypecheckError, UnionType,
 };
 
 pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, StaticDeclaration> {
@@ -16,6 +16,7 @@ pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, StaticDeclarati
         match &statement.value {
             AstNodeValue::StructDeclaration(StructDeclarationValue { name, .. })
             | AstNodeValue::UnionDeclaration(UnionDeclarationValue { name, .. })
+            | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue { name, .. })
             | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
             | AstNodeValue::ExternFunctionBinding(ExternFunctionBindingValue { name, .. }) => {
                 names_to_declarations.insert(name.clone(), statement);
@@ -51,6 +52,21 @@ pub fn resolve_top_level_declarations(
                                 .collect::<Result<HashMap<_, _>, _>>()?,
                         })
                     }
+                    AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
+                        fields,
+                        ..
+                    }) => StaticDeclaration::Interface(InterfaceType {
+                        id: node.id,
+                        fields: fields
+                            .iter()
+                            .map(|NameAndType { id: _, name, type_ }| {
+                                Ok((
+                                    name.clone(),
+                                    resolve_type_name(&names_to_declarations, type_)?,
+                                ))
+                            })
+                            .collect::<Result<HashMap<_, _>, _>>()?,
+                    }),
                     AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, .. }) => {
                         StaticDeclaration::Union(UnionType {
                             id: node.id,
@@ -134,6 +150,7 @@ pub fn resolve_type_name(
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)
         | AstNodeValue::UnionDeclaration(_)
+        | AstNodeValue::InterfaceDeclaration(_)
         | AstNodeValue::Declaration(_, _)
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)

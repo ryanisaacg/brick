@@ -33,6 +33,7 @@ pub enum PointerKind {
 pub enum StaticDeclaration {
     Func(FuncType),
     Struct(StructType),
+    Interface(InterfaceType),
     Union(UnionType),
     Module(ModuleType),
 }
@@ -42,6 +43,7 @@ impl StaticDeclaration {
         match self {
             StaticDeclaration::Func(inner) => inner.id,
             StaticDeclaration::Struct(inner) => inner.id,
+            StaticDeclaration::Interface(inner) => inner.id,
             StaticDeclaration::Union(inner) => inner.id,
             StaticDeclaration::Module(inner) => inner.id,
         }
@@ -84,6 +86,12 @@ pub struct FuncType {
 pub struct UnionType {
     pub id: ID,
     pub variants: HashMap<String, ExpressionType>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct InterfaceType {
+    pub id: ID,
+    pub fields: HashMap<String, ExpressionType>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -224,6 +232,7 @@ pub fn typecheck<'a>(
             AstNodeValue::Import(_)
             | AstNodeValue::StructDeclaration(_)
             | AstNodeValue::UnionDeclaration(_)
+            | AstNodeValue::InterfaceDeclaration(_)
             | AstNodeValue::ExternFunctionBinding(_) => {}
             _ => {
                 typecheck_expression(
@@ -301,6 +310,7 @@ fn typecheck_expression<'a, 'b>(
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)
         | AstNodeValue::UnionDeclaration(_)
+        | AstNodeValue::InterfaceDeclaration(_)
         | AstNodeValue::Import(_) => {
             unimplemented!("Can't do this inside a function");
         }
@@ -390,11 +400,10 @@ fn typecheck_expression<'a, 'b>(
             // TODO: fallible
             let lhs_type = context.decl(&id);
             match lhs_type {
-                Some(StaticDeclaration::Struct(lhs_type)) => lhs_type
-                    .fields
-                    .get(name)
-                    .expect("TODO: field is present")
-                    .clone(),
+                Some(
+                    StaticDeclaration::Struct(StructType { fields, .. })
+                    | StaticDeclaration::Interface(InterfaceType { fields, .. }),
+                ) => fields.get(name).expect("TODO: field is present").clone(),
                 Some(StaticDeclaration::Union(lhs_type)) => ExpressionType::Nullable(Box::new(
                     lhs_type
                         .variants

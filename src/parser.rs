@@ -67,6 +67,12 @@ pub struct UnionDeclarationValue<'a> {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct InterfaceDeclarationValue<'a> {
+    pub name: String,
+    pub fields: Vec<NameAndType<'a>>,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct IfDeclaration<'a> {
     pub condition: &'a mut AstNode<'a>,
     pub if_branch: &'a mut AstNode<'a>,
@@ -80,6 +86,7 @@ pub enum AstNodeValue<'a> {
     ExternFunctionBinding(ExternFunctionBindingValue<'a>),
     StructDeclaration(StructDeclarationValue<'a>),
     UnionDeclaration(UnionDeclarationValue<'a>),
+    InterfaceDeclaration(InterfaceDeclarationValue<'a>),
     Declaration(String, &'a mut AstNode<'a>),
     Import(String),
     Return(&'a mut AstNode<'a>),
@@ -174,6 +181,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
             }
             StructDeclaration(StructDeclarationValue { fields, .. })
             | ExternFunctionBinding(ExternFunctionBindingValue { params: fields, .. })
+            | InterfaceDeclaration(InterfaceDeclarationValue { fields, .. })
             | UnionDeclaration(UnionDeclarationValue {
                 variants: fields, ..
             }) => {
@@ -266,6 +274,7 @@ fn statement<'a>(
             | TokenValue::Extern
             | TokenValue::Struct
             | TokenValue::Union
+            | TokenValue::Interface
             | TokenValue::Return => {
                 let Token { range, value, .. } = already_peeked_token(source)?;
                 let cursor = range.end();
@@ -297,6 +306,7 @@ fn statement<'a>(
                     TokenValue::Function => function_declaration(source, context, cursor)?,
                     TokenValue::Struct => struct_declaration(source, context, cursor)?,
                     TokenValue::Union => union_declaration(source, context, cursor)?,
+                    TokenValue::Interface => interface_declaration(source, context, cursor)?,
                     TokenValue::Return => {
                         let statement = return_declaration(source, context, cursor)?;
                         assert_next_lexeme_eq(
@@ -347,11 +357,38 @@ fn struct_declaration<'a>(
     context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
-    let (name, mut provenance) = word(source, cursor, "expected name after 'struct'")?;
+    let (name, provenance) = word(source, cursor, "expected name after 'struct'")?;
+    let (end, fields) = interface_or_struct_body(source, context, provenance.end())?;
+
+    Ok(AstNode::new(
+        AstNodeValue::StructDeclaration(StructDeclarationValue { name, fields }),
+        SourceRange::new(cursor, end),
+    ))
+}
+
+fn interface_declaration<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    cursor: SourceMarker,
+) -> Result<AstNode<'a>, ParseError> {
+    let (name, provenance) = word(source, cursor, "expected name after 'interface'")?;
+    let (end, fields) = interface_or_struct_body(source, context, provenance.end())?;
+
+    Ok(AstNode::new(
+        AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue { name, fields }),
+        SourceRange::new(cursor, end),
+    ))
+}
+
+fn interface_or_struct_body<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    cursor: SourceMarker,
+) -> Result<(SourceMarker, Vec<NameAndType<'a>>), ParseError> {
     let mut cursor = assert_next_lexeme_eq(
         source.next(),
         TokenValue::OpenBracket,
-        provenance.end(),
+        cursor,
         "expected open bracket to start fields",
     )?
     .range
@@ -386,12 +423,8 @@ fn struct_declaration<'a>(
         closed = should_end;
         cursor = range.end();
     }
-    provenance.set_end(cursor);
 
-    Ok(AstNode::new(
-        AstNodeValue::StructDeclaration(StructDeclarationValue { name, fields }),
-        provenance,
-    ))
+    Ok((cursor, fields))
 }
 
 fn union_declaration<'a>(

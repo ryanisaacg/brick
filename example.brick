@@ -7,3 +7,12 @@ while x > 0 {
     x = stdio.read();
 }
 
+interface Point {
+    x: f32,
+    y: f32,
+}
+
+fn move(point: Point): f32 {
+    point.x + point.y
+}
+

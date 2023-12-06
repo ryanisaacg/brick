@@ -12,10 +12,13 @@ returns:
 - allow void returns
 
 interfaces:
-- interfaces exist and can be declared with associated functions
-- structs can have associated functions
-- structs can be converted to interfaces
-- unions can be converted to interfaces
+- interfaces can be declared with associated functions
+- structs:
+    - structs can have associated functions
+    - structs can be converted to interfaces
+- unions:
+    - unions can be converted to interfaces
+    - unions have associated functions
 - modules can be converted to interfaces
 
 arithmetic:

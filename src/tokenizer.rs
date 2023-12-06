@@ -74,6 +74,7 @@ pub enum TokenValue {
     Extern,
     Null,
     Dict,
+    Interface,
 }
 
 impl fmt::Display for TokenValue {
@@ -125,6 +126,7 @@ impl fmt::Display for TokenValue {
             Extern => write!(f, "keyword extern"),
             Null => write!(f, "keyword null"),
             Dict => write!(f, "keyword dict"),
+            Interface => write!(f, "keyword interface"),
         }
     }
 }
@@ -220,6 +222,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "extern" => TokenValue::Extern,
                         "null" => TokenValue::Null,
                         "dict" => TokenValue::Dict,
+                        "interface" => TokenValue::Interface,
                         _ => TokenValue::Word(word),
                     }
                 }

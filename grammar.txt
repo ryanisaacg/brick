@@ -5,7 +5,7 @@ null_literal ::= "null"
 char_literal ::= "'" /[^']/ "'"
 string_literal ::= "\"" /[^"]/* "\""
 
-statement ::= import | declaration | assignment | function | expression | expression ";"
+statement ::= import | declaration | assignment | function | expression | expression ";" | struct | union | interface
 import ::= "import" word
 declaration ::= "let" word "=" expression ";"
 assignment ::= word "=" expression ";"
@@ -17,6 +17,7 @@ maybe_extern ::= ε | "extern"
 
 struct ::= "struct" word "{" function_args "}"
 union ::= "union" word "{" union_variants "}"
+interface ::= "interface" word "{" function_args "}"
 
 union_variants ::= union_variant | union_variant "," | union_variant "," union_variants
 union_variant ::= word "(" type ")" 

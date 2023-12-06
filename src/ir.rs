@@ -249,6 +249,7 @@ fn lower_node<'ast>(
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)
         | AstNodeValue::UnionDeclaration(_)
+        | AstNodeValue::InterfaceDeclaration(_)
         | AstNodeValue::Import(_)
         | AstNodeValue::UniqueType(_)
         | AstNodeValue::SharedType(_)
