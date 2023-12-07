@@ -15,13 +15,12 @@ pub fn lower_module<'ast>(
 ) -> IrModule {
     let mut module = lower::lower_module(module, declarations);
 
-    let mut rewrite_assc = |expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr);
-
+    let rewrite_assc = |expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr);
     for expr in module.top_level_statements.iter_mut() {
-        expr.visit_mut(&mut rewrite_assc);
+        expr.visit_mut(rewrite_assc);
     }
     for func in module.functions.iter_mut() {
-        func.body.visit_mut(&mut rewrite_assc);
+        func.body.visit_mut(rewrite_assc);
     }
 
     module
@@ -62,7 +61,11 @@ impl IrNode {
         Self::from_ast(ast, value, ExpressionType::Void)
     }
 
-    pub fn visit_mut(&mut self, callback: &mut impl FnMut(&mut IrNode)) {
+    pub fn visit_mut(&mut self, mut callback: impl FnMut(&mut IrNode)) {
+        self.visit_mut_recursive(&mut callback);
+    }
+
+    fn visit_mut_recursive(&mut self, callback: &mut impl FnMut(&mut IrNode)) {
         callback(self);
         match &mut self.value {
             IrNodeValue::Parameter(_, _)
@@ -75,9 +78,9 @@ impl IrNode {
             | IrNodeValue::StringLiteral(_)
             | IrNodeValue::Null => {}
             IrNodeValue::Call(lhs, params) => {
-                lhs.visit_mut(callback);
+                lhs.visit_mut_recursive(callback);
                 for param in params.iter_mut() {
-                    param.visit_mut(callback);
+                    param.visit_mut_recursive(callback);
                 }
             }
             IrNodeValue::Access(child, _)
@@ -86,30 +89,30 @@ impl IrNode {
             | IrNodeValue::Dereference(child)
             | IrNodeValue::ArrayLiteralLength(child, _)
             | IrNodeValue::Return(child) => {
-                child.visit_mut(callback);
+                child.visit_mut_recursive(callback);
             }
             IrNodeValue::Assignment(lhs, rhs)
             | IrNodeValue::Index(lhs, rhs)
             | IrNodeValue::While(lhs, rhs)
             | IrNodeValue::BinOp(_, lhs, rhs) => {
-                lhs.visit_mut(callback);
-                rhs.visit_mut(callback);
+                lhs.visit_mut_recursive(callback);
+                rhs.visit_mut_recursive(callback);
             }
             IrNodeValue::Sequence(children) | IrNodeValue::ArrayLiteral(children) => {
                 for child in children.iter_mut() {
-                    child.visit_mut(callback);
+                    child.visit_mut_recursive(callback);
                 }
             }
             IrNodeValue::If(cond, if_branch, else_branch) => {
-                cond.visit_mut(callback);
-                if_branch.visit_mut(callback);
+                cond.visit_mut_recursive(callback);
+                if_branch.visit_mut_recursive(callback);
                 if let Some(else_branch) = else_branch {
-                    else_branch.visit_mut(callback);
+                    else_branch.visit_mut_recursive(callback);
                 }
             }
             IrNodeValue::StructLiteral(_, fields) => {
                 for field in fields.values_mut() {
-                    field.visit_mut(callback);
+                    field.visit_mut_recursive(callback);
                 }
             }
         }
