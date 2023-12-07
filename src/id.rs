@@ -4,6 +4,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub struct ID(u32);
 
 impl ID {
+    pub fn dummy() -> ID {
+        Self(0)
+    }
+
     pub fn new() -> Self {
         Self(get_id() as u32)
     }

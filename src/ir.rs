@@ -6,6 +6,7 @@ use crate::{
     typecheck::{ExpressionType, StaticDeclaration, TypecheckedFile},
 };
 
+mod interface_conversion_pass;
 mod lower;
 mod rewrite_associated_functions;
 
@@ -15,13 +16,8 @@ pub fn lower_module<'ast>(
 ) -> IrModule {
     let mut module = lower::lower_module(module, declarations);
 
-    let rewrite_assc = |expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr);
-    for expr in module.top_level_statements.iter_mut() {
-        expr.visit_mut(rewrite_assc);
-    }
-    for func in module.functions.iter_mut() {
-        func.body.visit_mut(rewrite_assc);
-    }
+    module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
+    interface_conversion_pass::rewrite(&mut module, declarations);
 
     module
 }
@@ -32,6 +28,26 @@ pub struct IrModule {
     pub top_level_statements: Vec<IrNode>,
     // TODO: include imports, structs, and extern function declaration
     pub functions: Vec<IrFunction>,
+}
+
+impl IrModule {
+    pub fn visit_mut(&mut self, mut callback: impl FnMut(&mut IrNode)) {
+        for expr in self.top_level_statements.iter_mut() {
+            expr.visit_mut_recursive(&mut callback);
+        }
+        for func in self.functions.iter_mut() {
+            func.body.visit_mut_recursive(&mut callback);
+        }
+    }
+
+    pub fn visit(&self, mut callback: impl FnMut(Option<&IrNode>, &IrNode)) {
+        for expr in self.top_level_statements.iter() {
+            expr.visit_recursive(None, &mut callback);
+        }
+        for func in self.functions.iter() {
+            func.body.visit_recursive(None, &mut callback);
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -49,6 +65,14 @@ pub struct IrNode {
 }
 
 impl IrNode {
+    pub fn dummy() -> IrNode {
+        IrNode {
+            id: ID::dummy(),
+            value: IrNodeValue::Null,
+            ty: ExpressionType::Null,
+        }
+    }
+
     pub fn from_ast(ast: &AstNode<'_>, value: IrNodeValue, ty: ExpressionType) -> IrNode {
         IrNode {
             id: ast.id,
@@ -88,7 +112,8 @@ impl IrNode {
             | IrNodeValue::TakeShared(child)
             | IrNodeValue::Dereference(child)
             | IrNodeValue::ArrayLiteralLength(child, _)
-            | IrNodeValue::Return(child) => {
+            | IrNodeValue::Return(child)
+            | IrNodeValue::StructToInterface(child) => {
                 child.visit_mut_recursive(callback);
             }
             IrNodeValue::Assignment(lhs, rhs)
@@ -113,6 +138,68 @@ impl IrNode {
             IrNodeValue::StructLiteral(_, fields) => {
                 for field in fields.values_mut() {
                     field.visit_mut_recursive(callback);
+                }
+            }
+        }
+    }
+
+    pub fn visit(&self, mut callback: impl FnMut(Option<&IrNode>, &IrNode)) {
+        self.visit_recursive(None, &mut callback);
+    }
+
+    fn visit_recursive(
+        &self,
+        parent: Option<&IrNode>,
+        callback: &mut impl FnMut(Option<&IrNode>, &IrNode),
+    ) {
+        callback(parent, self);
+        match &self.value {
+            IrNodeValue::Parameter(_, _)
+            | IrNodeValue::VariableReference(_)
+            | IrNodeValue::Declaration(_)
+            | IrNodeValue::Int(_)
+            | IrNodeValue::Float(_)
+            | IrNodeValue::Bool(_)
+            | IrNodeValue::CharLiteral(_)
+            | IrNodeValue::StringLiteral(_)
+            | IrNodeValue::Null => {}
+            IrNodeValue::Call(lhs, params) => {
+                lhs.visit_recursive(Some(self), callback);
+                for param in params.iter() {
+                    param.visit_recursive(Some(self), callback);
+                }
+            }
+            IrNodeValue::Access(child, _)
+            | IrNodeValue::TakeUnique(child)
+            | IrNodeValue::TakeShared(child)
+            | IrNodeValue::Dereference(child)
+            | IrNodeValue::ArrayLiteralLength(child, _)
+            | IrNodeValue::Return(child)
+            | IrNodeValue::StructToInterface(child) => {
+                child.visit_recursive(Some(self), callback);
+            }
+            IrNodeValue::Assignment(lhs, rhs)
+            | IrNodeValue::Index(lhs, rhs)
+            | IrNodeValue::While(lhs, rhs)
+            | IrNodeValue::BinOp(_, lhs, rhs) => {
+                lhs.visit_recursive(Some(self), callback);
+                rhs.visit_recursive(Some(self), callback);
+            }
+            IrNodeValue::Sequence(children) | IrNodeValue::ArrayLiteral(children) => {
+                for child in children.iter() {
+                    child.visit_recursive(Some(self), callback);
+                }
+            }
+            IrNodeValue::If(cond, if_branch, else_branch) => {
+                cond.visit_recursive(Some(self), callback);
+                if_branch.visit_recursive(Some(self), callback);
+                if let Some(else_branch) = else_branch {
+                    else_branch.visit_recursive(Some(self), callback);
+                }
+            }
+            IrNodeValue::StructLiteral(_, fields) => {
+                for field in fields.values() {
+                    field.visit_recursive(Some(self), callback);
                 }
             }
         }
@@ -157,6 +244,9 @@ pub enum IrNodeValue {
     StructLiteral(ID, HashMap<String, IrNode>),
     ArrayLiteral(Vec<IrNode>),
     ArrayLiteralLength(Box<IrNode>, u64),
+
+    // Instructions only generated by IR passes
+    StructToInterface(Box<IrNode>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

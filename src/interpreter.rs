@@ -252,6 +252,8 @@ pub async fn evaluate_node(fns: &HashMap<ID, Function>, ctx: &mut Context, node:
         IrNodeValue::Index(_, _) => todo!(),
         IrNodeValue::ArrayLiteral(_) => todo!(),
         IrNodeValue::ArrayLiteralLength(_, _) => todo!(),
+
+        IrNodeValue::StructToInterface(_) => todo!(),
     }
 
     Ok(())
