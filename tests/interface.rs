@@ -20,7 +20,7 @@ fn length2(vector: Vector): f32 {
 async fn associated_functions() {
     eval(r#"
 interface HasArea {
-    fn area(): f32,
+    fn area(area: HasArea): f32,
 }
 
 struct Square {

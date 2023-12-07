@@ -18,6 +18,7 @@ pub mod resolve;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpressionType {
+    Void,
     Primitive(PrimitiveType),
     DeclaredType(ID),
     Pointer(PointerKind, Box<ExpressionType>),
@@ -99,6 +100,7 @@ pub struct FuncType {
     pub id: ID,
     pub params: Vec<ExpressionType>,
     pub returns: ExpressionType,
+    pub is_associated: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -123,8 +125,6 @@ pub enum PrimitiveType {
     Int64,
     Float64,
     Bool,
-    // TODO: take out of PrimitiveType
-    Void,
 }
 
 // TODO: get the lifetimes out of these typecheck errors
@@ -181,6 +181,7 @@ pub struct TypecheckedFile<'a> {
     pub top_level_statements: Vec<&'a AstNode<'a>>,
 }
 
+#[derive(Clone, Debug)]
 pub struct TypecheckedFunction<'a> {
     pub id: ID,
     pub name: String,
@@ -278,12 +279,13 @@ fn typecheck_node<'ast>(
                     };
                     typecheck_function(&function.id, func, context).unwrap();
                     Some(TypecheckedFunction {
-                        id: statement.id,
+                        id: function.id,
                         name: func.name.clone(),
                         func,
                     })
                 })
-                .collect();
+                .collect::<Vec<_>>();
+            functions.extend(associated_functions.iter().cloned());
             associated_functions_for_type.insert(statement.id, associated_functions);
         }
         // These nodes don't execute anything and therefore don't need to be typechecked
@@ -364,20 +366,20 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::Statement(inner) => {
             typecheck_expression(inner, outer_scopes, current_scope, context)?;
-            ExpressionType::Primitive(PrimitiveType::Void)
+            ExpressionType::Void
         }
         AstNodeValue::Declaration(name, value) => {
             // TODO: do I want shadowing? currently this shadows
             let value = typecheck_expression(value, outer_scopes, current_scope, context)?;
             current_scope.insert(name.clone(), (node.id, value.clone()));
 
-            ExpressionType::Primitive(PrimitiveType::Void)
+            ExpressionType::Void
         }
         // TODO: You can only from within a function
         AstNodeValue::Return(returned) => {
             typecheck_expression(returned, outer_scopes, current_scope, context)?;
 
-            ExpressionType::Primitive(PrimitiveType::Void)
+            ExpressionType::Void
         }
         AstNodeValue::Name {
             value: name,
@@ -420,9 +422,25 @@ fn typecheck_expression<'a>(
             let lhs_type = context.decl(&id);
             match lhs_type {
                 Some(
-                    StaticDeclaration::Struct(StructType { fields, .. })
-                    | StaticDeclaration::Interface(InterfaceType { fields, .. }),
-                ) => fields.get(name).expect("TODO: field is present").clone(),
+                    StaticDeclaration::Struct(StructType {
+                        fields,
+                        associated_functions,
+                        ..
+                    })
+                    | StaticDeclaration::Interface(InterfaceType {
+                        fields,
+                        associated_functions,
+                        ..
+                    }),
+                ) => fields
+                    .get(name)
+                    .cloned()
+                    .or_else(|| {
+                        associated_functions
+                            .get(name)
+                            .map(|decl| ExpressionType::DeclaredType(decl.id()))
+                    })
+                    .expect("TODO: field is present"),
                 Some(StaticDeclaration::Union(lhs_type)) => ExpressionType::Nullable(Box::new(
                     lhs_type
                         .variants
@@ -492,7 +510,7 @@ fn typecheck_expression<'a>(
                 });
             }
 
-            ExpressionType::Primitive(PrimitiveType::Void)
+            ExpressionType::Void
         }
         AstNodeValue::BinExpr(
             BinOp::AddAssign | BinOp::SubtractAssign | BinOp::MultiplyAssign | BinOp::DivideAssign,
@@ -516,7 +534,7 @@ fn typecheck_expression<'a>(
                 });
             }
 
-            ExpressionType::Primitive(PrimitiveType::Void)
+            ExpressionType::Void
         }
         AstNodeValue::While(condition, body) => {
             let condition = typecheck_expression(condition, outer_scopes, current_scope, context)?;
@@ -533,7 +551,7 @@ fn typecheck_expression<'a>(
 
             typecheck_expression(body, outer_scopes, current_scope, context)?;
 
-            ExpressionType::Primitive(PrimitiveType::Void)
+            ExpressionType::Void
         }
         AstNodeValue::If(IfDeclaration {
             condition,
@@ -569,7 +587,7 @@ fn typecheck_expression<'a>(
                         panic!("if and else don't match");
                     }
                 }
-                None => ExpressionType::Primitive(PrimitiveType::Void),
+                None => ExpressionType::Void,
             }
         }
         AstNodeValue::Block(children) => {
@@ -578,15 +596,13 @@ fn typecheck_expression<'a>(
             scopes.extend_from_slice(outer_scopes);
 
             let mut child_scope = HashMap::new();
-            let mut expr_ty = ExpressionType::Primitive(PrimitiveType::Void);
+            let mut expr_ty = ExpressionType::Void;
             for (index, child) in children.iter().enumerate() {
                 expr_ty =
                     typecheck_expression(child, &scopes[..], &mut child_scope, context)?.clone();
-                if index != children.len() - 1
-                    && expr_ty != ExpressionType::Primitive(PrimitiveType::Void)
-                {
+                if index != children.len() - 1 && expr_ty != ExpressionType::Void {
                     return Err(TypecheckError::TypeMismatch {
-                        expected: ExpressionType::Primitive(PrimitiveType::Void),
+                        expected: ExpressionType::Void,
                         received: expr_ty,
                     });
                 }
@@ -601,11 +617,17 @@ fn typecheck_expression<'a>(
             };
             let func = context.id_to_func(&func);
 
-            if func.params.len() != args.len() {
+            let params = if func.is_associated {
+                &func.params[1..]
+            } else {
+                &func.params[..]
+            };
+
+            if params.len() != args.len() {
                 return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
             }
 
-            for (arg, param) in args.iter().zip(func.params.iter()) {
+            for (arg, param) in args.iter().zip(params.iter()) {
                 let arg = typecheck_expression(arg, outer_scopes, current_scope, context)?;
                 if !is_assignable_to(&param, &arg) {
                     return Err(TypecheckError::TypeMismatch {

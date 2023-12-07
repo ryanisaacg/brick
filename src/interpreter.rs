@@ -115,7 +115,6 @@ pub async fn evaluate_node(fns: &HashMap<ID, Function>, ctx: &mut Context, node:
         }
         // No-op in the interpeter
         IrNodeValue::Declaration(_) => {}
-        IrNodeValue::Destructor(_) => todo!(),
         IrNodeValue::Call(fn_id, params) => {
             evaluate_node(fns, ctx, fn_id).await?;
             let Some(Value::Function(func)) = ctx.value_stack.pop() else {
@@ -203,7 +202,7 @@ pub async fn evaluate_node(fns: &HashMap<ID, Function>, ctx: &mut Context, node:
         }
         IrNodeValue::Return(val) => {
             evaluate_node(fns, ctx, val).await?;
-            return Err(EvaluationStop::Returned(dbg!(ctx.value_stack.pop().expect("value on stack"))));
+            return Err(EvaluationStop::Returned(ctx.value_stack.pop().expect("value on stack")));
         }
         IrNodeValue::Int(val) => ctx.value_stack.push(Value::Int(*val)),
         IrNodeValue::Float(val) => ctx.value_stack.push(Value::Float(*val)),

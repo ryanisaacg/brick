@@ -37,7 +37,7 @@ pub fn resolve_top_level_declarations(
         .map(|(name, node)| {
             Ok((
                 name.clone(),
-                resolve_declaration(names_to_declarations, &node)?,
+                resolve_declaration(names_to_declarations, &node, false)?,
             ))
         })
         .collect::<Result<HashMap<_, _>, _>>()
@@ -46,6 +46,7 @@ pub fn resolve_top_level_declarations(
 fn resolve_declaration(
     names_to_declarations: &HashMap<String, &AstNode<'_>>,
     node: &AstNode<'_>,
+    is_associated: bool,
 ) -> Result<StaticDeclaration, TypecheckError> {
     Ok(match &node.value {
         AstNodeValue::StructDeclaration(StructDeclarationValue {
@@ -70,14 +71,14 @@ fn resolve_declaration(
                     Ok(match &node.value {
                         AstNodeValue::RequiredFunction(FunctionHeaderValue { name, .. }) => (
                             name.clone(),
-                            resolve_declaration(names_to_declarations, node)?,
+                            resolve_declaration(names_to_declarations, node, true)?,
                         ),
                         AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
                             name,
                             ..
                         }) => (
                             name.clone(),
-                            resolve_declaration(names_to_declarations, node)?,
+                            resolve_declaration(names_to_declarations, node, true)?,
                         ),
                         _ => panic!(
                             "Associated function should not be anything but function declaration"
@@ -85,11 +86,7 @@ fn resolve_declaration(
                     })
                 })
                 .collect::<Result<HashMap<_, _>, _>>()?;
-            let fields = fields
-                .chain(associated_functions.iter().map(|(name, decl)| {
-                    Ok((name.clone(), ExpressionType::DeclaredType(decl.id())))
-                }))
-                .collect::<Result<_, _>>()?;
+            let fields = fields.collect::<Result<_, _>>()?;
 
             if let AstNodeValue::StructDeclaration(_) = &node.value {
                 StaticDeclaration::Struct(StructType {
@@ -137,7 +134,8 @@ fn resolve_declaration(
             returns: returns
                 .as_ref()
                 .map(|returns| resolve_type_name(&names_to_declarations, returns))
-                .unwrap_or(Ok(ExpressionType::Primitive(PrimitiveType::Void)))?,
+                .unwrap_or(Ok(ExpressionType::Void))?,
+            is_associated,
         }),
         _ => panic!("internal compiler error: unexpected decl node"),
     })
@@ -150,7 +148,7 @@ pub fn resolve_type_name(
     Ok(match &node.value {
         AstNodeValue::Name { value: name, .. } => match name.as_str() {
             "bool" => ExpressionType::Primitive(PrimitiveType::Bool),
-            "void" => ExpressionType::Primitive(PrimitiveType::Void),
+            "void" => ExpressionType::Void,
             "i32" => ExpressionType::Primitive(PrimitiveType::Int32),
             "f32" => ExpressionType::Primitive(PrimitiveType::Float32),
             "i64" => ExpressionType::Primitive(PrimitiveType::Int64),

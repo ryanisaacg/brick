@@ -108,7 +108,12 @@ pub fn compile_file<'a>(
             (name, module)
         })
         .collect::<HashMap<_, _>>();
-    let id_decls: HashMap<_, _> = declarations.values().map(|decl| (decl.id(), decl)).collect();
+    let mut id_decls = HashMap::new();
+    for decl in declarations.values() {
+        decl.visit(&mut |decl: &StaticDeclaration| {
+            id_decls.insert(decl.id(), decl);
+        });
+    }
 
     let modules = modules
         .par_iter()

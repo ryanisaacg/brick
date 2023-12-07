@@ -2,9 +2,30 @@ use std::collections::HashMap;
 
 use crate::{
     id::ID,
-    parser::{AstNode, AstNodeValue, BinOp, IfDeclaration},
-    typecheck::{ExpressionType, StaticDeclaration, TypecheckedFile, TypecheckedFunction},
+    parser::AstNode,
+    typecheck::{ExpressionType, StaticDeclaration, TypecheckedFile},
 };
+
+mod lower;
+mod rewrite_associated_functions;
+
+pub fn lower_module<'ast>(
+    module: TypecheckedFile<'ast>,
+    declarations: &HashMap<ID, &'ast StaticDeclaration>,
+) -> IrModule {
+    let mut module = lower::lower_module(module, declarations);
+
+    let mut rewrite_assc = |expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr);
+
+    for expr in module.top_level_statements.iter_mut() {
+        expr.visit_mut(&mut rewrite_assc);
+    }
+    for func in module.functions.iter_mut() {
+        func.body.visit_mut(&mut rewrite_assc);
+    }
+
+    module
+}
 
 // TODO: should the IR be a stack machine?
 
@@ -14,54 +35,6 @@ pub struct IrModule {
     pub functions: Vec<IrFunction>,
 }
 
-pub fn lower_module<'ast>(
-    module: TypecheckedFile<'ast>,
-    declarations: &HashMap<ID, &'ast StaticDeclaration>,
-) -> IrModule {
-    let TypecheckedFile {
-        associated_functions: _, // TODO
-        functions,
-        top_level_statements,
-    } = module;
-    IrModule {
-        functions: functions
-            .into_iter()
-            .map(|func| lower_function(declarations, func))
-            .collect(),
-        top_level_statements: top_level_statements
-            .into_iter()
-            .map(|stmt| lower_node(declarations, &stmt))
-            .collect(),
-    }
-}
-
-fn lower_function<'ast>(
-    decls: &HashMap<ID, &'ast StaticDeclaration>,
-    func: TypecheckedFunction<'ast>,
-) -> IrFunction {
-    let mut instructions: Vec<_> = func
-        .func
-        .params
-        .iter()
-        .enumerate()
-        .map(|(i, param)| IrNode {
-            id: param.id,
-            value: IrNodeValue::Parameter(i, param.id),
-        })
-        .collect();
-    instructions.push(lower_node(decls, func.func.body));
-    IrFunction {
-        id: func.id,
-        name: func.name,
-        body: IrNode {
-            id: func.id,
-            value: IrNodeValue::Sequence(instructions),
-        },
-    }
-}
-
-// TODO: include types in all IR nodes?
-
 #[derive(Clone, Debug)]
 pub struct IrFunction {
     pub id: ID,
@@ -69,199 +42,77 @@ pub struct IrFunction {
     pub body: IrNode,
 }
 
-fn lower_node<'ast>(
-    decls: &HashMap<ID, &'ast StaticDeclaration>,
-    node: &'ast AstNode<'ast>,
-) -> IrNode {
-    let value = match &node.value {
-        AstNodeValue::Int(x) => IrNodeValue::Int(*x),
-        AstNodeValue::Float(x) => IrNodeValue::Float(*x),
-        AstNodeValue::Bool(x) => IrNodeValue::Bool(*x),
-        AstNodeValue::Null => IrNodeValue::Null,
-        AstNodeValue::CharLiteral(x) => IrNodeValue::CharLiteral(*x),
-        AstNodeValue::StringLiteral(x) => IrNodeValue::StringLiteral(x.clone()),
-
-        AstNodeValue::While(cond, body) => {
-            // TODO: can you assign out of a while?
-            let cond = lower_node_alloc(decls, cond);
-            let body = lower_node_alloc(decls, body);
-            IrNodeValue::While(cond, body)
-        }
-        AstNodeValue::Block(contents) => {
-            let contents = contents
-                .iter()
-                .map(|node| lower_node(decls, node))
-                .collect();
-
-            IrNodeValue::Sequence(contents)
-        }
-        // TODO
-        AstNodeValue::If(IfDeclaration {
-            condition,
-            if_branch,
-            else_branch,
-        }) => {
-            let condition = lower_node_alloc(decls, condition);
-            let if_branch = lower_node_alloc(decls, if_branch);
-            let else_branch = else_branch
-                .as_ref()
-                .map(|else_branch| lower_node_alloc(decls, else_branch));
-
-            IrNodeValue::If(condition, if_branch, else_branch)
-        }
-
-        AstNodeValue::TakeUnique(inner) => IrNodeValue::TakeUnique(lower_node_alloc(decls, inner)),
-        AstNodeValue::TakeShared(inner) => IrNodeValue::Return(lower_node_alloc(decls, inner)),
-
-        // Statement doesn't actually add a node - the inner expression
-        // has what really counts
-        AstNodeValue::Statement(inner) => return lower_node(decls, inner),
-
-        AstNodeValue::Declaration(_lvalue, rvalue) => {
-            let lvalue = Box::new(IrNode::from_ast(
-                node,
-                IrNodeValue::VariableReference(node.id),
-            ));
-            let rvalue = lower_node_alloc(decls, rvalue);
-            let statements = vec![
-                IrNode::from_ast(node, IrNodeValue::Declaration(node.id)),
-                IrNode::from_ast(node, IrNodeValue::Assignment(lvalue, rvalue)),
-            ];
-            IrNodeValue::Sequence(statements)
-        }
-        AstNodeValue::Name { referenced_id, .. } => IrNodeValue::VariableReference(
-            *referenced_id.get().expect("referenced ID to be filled in"),
-        ),
-
-        AstNodeValue::Return(inner) => IrNodeValue::Return(lower_node_alloc(decls, inner)),
-        AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
-            let Some(ExpressionType::DeclaredType(expr_ty)) = left.ty.get() else {
-                panic!("expected left side of dot to be declared type");
-            };
-            let AstNodeValue::Name { value: name, .. } = &right.value else {
-                unreachable!()
-            };
-            if let Some(StaticDeclaration::Module(module)) = decls.get(expr_ty) {
-                IrNodeValue::VariableReference(
-                    module
-                        .exports
-                        .get(name)
-                        .expect("module export to exist")
-                        .id(),
-                )
-            } else {
-                let left = lower_node_alloc(decls, left);
-                IrNodeValue::Access(left, name.clone())
-            }
-        }
-        AstNodeValue::BinExpr(op, left, right) => {
-            let left = lower_node_alloc(decls, left);
-            let right = lower_node_alloc(decls, right);
-
-            match op {
-                BinOp::AddAssign => IrNodeValue::Assignment(
-                    left.clone(),
-                    Box::new(IrNode::from_ast(
-                        &node,
-                        IrNodeValue::BinOp(IrBinOp::Add, left, right),
-                    )),
-                ),
-                BinOp::SubtractAssign => IrNodeValue::Assignment(
-                    left.clone(),
-                    Box::new(IrNode::from_ast(
-                        &node,
-                        IrNodeValue::BinOp(IrBinOp::Subtract, left, right),
-                    )),
-                ),
-                BinOp::MultiplyAssign => IrNodeValue::Assignment(
-                    left.clone(),
-                    Box::new(IrNode::from_ast(
-                        &node,
-                        IrNodeValue::BinOp(IrBinOp::Multiply, left, right),
-                    )),
-                ),
-                BinOp::DivideAssign => IrNodeValue::Assignment(
-                    left.clone(),
-                    Box::new(IrNode::from_ast(
-                        &node,
-                        IrNodeValue::BinOp(IrBinOp::Divide, left, right),
-                    )),
-                ),
-                BinOp::Assignment => IrNodeValue::Assignment(left, right),
-
-                BinOp::Add => IrNodeValue::BinOp(IrBinOp::Add, left, right),
-                BinOp::Subtract => IrNodeValue::BinOp(IrBinOp::Subtract, left, right),
-                BinOp::Multiply => IrNodeValue::BinOp(IrBinOp::Multiply, left, right),
-                BinOp::Divide => IrNodeValue::BinOp(IrBinOp::Divide, left, right),
-                BinOp::LessThan => IrNodeValue::BinOp(IrBinOp::LessThan, left, right),
-                BinOp::GreaterThan => IrNodeValue::BinOp(IrBinOp::GreaterThan, left, right),
-                BinOp::LessEqualThan => IrNodeValue::BinOp(IrBinOp::LessEqualThan, left, right),
-                BinOp::GreaterEqualThan => {
-                    IrNodeValue::BinOp(IrBinOp::GreaterEqualThan, left, right)
-                }
-                BinOp::EqualTo => IrNodeValue::BinOp(IrBinOp::EqualTo, left, right),
-                BinOp::NotEquals => IrNodeValue::BinOp(IrBinOp::NotEquals, left, right),
-                BinOp::Index => IrNodeValue::Index(left, right),
-                BinOp::Dot => unreachable!(),
-            }
-        }
-        AstNodeValue::Call(func, params) => {
-            let func = lower_node_alloc(decls, func);
-            let params = params
-                .iter()
-                .map(|param| lower_node(decls, param))
-                .collect();
-            IrNodeValue::Call(func, params)
-        }
-        AstNodeValue::StructLiteral { name, fields } => {
-            let AstNodeValue::Name { referenced_id, .. } = &name.value else {
-                panic!("Struct literal must have Name");
-            };
-            let id = referenced_id
-                .get()
-                .expect("referenced fields to be filled in");
-            let fields = fields
-                .iter()
-                .map(|(name, field)| (name.clone(), lower_node(decls, field)))
-                .collect();
-            IrNodeValue::StructLiteral(*id, fields)
-        }
-        AstNodeValue::DictLiteral(_) => todo!(),
-        AstNodeValue::ArrayLiteral(_) => todo!(),
-        AstNodeValue::ArrayLiteralLength(_, _) => todo!(),
-
-        AstNodeValue::FunctionDeclaration(_)
-        | AstNodeValue::ExternFunctionBinding(_)
-        | AstNodeValue::StructDeclaration(_)
-        | AstNodeValue::UnionDeclaration(_)
-        | AstNodeValue::InterfaceDeclaration(_)
-        | AstNodeValue::Import(_)
-        | AstNodeValue::UniqueType(_)
-        | AstNodeValue::SharedType(_)
-        | AstNodeValue::NullableType(_)
-        | AstNodeValue::RequiredFunction(_)
-        | AstNodeValue::ArrayType(_) => unreachable!("Can't have these in a function body"),
-    };
-
-    IrNode::from_ast(node, value)
-}
-
-fn lower_node_alloc<'ast, 'ir>(
-    decls: &HashMap<ID, &'ast StaticDeclaration>,
-    node: &'ast AstNode<'ast>,
-) -> Box<IrNode> {
-    Box::new(lower_node(decls, node))
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct IrNode {
     pub id: ID,
     pub value: IrNodeValue,
+    pub ty: ExpressionType,
 }
 
 impl IrNode {
-    pub fn from_ast(ast: &AstNode<'_>, value: IrNodeValue) -> IrNode {
-        IrNode { id: ast.id, value }
+    pub fn from_ast(ast: &AstNode<'_>, value: IrNodeValue, ty: ExpressionType) -> IrNode {
+        IrNode {
+            id: ast.id,
+            value,
+            ty,
+        }
+    }
+
+    pub fn from_ast_void(ast: &AstNode<'_>, value: IrNodeValue) -> IrNode {
+        Self::from_ast(ast, value, ExpressionType::Void)
+    }
+
+    pub fn visit_mut(&mut self, callback: &mut impl FnMut(&mut IrNode)) {
+        callback(self);
+        match &mut self.value {
+            IrNodeValue::Parameter(_, _)
+            | IrNodeValue::VariableReference(_)
+            | IrNodeValue::Declaration(_)
+            | IrNodeValue::Int(_)
+            | IrNodeValue::Float(_)
+            | IrNodeValue::Bool(_)
+            | IrNodeValue::CharLiteral(_)
+            | IrNodeValue::StringLiteral(_)
+            | IrNodeValue::Null => {}
+            IrNodeValue::Call(lhs, params) => {
+                lhs.visit_mut(callback);
+                for param in params.iter_mut() {
+                    param.visit_mut(callback);
+                }
+            }
+            IrNodeValue::Access(child, _)
+            | IrNodeValue::TakeUnique(child)
+            | IrNodeValue::TakeShared(child)
+            | IrNodeValue::Dereference(child)
+            | IrNodeValue::ArrayLiteralLength(child, _)
+            | IrNodeValue::Return(child) => {
+                child.visit_mut(callback);
+            }
+            IrNodeValue::Assignment(lhs, rhs)
+            | IrNodeValue::Index(lhs, rhs)
+            | IrNodeValue::While(lhs, rhs)
+            | IrNodeValue::BinOp(_, lhs, rhs) => {
+                lhs.visit_mut(callback);
+                rhs.visit_mut(callback);
+            }
+            IrNodeValue::Sequence(children) | IrNodeValue::ArrayLiteral(children) => {
+                for child in children.iter_mut() {
+                    child.visit_mut(callback);
+                }
+            }
+            IrNodeValue::If(cond, if_branch, else_branch) => {
+                cond.visit_mut(callback);
+                if_branch.visit_mut(callback);
+                if let Some(else_branch) = else_branch {
+                    else_branch.visit_mut(callback);
+                }
+            }
+            IrNodeValue::StructLiteral(_, fields) => {
+                for field in fields.values_mut() {
+                    field.visit_mut(callback);
+                }
+            }
+        }
     }
 }
 
@@ -273,8 +124,6 @@ pub enum IrNodeValue {
     Parameter(usize, ID),
     VariableReference(ID),
     Declaration(ID),
-    // TODO: insert destructors
-    Destructor(ID),
 
     Call(Box<IrNode>, Vec<IrNode>),
     Access(Box<IrNode>, String),

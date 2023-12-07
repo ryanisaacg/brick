@@ -16,9 +16,6 @@ returns:
 
 interfaces:
 - structs:
-    - struct associated functions work:
-        - they are lowered to IR
-        - they can be called in the interperter
     - struct associated functions support "self"
         - self can be declared as a typeless parameter syntactically
         - self typechecks correctly
@@ -31,6 +28,11 @@ interfaces:
     - unions have associated functions
 - modules can be converted to interfaces
 - interfaces are supported in the interpreter
+
+static associated functions:
+- structs
+- unions
+- interfaces?
 
 arithmetic:
 - automatically promote integers to equivalent floats

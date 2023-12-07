@@ -17,3 +17,21 @@ tri.a + tri.b + tri.c
     assert_matches!(&result[..], [Value::Int(6)]);
 }
 
+
+#[tokio::test]
+async fn associated_functions() {
+    let result = eval(r#"
+struct Point2 {
+    x: i32,
+    y: i32,
+
+    fn length2(point: Point2): i32 {
+        (point.x * point.x) + (point.y * point.y)
+    }
+}
+
+let x = Point2 { x: 3, y: -1 };
+x.length2()
+"#).await.unwrap();
+    assert_matches!(&result[..], [Value::Int(10)]);
+}
