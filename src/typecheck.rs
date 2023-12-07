@@ -330,7 +330,7 @@ fn typecheck_function<'a>(
     // TODO: check all the return values for matching
     // TODO: check to see reachability
 
-    if !is_assignable_to(&function_type.returns, &return_value) {
+    if !is_assignable_to(&context.id_to_decl, &function_type.returns, &return_value) {
         return Err(TypecheckError::TypeMismatch {
             expected: function_type.returns.clone(),
             received: return_value.clone(),
@@ -503,7 +503,7 @@ fn typecheck_expression<'a>(
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
 
-            if !is_assignable_to(&left, &right) {
+            if !is_assignable_to(&context.id_to_decl, &left, &right) {
                 return Err(TypecheckError::TypeMismatch {
                     received: right.clone(),
                     expected: left.clone(),
@@ -527,7 +527,7 @@ fn typecheck_expression<'a>(
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
 
-            if !is_assignable_to(&left, &right) {
+            if !is_assignable_to(&context.id_to_decl, &left, &right) {
                 return Err(TypecheckError::TypeMismatch {
                     received: right.clone(),
                     expected: left.clone(),
@@ -629,7 +629,7 @@ fn typecheck_expression<'a>(
 
             for (arg, param) in args.iter().zip(params.iter()) {
                 let arg = typecheck_expression(arg, outer_scopes, current_scope, context)?;
-                if !is_assignable_to(&param, &arg) {
+                if !is_assignable_to(&context.id_to_decl, &param, &arg) {
                     return Err(TypecheckError::TypeMismatch {
                         received: arg.clone(),
                         expected: param.clone(),
@@ -657,7 +657,7 @@ fn typecheck_expression<'a>(
                 };
                 let arg_field =
                     typecheck_expression(arg_field, outer_scopes, current_scope, context)?;
-                if !is_assignable_to(param_field, &arg_field) {
+                if !is_assignable_to(&context.id_to_decl, param_field, &arg_field) {
                     return Err(TypecheckError::TypeMismatch {
                         received: arg_field.clone(),
                         expected: param_field.clone(),
@@ -704,19 +704,108 @@ fn resolve_name(
 }
 
 // TODO
-fn is_assignable_to(left: &ExpressionType, right: &ExpressionType) -> bool {
+fn is_assignable_to(
+    id_to_decl: &HashMap<ID, &StaticDeclaration>,
+    left: &ExpressionType,
+    right: &ExpressionType,
+) -> bool {
     use ExpressionType::*;
 
     match (left, right) {
+        // Kinda a special case, but a function that returns void should accept a void block
+        (Void, Void) => true,
+        // Void can never be assigned to or be assigned from
+        // Null can never be assigned to
+        (Void, _) | (_, Void) | (Null, _) => false,
+
+        // Handle pointers and de-referencing
         (Pointer(left_ty, left_inner), Pointer(right_ty, right_inner)) => {
-            left_ty == right_ty && is_assignable_to(left_inner, right_inner)
+            left_ty == right_ty && is_assignable_to(id_to_decl, left_inner, right_inner)
         }
-        (left, Pointer(_, right_inner)) => is_assignable_to(left, right_inner),
+        // TODO: auto-dereference in the IR
+        (left, Pointer(_, right_inner)) => is_assignable_to(id_to_decl, left, right_inner),
+        // TODO: support auto-dereferencing on lhs
         (Pointer(_, _), _right) => false,
+
+        // Nullability
         (Nullable(_), Null) => true,
-        (Nullable(left), Nullable(right)) => is_assignable_to(left, right),
-        (Nullable(left), right) => is_assignable_to(left, right),
-        (left, right) => left == right,
+        (_, Null) => false,
+        (Nullable(left), Nullable(right)) => is_assignable_to(id_to_decl, left, right),
+        (Nullable(left), right) => is_assignable_to(id_to_decl, left, right),
+        (_, Nullable(_)) => false,
+
+        // TODO: support auto-widening of primitive types
+        (Primitive(left), Primitive(right)) => left == right,
+        (Primitive(_), _) => false,
+
+        (DeclaredType(left), DeclaredType(right)) => {
+            let left = id_to_decl.get(left).expect("ID is in map");
+            let right = id_to_decl.get(right).expect("ID is in map");
+            use StaticDeclaration::*;
+            match (left, right) {
+                // TODO: support function pointer types?
+                (Func(left), Func(right)) => {
+                    dbg!(left)
+                        .params
+                        .iter()
+                        .zip(dbg!(right).params.iter())
+                        .all(|(left, right)| left == right)
+                        && left.returns == right.returns
+                }
+                (Func(_), _) => false,
+
+                // TODO: support structural struct conversions?
+                (Struct(_), Struct(_)) => left == right,
+                (Struct(_), _) => false,
+
+                // TODO: support structural union conversions?
+                (Union(_), Union(_)) => left == right,
+                (Union(_), _) => false,
+
+                (
+                    Interface(InterfaceType {
+                        associated_functions: lhs_assoc,
+                        ..
+                    }),
+                    Struct(StructType {
+                        associated_functions: rhs_assoc,
+                        ..
+                    }),
+                ) => lhs_assoc.iter().all(|(name, lhs_ty)| {
+                    let Some(rhs_ty) = rhs_assoc.get(name) else {
+                        return false;
+                    };
+                    let StaticDeclaration::Func(lhs) = lhs_ty else {
+                        return false;
+                    };
+                    let StaticDeclaration::Func(rhs) = rhs_ty else {
+                        return false;
+                    };
+                    // Ignore the first argument to both associated functions -
+                    // the type will differ because it's a self param
+                    lhs.params[1..]
+                        .iter()
+                        .zip(rhs.params[1..].iter())
+                        .all(|(lhs, rhs)| lhs == rhs)
+                        && lhs.returns == rhs.returns
+                }),
+                // TODO: support structural interface conversions?
+                (Interface(_), Interface(_)) => left == right,
+                (Interface(_), Func(_)) => todo!(),
+                (Interface(_), Union(_)) => todo!(),
+
+                // TODO: support module -> interface conversion
+                (_, Module(_)) => false,
+                // You can never assign to a module
+                (Module(_), _) => false,
+            }
+        }
+
+        // TODO: could these ever be valid?
+        (DeclaredType(_), Primitive(_)) | (DeclaredType(_), Array(_)) => false,
+
+        // TODO: arrays
+        (Array(_), Primitive(_)) | (Array(_), DeclaredType(_)) | (Array(_), Array(_)) => todo!(),
     }
 }
 

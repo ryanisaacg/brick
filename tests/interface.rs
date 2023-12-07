@@ -23,12 +23,34 @@ interface HasArea {
     fn area(area: HasArea): f32,
 }
 
+fn area_2(shape: HasArea): f32 {
+    let area = shape.area();
+    area * area
+}
+
+"#)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn can_assign_structs() {
+    eval(r#"
+interface HasArea {
+    fn area(area: HasArea): f32,
+}
+
 struct Square {
     size: f32,
 
     fn area(self: Square): f32 {
         self.size * self.size
     }
+}
+
+fn test() {
+    let x = Square { size: 10.0 };
+    area_2(x);
 }
 
 fn area_2(shape: HasArea): f32 {

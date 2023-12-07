@@ -1,5 +1,6 @@
 syntax:
 - remove ; and , requirements?
+- keyword arguments
 
 import support:
 - allow imports to have nested paths (sugar for recursively expanding?)
@@ -15,19 +16,24 @@ returns:
 - allow void returns
 
 interfaces:
+- remove fields from interfaces? vtables just make more sense...
 - structs:
     - struct associated functions support "self"
         - self can be declared as a typeless parameter syntactically
         - self typechecks correctly
         - IR transforms code properly to pass self into the function
     - structs can be converted to interfaces:
-        - typecheck allows structs to be assigned to compatible interfaces
+        - in the interpreter
 - unions:
     - unions can be converted to interfaces
     - union associated functions support "self"
     - union associated functions work
     - unions have associated functions
 - modules can be converted to interfaces
+- interfaces can be converted between each other:
+    - in typechecking
+    - in the IR
+    - in the interpreter
 - interfaces are supported in the interpreter:
     - interface associated functions are correctly rewritten
     - (requires references I think)
