@@ -148,7 +148,7 @@ pub fn resolve_type_name(
     node: &AstNode<'_>,
 ) -> Result<ExpressionType, TypecheckError> {
     Ok(match &node.value {
-        AstNodeValue::Name(name) => match name.as_str() {
+        AstNodeValue::Name { value: name, .. } => match name.as_str() {
             "bool" => ExpressionType::Primitive(PrimitiveType::Bool),
             "void" => ExpressionType::Primitive(PrimitiveType::Void),
             "i32" => ExpressionType::Primitive(PrimitiveType::Int32),

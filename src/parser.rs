@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::Peekable};
+use std::{collections::HashMap, iter::Peekable, sync::OnceLock};
 
 use thiserror::Error;
 use typed_arena::Arena;
@@ -8,6 +8,7 @@ use crate::{
     id::ID,
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
+    typecheck::ExpressionType,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -22,6 +23,7 @@ pub struct AstNode<'parse> {
     pub id: ID,
     pub value: AstNodeValue<'parse>,
     pub provenance: SourceRange,
+    pub ty: OnceLock<ExpressionType>,
 }
 
 impl<'a> AstNode<'a> {
@@ -30,6 +32,7 @@ impl<'a> AstNode<'a> {
             id: ID::new(),
             value,
             provenance,
+            ty: OnceLock::new(),
         }
     }
 }
@@ -96,7 +99,10 @@ pub enum AstNodeValue<'a> {
     // Any non-specific expression that ends in ; is a statement
     Statement(&'a mut AstNode<'a>),
 
-    Name(String),
+    Name {
+        value: String,
+        referenced_id: OnceLock<ID>,
+    },
 
     // Expressions
     Int(i64),
@@ -112,7 +118,7 @@ pub enum AstNodeValue<'a> {
     TakeUnique(&'a mut AstNode<'a>),
     TakeShared(&'a mut AstNode<'a>),
     StructLiteral {
-        name: String,
+        name: &'a mut AstNode<'a>,
         fields: HashMap<String, AstNode<'a>>,
     },
     DictLiteral(Vec<(AstNode<'a>, AstNode<'a>)>),
@@ -125,6 +131,15 @@ pub enum AstNodeValue<'a> {
     SharedType(&'a mut AstNode<'a>),
     ArrayType(&'a mut AstNode<'a>),
     NullableType(&'a mut AstNode<'a>),
+}
+
+impl AstNodeValue<'_> {
+    fn name<'a>(value: String) -> AstNodeValue<'a> {
+        AstNodeValue::Name {
+            value,
+            referenced_id: OnceLock::new(),
+        }
+    }
 }
 
 impl<'a> ArenaNode<'a> for AstNode<'a> {
@@ -217,7 +232,13 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                     children.push(field.type_);
                 }
             }
-            Name(_) | Import(_) | Int(_) | Float(_) | Bool(_) | Null | CharLiteral(_)
+            Name { .. }
+            | Import(_)
+            | Int(_)
+            | Float(_)
+            | Bool(_)
+            | Null
+            | CharLiteral(_)
             | StringLiteral(_) => {}
         }
     }
@@ -846,7 +867,7 @@ fn type_expression<'a>(
                 SourceRange::new(next.range.start(), end),
             )
         }
-        TokenValue::Word(name) => AstNode::new(AstNodeValue::Name(name), next.range),
+        TokenValue::Word(name) => AstNode::new(AstNodeValue::name(name), next.range),
         _ => {
             return Err(ParseError::UnexpectedToken(
                 Box::new(next),
@@ -918,7 +939,7 @@ fn expression_pratt<'a>(
         // Atoms
         TokenValue::True => AstNode::new(AstNodeValue::Bool(true), range),
         TokenValue::False => AstNode::new(AstNodeValue::Bool(false), range),
-        TokenValue::Word(word) => AstNode::new(AstNodeValue::Name(word), range),
+        TokenValue::Word(word) => AstNode::new(AstNodeValue::name(word), range),
         TokenValue::Null => AstNode::new(AstNodeValue::Null, range),
         TokenValue::CharacterLiteral(c) => AstNode::new(AstNodeValue::CharLiteral(c), range),
         TokenValue::StringLiteral(s) => AstNode::new(AstNodeValue::StringLiteral(s), range),
@@ -1031,7 +1052,7 @@ fn expression_pratt<'a>(
                             let lex = lex.clone();
                             source.next();
                             let argument =
-                                AstNode::new(AstNodeValue::Name(field.clone()), field_range);
+                                AstNode::new(AstNodeValue::name(field.clone()), field_range);
                             fields.insert(field, argument);
                             if lex == TokenValue::CloseBracket {
                                 break;
@@ -1068,12 +1089,15 @@ fn expression_pratt<'a>(
                         }
                     }
 
-                    let AstNodeValue::Name(name) = left.value else {
+                    let AstNodeValue::Name { .. } = left.value else {
                         todo!("non-name struct literal");
                     };
 
                     left = AstNode::new(
-                        AstNodeValue::StructLiteral { name, fields },
+                        AstNodeValue::StructLiteral {
+                            name: context.alloc(left),
+                            fields,
+                        },
                         SourceRange::new(start, end),
                     );
                 }
@@ -1290,7 +1314,7 @@ fn dict_literal<'a>(
                     let token = already_peeked_token(source)?;
                     cursor = token.range.end();
 
-                    let value = AstNode::new(AstNodeValue::Name(key.clone()), key_range.clone());
+                    let value = AstNode::new(AstNodeValue::name(key.clone()), key_range.clone());
                     let key = AstNode::new(AstNodeValue::StringLiteral(key), key_range);
 
                     entries.push((key, value));

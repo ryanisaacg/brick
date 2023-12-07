@@ -1,8 +1,6 @@
 use assert_matches::assert_matches;
 use brick::{eval, Value};
 
-// TODO: assert matches?
-
 #[tokio::test]
 async fn basic_precedence() {
     let result = eval("1 + 2 * 3").await.unwrap();
