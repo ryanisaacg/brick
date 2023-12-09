@@ -41,10 +41,12 @@ fn lower_function<'ast>(
         .params
         .iter()
         .enumerate()
-        .map(|(i, param)| IrNode {
-            id: param.id,
-            value: IrNodeValue::Parameter(i, param.id),
-            ty: func_ty.params[i].clone(),
+        .map(|(i, param)| {
+            IrNode::generated_with_id(
+                param.id,
+                IrNodeValue::Parameter(i, param.id),
+                func_ty.params[i].clone(),
+            )
         })
         .collect();
     let body = lower_node(decls, func.func.body);
@@ -53,11 +55,7 @@ fn lower_function<'ast>(
     IrFunction {
         id: func.id,
         name: func.name,
-        body: IrNode {
-            id: func.id,
-            value: IrNodeValue::Sequence(instructions),
-            ty,
-        },
+        body: IrNode::generated_with_id(func.id, IrNodeValue::Sequence(instructions), ty),
     }
 }
 
