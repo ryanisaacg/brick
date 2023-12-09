@@ -61,7 +61,10 @@ pub async fn interpret_code(
             functions.insert(function.id, Function::Ir(function));
         }
     }
-    let module = StaticDeclaration::Module(ModuleType { id: ID::new(), exports: declarations });
+    let module = StaticDeclaration::Module(ModuleType {
+        id: ID::new(),
+        exports: declarations,
+    });
     module.visit(&mut |decl| {
         if let StaticDeclaration::Module(ModuleType { exports, .. }) = decl {
             for (name, decl) in exports.iter() {

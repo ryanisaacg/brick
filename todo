@@ -22,8 +22,6 @@ interfaces:
         - self can be declared as a typeless parameter syntactically
         - self typechecks correctly
         - IR transforms code properly to pass self into the function
-    - structs can be converted to interfaces:
-        - in the interpreter
 - unions:
     - unions can be converted to interfaces
     - union associated functions support "self"
@@ -34,11 +32,11 @@ interfaces:
     - in typechecking
     - in the IR
     - in the interpreter
+- interface conversion:
+    - checks return statements
+    - checks implicit returns due to the end of blocks
 - interfaces are supported in the interpreter:
-    - interface associated functions are correctly rewritten
-    - (requires references I think)
-    - conversion instruction builds a vtable
-    - vtable is correctly called
+    - mutable interfaces (requires references, significant borrowck implications)
 
 static associated functions:
 - structs

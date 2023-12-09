@@ -3,7 +3,8 @@ use brick::{eval, Value};
 
 #[tokio::test]
 async fn basic_construction() {
-    let result = eval(r#"
+    let result = eval(
+        r#"
 struct Triple {
     a: i32,
     b: i32,
@@ -13,14 +14,17 @@ struct Triple {
 let tri = Triple { a: 1, b: 2, c: 3 };
 
 tri.a + tri.b + tri.c
-"#).await.unwrap();
+"#,
+    )
+    .await
+    .unwrap();
     assert_matches!(&result[..], [Value::Int(6)]);
 }
 
-
 #[tokio::test]
 async fn associated_functions() {
-    let result = eval(r#"
+    let result = eval(
+        r#"
 struct Point2 {
     x: i32,
     y: i32,
@@ -32,6 +36,9 @@ struct Point2 {
 
 let x = Point2 { x: 3, y: -1 };
 x.length2()
-"#).await.unwrap();
+"#,
+    )
+    .await
+    .unwrap();
     assert_matches!(&result[..], [Value::Int(10)]);
 }

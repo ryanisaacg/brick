@@ -3,13 +3,15 @@ use brick::{eval, Value};
 
 #[tokio::test]
 async fn add() {
-    let result = eval(r#"
+    let result = eval(
+        r#"
 fn add(a: i32, b: i32): i32 {
     a + b
 }
 
 add(1, 2)
-"#)
+"#,
+    )
     .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int(3)]);
@@ -17,7 +19,8 @@ add(1, 2)
 
 #[tokio::test]
 async fn recursion() {
-    let result = eval(r#"
+    let result = eval(
+        r#"
 fn fib(input: i32): i32 {
     if input < 1 {
         return 0;
@@ -30,7 +33,8 @@ fn fib(input: i32): i32 {
 }
 
 fib(5)
-"#)
+"#,
+    )
     .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int(5)]);
@@ -39,12 +43,13 @@ fib(5)
 #[tokio::test]
 #[should_panic]
 async fn return_mismatch() {
-    eval(r#"
+    eval(
+        r#"
 fn function(): i32 {
     "not an i32"
 }
-"#)
+"#,
+    )
     .await
     .unwrap();
 }
-

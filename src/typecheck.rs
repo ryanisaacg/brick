@@ -745,10 +745,9 @@ fn is_assignable_to(
             match (left, right) {
                 // TODO: support function pointer types?
                 (Func(left), Func(right)) => {
-                    dbg!(left)
-                        .params
+                    left.params
                         .iter()
-                        .zip(dbg!(right).params.iter())
+                        .zip(right.params.iter())
                         .all(|(left, right)| left == right)
                         && left.returns == right.returns
                 }

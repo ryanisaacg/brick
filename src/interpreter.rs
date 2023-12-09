@@ -18,6 +18,7 @@ pub enum Value {
     Array(Vec<Value>),
     Struct(HashMap<String, Value>),
     Function(Function),
+    Interface(Box<Value>, HashMap<ID, Function>),
 }
 
 impl Value {
@@ -88,7 +89,8 @@ impl Context {
 
     pub fn add_fns(&mut self, fns: &HashMap<ID, Function>) {
         for (id, fn_val) in fns.iter() {
-            self.variables.insert(id.clone(), Value::Function(fn_val.clone()));
+            self.variables
+                .insert(id.clone(), Value::Function(fn_val.clone()));
         }
     }
 
@@ -103,7 +105,11 @@ pub enum EvaluationStop {
 
 // Kinda a hack: when we return, unwind the stack via Result
 #[async_recursion]
-pub async fn evaluate_node(fns: &HashMap<ID, Function>, ctx: &mut Context, node: &IrNode) -> Result<(), EvaluationStop> {
+pub async fn evaluate_node(
+    fns: &HashMap<ID, Function>,
+    ctx: &mut Context,
+    node: &IrNode,
+) -> Result<(), EvaluationStop> {
     match &node.value {
         IrNodeValue::Parameter(idx, id) => {
             ctx.variables.insert(*id, ctx.params[*idx].clone());
@@ -115,19 +121,36 @@ pub async fn evaluate_node(fns: &HashMap<ID, Function>, ctx: &mut Context, node:
         }
         // No-op in the interpeter
         IrNodeValue::Declaration(_) => {}
-        IrNodeValue::Call(fn_id, params) => {
+        IrNodeValue::Call(fn_id, args) => {
             evaluate_node(fns, ctx, fn_id).await?;
             let Some(Value::Function(func)) = ctx.value_stack.pop() else {
                 panic!("expected functions");
             };
             // TODO: reverse order?
-            for param in params.iter().rev() {
+            for param in args.iter().rev() {
                 evaluate_node(fns, ctx, param).await?;
             }
-            let params: Vec<_> = (0..params.len())
+            let params: Vec<_> = (0..args.len())
                 .map(|_| ctx.value_stack.pop().expect("param on stack"))
                 .collect();
             let results = evaluate_function(fns, &func, params);
+            ctx.value_stack.extend(results.await.into_iter());
+        }
+        IrNodeValue::VtableCall(var, virtual_fn_id, args) => {
+            evaluate_node(fns, ctx, var).await?;
+            let Some(Value::Interface(value, vtable)) = ctx.value_stack.pop() else {
+                panic!("expected interface");
+            };
+            let function = vtable.get(virtual_fn_id).unwrap();
+            // TODO: reverse order?
+            for param in args.iter().rev() {
+                evaluate_node(fns, ctx, param).await?;
+            }
+            ctx.value_stack.push(*value);
+            let params: Vec<_> = (0..args.len())
+                .map(|_| ctx.value_stack.pop().expect("param on stack"))
+                .collect();
+            let results = evaluate_function(fns, function, params);
             ctx.value_stack.extend(results.await.into_iter());
         }
         IrNodeValue::Access(val, name) => {
@@ -202,7 +225,9 @@ pub async fn evaluate_node(fns: &HashMap<ID, Function>, ctx: &mut Context, node:
         }
         IrNodeValue::Return(val) => {
             evaluate_node(fns, ctx, val).await?;
-            return Err(EvaluationStop::Returned(ctx.value_stack.pop().expect("value on stack")));
+            return Err(EvaluationStop::Returned(
+                ctx.value_stack.pop().expect("value on stack"),
+            ));
         }
         IrNodeValue::Int(val) => ctx.value_stack.push(Value::Int(*val)),
         IrNodeValue::Float(val) => ctx.value_stack.push(Value::Float(*val)),
@@ -253,7 +278,18 @@ pub async fn evaluate_node(fns: &HashMap<ID, Function>, ctx: &mut Context, node:
         IrNodeValue::ArrayLiteral(_) => todo!(),
         IrNodeValue::ArrayLiteralLength(_, _) => todo!(),
 
-        IrNodeValue::StructToInterface(_) => todo!(),
+        IrNodeValue::StructToInterface { value, vtable } => {
+            evaluate_node(fns, ctx, value).await?;
+            let value = ctx.value_stack.pop().unwrap();
+            let vtable = vtable
+                .iter()
+                .map(|(virtual_fn_id, concrete_fn_id)| {
+                    (*virtual_fn_id, fns.get(concrete_fn_id).unwrap().clone())
+                })
+                .collect();
+            ctx.value_stack
+                .push(Value::Interface(Box::new(value), vtable));
+        }
     }
 
     Ok(())
