@@ -11,8 +11,11 @@ use crate::{
 pub enum Value {
     Null,
     ID(ID),
-    Int(i64),
-    Float(f64),
+    Size(usize),
+    Int32(i32),
+    Int64(i64),
+    Float32(f32),
+    Float64(f64),
     Bool(bool),
     Char(char),
     String(String),
@@ -25,8 +28,10 @@ pub enum Value {
 impl Value {
     pub fn to_numeric(&self) -> Option<Numeric> {
         match self {
-            Value::Int(x) => Some(Numeric::Int(*x)),
-            Value::Float(x) => Some(Numeric::Float(*x)),
+            Value::Int32(x) => Some(Numeric::Int32(*x)),
+            Value::Float32(x) => Some(Numeric::Float32(*x)),
+            Value::Int64(x) => Some(Numeric::Int64(*x)),
+            Value::Float64(x) => Some(Numeric::Float64(*x)),
             _ => None,
         }
     }
@@ -79,8 +84,10 @@ pub async fn evaluate_function(
 }
 
 pub enum Numeric {
-    Int(i64),
-    Float(f64),
+    Int32(i32),
+    Float32(f32),
+    Int64(i64),
+    Float64(f64),
 }
 
 pub struct Context {
@@ -204,11 +211,11 @@ pub async fn evaluate_node(
                 .expect("value numeric");
 
             let val = match (left, right) {
-                (Numeric::Int(left), Numeric::Int(right)) => match op {
-                    HirBinOp::Add => Value::Int(left + right),
-                    HirBinOp::Subtract => Value::Int(left - right),
-                    HirBinOp::Multiply => Value::Int(left * right),
-                    HirBinOp::Divide => Value::Int(left / right),
+                (Numeric::Int32(left), Numeric::Int32(right)) => match op {
+                    HirBinOp::Add => Value::Int32(left + right),
+                    HirBinOp::Subtract => Value::Int32(left - right),
+                    HirBinOp::Multiply => Value::Int32(left * right),
+                    HirBinOp::Divide => Value::Int32(left / right),
                     HirBinOp::LessThan => Value::Bool(left < right),
                     HirBinOp::GreaterThan => Value::Bool(left > right),
                     HirBinOp::LessEqualThan => Value::Bool(left <= right),
@@ -216,11 +223,35 @@ pub async fn evaluate_node(
                     HirBinOp::EqualTo => Value::Bool(left == right),
                     HirBinOp::NotEquals => Value::Bool(left != right),
                 },
-                (Numeric::Float(left), Numeric::Float(right)) => match op {
-                    HirBinOp::Add => Value::Float(left + right),
-                    HirBinOp::Subtract => Value::Float(left - right),
-                    HirBinOp::Multiply => Value::Float(left * right),
-                    HirBinOp::Divide => Value::Float(left / right),
+                (Numeric::Float32(left), Numeric::Float32(right)) => match op {
+                    HirBinOp::Add => Value::Float32(left + right),
+                    HirBinOp::Subtract => Value::Float32(left - right),
+                    HirBinOp::Multiply => Value::Float32(left * right),
+                    HirBinOp::Divide => Value::Float32(left / right),
+                    HirBinOp::LessThan => Value::Bool(left < right),
+                    HirBinOp::GreaterThan => Value::Bool(left > right),
+                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
+                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
+                    HirBinOp::EqualTo => Value::Bool(left == right),
+                    HirBinOp::NotEquals => Value::Bool(left != right),
+                },
+                (Numeric::Int64(left), Numeric::Int64(right)) => match op {
+                    HirBinOp::Add => Value::Int64(left + right),
+                    HirBinOp::Subtract => Value::Int64(left - right),
+                    HirBinOp::Multiply => Value::Int64(left * right),
+                    HirBinOp::Divide => Value::Int64(left / right),
+                    HirBinOp::LessThan => Value::Bool(left < right),
+                    HirBinOp::GreaterThan => Value::Bool(left > right),
+                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
+                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
+                    HirBinOp::EqualTo => Value::Bool(left == right),
+                    HirBinOp::NotEquals => Value::Bool(left != right),
+                },
+                (Numeric::Float64(left), Numeric::Float64(right)) => match op {
+                    HirBinOp::Add => Value::Float64(left + right),
+                    HirBinOp::Subtract => Value::Float64(left - right),
+                    HirBinOp::Multiply => Value::Float64(left * right),
+                    HirBinOp::Divide => Value::Float64(left / right),
                     HirBinOp::LessThan => Value::Bool(left < right),
                     HirBinOp::GreaterThan => Value::Bool(left > right),
                     HirBinOp::LessEqualThan => Value::Bool(left <= right),
@@ -239,8 +270,8 @@ pub async fn evaluate_node(
                 ctx.value_stack.pop().expect("value on stack"),
             ));
         }
-        HirNodeValue::Int(val) => ctx.value_stack.push(Value::Int(*val)),
-        HirNodeValue::Float(val) => ctx.value_stack.push(Value::Float(*val)),
+        HirNodeValue::Int(val) => ctx.value_stack.push(Value::Int32(*val as i32)),
+        HirNodeValue::Float(val) => ctx.value_stack.push(Value::Float32(*val as f32)),
         HirNodeValue::Bool(val) => ctx.value_stack.push(Value::Bool(*val)),
         HirNodeValue::Null => ctx.value_stack.push(Value::Null),
         HirNodeValue::StringLiteral(val) => ctx.value_stack.push(Value::String(val.clone())),

@@ -18,7 +18,7 @@ tri.a + tri.b + tri.c
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int(6)]);
+    assert_matches!(&result[..], [Value::Int32(6)]);
 }
 
 #[tokio::test]
@@ -40,5 +40,5 @@ x.length2()
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int(10)]);
+    assert_matches!(&result[..], [Value::Int32(10)]);
 }

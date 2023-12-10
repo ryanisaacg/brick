@@ -11,13 +11,15 @@ async fn main() {
             stdin()
                 .read_line(&mut input)
                 .expect("should be able to read from stdin");
-            Some(Value::Int(input.trim().parse().expect("should be an int")))
+            Some(Value::Int32(
+                input.trim().parse().expect("should be an int"),
+            ))
         }),
     );
     bindings.insert(
         "write".to_string(),
         ext_fn(|values| async move {
-            let Value::Int(input) = values[0] else {
+            let Value::Int32(input) = values[0] else {
                 panic!("expected int");
             };
             println!("{}", input);

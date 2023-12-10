@@ -12,7 +12,7 @@ async fn assignment() {
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int(3)]);
+    assert_matches!(&result[..], [Value::Int32(3)]);
 }
 
 #[tokio::test]
@@ -41,5 +41,5 @@ async fn numeric_assignment() {
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int(4)]);
+    assert_matches!(&result[..], [Value::Int32(4)]);
 }

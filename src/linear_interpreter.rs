@@ -7,6 +7,7 @@ use crate::{
     id::ID,
     interpreter::Numeric,
     linear_ir::{LinearBlock, LinearFunction, LinearNode, LinearNodeValue},
+    typecheck::{ExpressionType, PrimitiveType},
     Value,
 };
 
@@ -74,14 +75,18 @@ pub enum Unwind {
 
 pub struct VM {
     pub memory: [u8; 1024],
-    pub stack: Vec<Value>,
+    pub op_stack: Vec<Value>,
+    pub base_ptr: usize,
+    pub stack_ptr: usize,
 }
 
 impl VM {
     pub fn new() -> VM {
         VM {
             memory: [0; 1024],
-            stack: Vec::new(),
+            op_stack: Vec::new(),
+            base_ptr: 0,
+            stack_ptr: 0,
         }
     }
 }
@@ -95,20 +100,61 @@ pub async fn evaluate_block(
     node: &LinearNode,
 ) -> Result<(), Unwind> {
     match &node.value {
-        LinearNodeValue::BasePtr => todo!(),
-        LinearNodeValue::StackAlloc(_) => todo!(),
+        LinearNodeValue::BasePtr => {
+            vm.op_stack.push(Value::Size(vm.base_ptr));
+        }
+        LinearNodeValue::StackAlloc(amount) => {
+            vm.stack_ptr += amount;
+        }
         LinearNodeValue::Parameter(_) => todo!(),
         LinearNodeValue::Read {
             location,
             offset,
             size,
-        } => todo!(),
+            ty,
+        } => {
+            evaluate_block(fns, params, vm, location).await?;
+            let Some(Value::Size(mut location)) = vm.op_stack.pop() else {
+                unreachable!()
+            };
+            location += offset;
+            let memory = &vm.memory[location..(location + size)];
+            // TODO: complex types
+            let ExpressionType::Primitive(ty) = ty else {
+                todo!()
+            };
+            vm.op_stack.push(match ty {
+                PrimitiveType::Char => todo!(), //Value::Char(*bytemuck::from_bytes(memory)),
+                PrimitiveType::String => todo!(),
+                PrimitiveType::Int32 => Value::Int32(*bytemuck::from_bytes(memory)),
+                PrimitiveType::Float32 => Value::Float32(*bytemuck::from_bytes(memory)),
+                PrimitiveType::Int64 => Value::Int64(*bytemuck::from_bytes(memory)),
+                PrimitiveType::Float64 => Value::Float64(*bytemuck::from_bytes(memory)),
+                PrimitiveType::Bool => todo!(), //Value::Bool(*bytemuck::from_bytes(memory)),
+            });
+        }
         LinearNodeValue::Write {
             location,
             offset,
             size,
             value,
-        } => todo!(),
+        } => {
+            evaluate_block(fns, params, vm, value).await?;
+            // TODO: complex types
+            let value = vm.op_stack.pop().unwrap().to_numeric().unwrap();
+            evaluate_block(fns, params, vm, location).await?;
+            let Some(Value::Size(mut location)) = vm.op_stack.pop() else {
+                unreachable!()
+            };
+            location += offset;
+            let bytes = match &value {
+                Numeric::Float32(value) => bytemuck::bytes_of(value),
+                Numeric::Int32(value) => bytemuck::bytes_of(value),
+                Numeric::Float64(value) => bytemuck::bytes_of(value),
+                Numeric::Int64(value) => bytemuck::bytes_of(value),
+            };
+            (&mut vm.memory[location..(location + size)]).copy_from_slice(bytes);
+        }
         LinearNodeValue::Call(_, _) => todo!(),
         LinearNodeValue::Return(_) => todo!(),
         LinearNodeValue::If(_, _, _) => todo!(),
@@ -117,14 +163,14 @@ pub async fn evaluate_block(
         LinearNodeValue::BinOp(op, _ty, lhs, rhs) => {
             evaluate_block(fns, params, vm, rhs).await?;
             evaluate_block(fns, params, vm, lhs).await?;
-            let left = vm.stack.pop().unwrap().to_numeric().unwrap();
-            let right = vm.stack.pop().unwrap().to_numeric().unwrap();
+            let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
+            let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let val = match (left, right) {
-                (Numeric::Int(left), Numeric::Int(right)) => match op {
-                    HirBinOp::Add => Value::Int(left + right),
-                    HirBinOp::Subtract => Value::Int(left - right),
-                    HirBinOp::Multiply => Value::Int(left * right),
-                    HirBinOp::Divide => Value::Int(left / right),
+                (Numeric::Int32(left), Numeric::Int32(right)) => match op {
+                    HirBinOp::Add => Value::Int32(left + right),
+                    HirBinOp::Subtract => Value::Int32(left - right),
+                    HirBinOp::Multiply => Value::Int32(left * right),
+                    HirBinOp::Divide => Value::Int32(left / right),
                     HirBinOp::LessThan => Value::Bool(left < right),
                     HirBinOp::GreaterThan => Value::Bool(left > right),
                     HirBinOp::LessEqualThan => Value::Bool(left <= right),
@@ -132,11 +178,35 @@ pub async fn evaluate_block(
                     HirBinOp::EqualTo => Value::Bool(left == right),
                     HirBinOp::NotEquals => Value::Bool(left != right),
                 },
-                (Numeric::Float(left), Numeric::Float(right)) => match op {
-                    HirBinOp::Add => Value::Float(left + right),
-                    HirBinOp::Subtract => Value::Float(left - right),
-                    HirBinOp::Multiply => Value::Float(left * right),
-                    HirBinOp::Divide => Value::Float(left / right),
+                (Numeric::Float32(left), Numeric::Float32(right)) => match op {
+                    HirBinOp::Add => Value::Float32(left + right),
+                    HirBinOp::Subtract => Value::Float32(left - right),
+                    HirBinOp::Multiply => Value::Float32(left * right),
+                    HirBinOp::Divide => Value::Float32(left / right),
+                    HirBinOp::LessThan => Value::Bool(left < right),
+                    HirBinOp::GreaterThan => Value::Bool(left > right),
+                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
+                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
+                    HirBinOp::EqualTo => Value::Bool(left == right),
+                    HirBinOp::NotEquals => Value::Bool(left != right),
+                },
+                (Numeric::Int64(left), Numeric::Int64(right)) => match op {
+                    HirBinOp::Add => Value::Int64(left + right),
+                    HirBinOp::Subtract => Value::Int64(left - right),
+                    HirBinOp::Multiply => Value::Int64(left * right),
+                    HirBinOp::Divide => Value::Int64(left / right),
+                    HirBinOp::LessThan => Value::Bool(left < right),
+                    HirBinOp::GreaterThan => Value::Bool(left > right),
+                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
+                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
+                    HirBinOp::EqualTo => Value::Bool(left == right),
+                    HirBinOp::NotEquals => Value::Bool(left != right),
+                },
+                (Numeric::Float64(left), Numeric::Float64(right)) => match op {
+                    HirBinOp::Add => Value::Float64(left + right),
+                    HirBinOp::Subtract => Value::Float64(left - right),
+                    HirBinOp::Multiply => Value::Float64(left * right),
+                    HirBinOp::Divide => Value::Float64(left / right),
                     HirBinOp::LessThan => Value::Bool(left < right),
                     HirBinOp::GreaterThan => Value::Bool(left > right),
                     HirBinOp::LessEqualThan => Value::Bool(left <= right),
@@ -146,30 +216,30 @@ pub async fn evaluate_block(
                 },
                 (_, _) => unreachable!(),
             };
-            vm.stack.push(dbg!(val));
+            vm.op_stack.push(val);
         }
         LinearNodeValue::ID(_) => todo!(),
         LinearNodeValue::Size(_) => todo!(),
         LinearNodeValue::Int(x) => {
-            vm.stack.push(Value::Int(*x));
+            vm.op_stack.push(Value::Int32(*x as i32));
         }
         LinearNodeValue::Float(x) => {
-            vm.stack.push(Value::Float(*x));
+            vm.op_stack.push(Value::Float32(*x as f32));
         }
         LinearNodeValue::Bool(x) => {
-            vm.stack.push(Value::Bool(*x));
+            vm.op_stack.push(Value::Bool(*x));
         }
         LinearNodeValue::Null => {
-            vm.stack.push(Value::Null);
+            vm.op_stack.push(Value::Null);
         }
         LinearNodeValue::CharLiteral(x) => {
-            vm.stack.push(Value::Char(*x));
+            vm.op_stack.push(Value::Char(*x));
         }
         LinearNodeValue::StringLiteral(x) => {
-            vm.stack.push(Value::String(x.clone()));
+            vm.op_stack.push(Value::String(x.clone()));
         }
         LinearNodeValue::FunctionID(x) => {
-            vm.stack.push(Value::ID(*x));
+            vm.op_stack.push(Value::ID(*x));
         }
     }
 

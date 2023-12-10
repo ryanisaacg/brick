@@ -68,7 +68,7 @@ a1 + a2
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int(17)]);
+    assert_matches!(&result[..], [Value::Int32(17)]);
 }
 
 #[tokio::test]

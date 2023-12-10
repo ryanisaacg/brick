@@ -14,7 +14,7 @@ add(1, 2)
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int(3)]);
+    assert_matches!(&result[..], [Value::Int32(3)]);
 }
 
 #[tokio::test]
@@ -37,7 +37,7 @@ fib(5)
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int(5)]);
+    assert_matches!(&result[..], [Value::Int32(5)]);
 }
 
 #[tokio::test]

@@ -4,7 +4,7 @@ use crate::{
     hir::{HirBinOp, HirFunction, HirNode, HirNodeValue},
     id::ID,
     provenance::SourceRange,
-    typecheck::{ExpressionType, PrimitiveType, StaticDeclaration},
+    typecheck::{ExpressionType, PrimitiveType},
 };
 
 #[derive(Debug)]
@@ -67,6 +67,7 @@ pub enum LinearNodeValue {
         location: Box<LinearNode>,
         offset: usize,
         size: usize,
+        ty: ExpressionType,
     },
     Write {
         location: Box<LinearNode>,
@@ -141,8 +142,8 @@ pub fn linearize_nodes(
                 });
             }
             HirNodeValue::Assignment(lhs, rhs) => {
-                let (location, offset) = lower_lvalue(*lhs);
-                let size = expression_type_size(declarations, &rhs.ty);
+                let size = expression_type_size(declarations, &lhs.ty);
+                let (location, offset) = lower_lvalue(stack_entries, *lhs);
                 let rhs = lower_expression(declarations, stack_entries, *rhs);
                 values.push(LinearNode {
                     value: LinearNodeValue::Write {
@@ -227,8 +228,8 @@ fn lower_expression(
         HirNodeValue::StringLiteral(x) => LinearNodeValue::StringLiteral(x),
 
         HirNodeValue::BinOp(op, lhs, rhs) => {
-            let ExpressionType::Primitive(ty) = ty else {
-                unreachable!("binoperands must be primitive")
+            let ExpressionType::Primitive(ty) = rhs.ty else {
+                unreachable!("binoperands must be primitive not {:?}", ty)
             };
             LinearNodeValue::BinOp(
                 op,
@@ -243,6 +244,7 @@ fn lower_expression(
                 location: Box::new(LinearNode::new(LinearNodeValue::BasePtr)),
                 offset,
                 size: expression_type_size(declarations, &ty),
+                ty,
             }
         }
         HirNodeValue::Call(_, _) => todo!(),
@@ -270,8 +272,40 @@ fn lower_expression(
     LinearNode { value, provenance }
 }
 
-fn lower_lvalue(lvalue: HirNode) -> (LinearNode, usize) {
-    todo!();
+fn lower_lvalue(stack_entries: &HashMap<ID, usize>, lvalue: HirNode) -> (LinearNode, usize) {
+    match lvalue.value {
+        HirNodeValue::VariableReference(id) => {
+            let offset = stack_entries.get(&id).unwrap();
+
+            (LinearNode::new(LinearNodeValue::BasePtr), *offset)
+        }
+
+        HirNodeValue::Parameter(_, _) => todo!(),
+        HirNodeValue::Declaration(_) => todo!(),
+        HirNodeValue::Call(_, _) => todo!(),
+        HirNodeValue::Access(_, _) => todo!(),
+        HirNodeValue::Assignment(_, _) => todo!(),
+        HirNodeValue::Index(_, _) => todo!(),
+        HirNodeValue::BinOp(_, _, _) => todo!(),
+        HirNodeValue::Return(_) => todo!(),
+        HirNodeValue::Int(_) => todo!(),
+        HirNodeValue::Float(_) => todo!(),
+        HirNodeValue::Bool(_) => todo!(),
+        HirNodeValue::Null => todo!(),
+        HirNodeValue::CharLiteral(_) => todo!(),
+        HirNodeValue::StringLiteral(_) => todo!(),
+        HirNodeValue::TakeUnique(_) => todo!(),
+        HirNodeValue::TakeShared(_) => todo!(),
+        HirNodeValue::Dereference(_) => todo!(),
+        HirNodeValue::Sequence(_) => todo!(),
+        HirNodeValue::If(_, _, _) => todo!(),
+        HirNodeValue::While(_, _) => todo!(),
+        HirNodeValue::StructLiteral(_, _) => todo!(),
+        HirNodeValue::ArrayLiteral(_) => todo!(),
+        HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
+        HirNodeValue::VtableCall(_, _, _) => todo!(),
+        HirNodeValue::StructToInterface { value, vtable } => todo!(),
+    }
 }
 
 const POINTER_SIZE: usize = 4;

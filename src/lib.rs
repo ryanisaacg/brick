@@ -147,14 +147,13 @@ pub async fn linear_interpret_code(
         &mut stack_offset,
         statements.into(),
     );
-    dbg!(&statements);
 
     let mut vm = VM::new();
     for statement in statements.statements {
         let _ = evaluate_block(&functions, &[], &mut vm, &statement).await;
     }
 
-    Ok(vm.stack)
+    Ok(vm.op_stack)
 }
 
 pub struct CompilationResults {
