@@ -288,9 +288,3 @@ pub enum HirBinOp {
     EqualTo,
     NotEquals,
 }
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum HirLvalueBinOp {
-    Index,
-    Assignment,
-}

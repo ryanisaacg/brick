@@ -37,7 +37,7 @@ pub fn resolve_top_level_declarations(
         .map(|(name, node)| {
             Ok((
                 name.clone(),
-                resolve_declaration(names_to_declarations, &node, false)?,
+                resolve_declaration(names_to_declarations, node, false)?,
             ))
         })
         .collect::<Result<HashMap<_, _>, _>>()
@@ -62,7 +62,7 @@ fn resolve_declaration(
             let fields = fields.iter().map(|NameAndType { id: _, name, type_ }| {
                 Ok((
                     name.clone(),
-                    resolve_type_name(&names_to_declarations, type_)?,
+                    resolve_type_name(names_to_declarations, type_)?,
                 ))
             });
             let associated_functions = associated_functions
@@ -110,7 +110,7 @@ fn resolve_declaration(
                     .map(|NameAndType { id: _, name, type_ }| {
                         Ok((
                             name.clone(),
-                            resolve_type_name(&names_to_declarations, type_)?,
+                            resolve_type_name(names_to_declarations, type_)?,
                         ))
                     })
                     .collect::<Result<HashMap<_, _>, _>>()?,
@@ -129,11 +129,11 @@ fn resolve_declaration(
             id: node.id,
             params: params
                 .iter()
-                .map(|NameAndType { type_, .. }| resolve_type_name(&names_to_declarations, type_))
+                .map(|NameAndType { type_, .. }| resolve_type_name(names_to_declarations, type_))
                 .collect::<Result<Vec<_>, _>>()?,
             returns: returns
                 .as_ref()
-                .map(|returns| resolve_type_name(&names_to_declarations, returns))
+                .map(|returns| resolve_type_name(names_to_declarations, returns))
                 .unwrap_or(Ok(ExpressionType::Void))?,
             is_associated,
         }),

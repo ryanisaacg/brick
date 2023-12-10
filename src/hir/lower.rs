@@ -24,7 +24,7 @@ pub fn lower_module<'ast>(
             .collect(),
         top_level_statements: top_level_statements
             .into_iter()
-            .map(|stmt| lower_node(declarations, &stmt))
+            .map(|stmt| lower_node(declarations, stmt))
             .collect(),
     }
 }
@@ -153,28 +153,28 @@ fn lower_node<'ast>(
                 BinOp::AddAssign => HirNodeValue::Assignment(
                     left.clone(),
                     Box::new(HirNode::from_ast_void(
-                        &node,
+                        node,
                         HirNodeValue::BinOp(HirBinOp::Add, left, right),
                     )),
                 ),
                 BinOp::SubtractAssign => HirNodeValue::Assignment(
                     left.clone(),
                     Box::new(HirNode::from_ast_void(
-                        &node,
+                        node,
                         HirNodeValue::BinOp(HirBinOp::Subtract, left, right),
                     )),
                 ),
                 BinOp::MultiplyAssign => HirNodeValue::Assignment(
                     left.clone(),
                     Box::new(HirNode::from_ast_void(
-                        &node,
+                        node,
                         HirNodeValue::BinOp(HirBinOp::Multiply, left, right),
                     )),
                 ),
                 BinOp::DivideAssign => HirNodeValue::Assignment(
                     left.clone(),
                     Box::new(HirNode::from_ast_void(
-                        &node,
+                        node,
                         HirNodeValue::BinOp(HirBinOp::Divide, left, right),
                     )),
                 ),
@@ -244,7 +244,7 @@ fn lower_node<'ast>(
     HirNode::from_ast(node, value, node.ty.get().expect("type filled").clone())
 }
 
-fn lower_node_alloc<'ast, 'ir>(
+fn lower_node_alloc<'ast>(
     decls: &HashMap<ID, &'ast StaticDeclaration>,
     node: &'ast AstNode<'ast>,
 ) -> Box<HirNode> {

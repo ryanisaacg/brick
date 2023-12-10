@@ -8,6 +8,7 @@ impl ID {
         Self(0)
     }
 
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self(get_id() as u32)
     }

@@ -81,17 +81,14 @@ fn collect_blocks_to_add<'a>(
     cfg_end: NodeIndex,
     current: NodeIndex,
 ) {
-    match intermediate_cfg.node_weight(current) {
-        Some(IntermediateNode::Expression(expr)) => {
-            let Some(CfgNode::Block(block)) = cfg.node_weight_mut(leader) else {
-                panic!("expected block");
-            };
-            block.push(expr);
-        }
-        _ => {}
+    if let Some(IntermediateNode::Expression(expr)) = intermediate_cfg.node_weight(current) {
+        let Some(CfgNode::Block(block)) = cfg.node_weight_mut(leader) else {
+            panic!("expected block");
+        };
+        block.push(expr);
     }
     let mut edges = intermediate_cfg.neighbors(current).detach();
-    while let Some((edge, neighbor)) = edges.next(&intermediate_cfg) {
+    while let Some((edge, neighbor)) = edges.next(intermediate_cfg) {
         let edge = intermediate_cfg.edge_weight(edge).expect("edge exists");
         if let Some(IntermediateNode::Exit) = intermediate_cfg.node_weight(neighbor) {
             cfg.add_edge(leader, cfg_end, *edge);

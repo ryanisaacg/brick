@@ -90,7 +90,7 @@ impl Context {
     pub fn add_fns(&mut self, fns: &HashMap<ID, Function>) {
         for (id, fn_val) in fns.iter() {
             self.variables
-                .insert(id.clone(), Value::Function(fn_val.clone()));
+                .insert(*id, Value::Function(fn_val.clone()));
         }
     }
 

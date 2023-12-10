@@ -283,11 +283,6 @@ pub enum ParseError {
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, LexError>>;
 type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
-pub struct ParsedModule<'a> {
-    pub arena: Arena<AstNode<'a>>,
-    pub top_level_nodes: Vec<AstNode<'a>>,
-}
-
 pub fn parse<'a>(
     arena: &'a Arena<AstNode<'a>>,
     mut source: impl Iterator<Item = Result<Token, LexError>>,
@@ -298,7 +293,7 @@ pub fn parse<'a>(
 
     while let Some(lexeme) = peek_token_optional(&mut source)? {
         let cursor = lexeme.range.start();
-        let statement = statement(&mut source, &arena, cursor)?;
+        let statement = statement(&mut source, arena, cursor)?;
 
         top_level_nodes.push(statement);
     }

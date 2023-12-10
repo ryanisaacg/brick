@@ -92,8 +92,8 @@ pub struct CompilationResults {
     pub declarations: HashMap<String, StaticDeclaration>,
 }
 
-pub fn typecheck_module<'a>(
-    module_name: &'a str,
+pub fn typecheck_module(
+    module_name: &str,
     source_name: &'static str,
     contents: String,
 ) -> Result<CompilationResults, CompileError> {

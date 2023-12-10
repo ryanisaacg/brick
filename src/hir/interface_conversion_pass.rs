@@ -7,7 +7,7 @@ use crate::{
 
 use super::{HirModule, HirNode, HirNodeValue};
 
-pub fn rewrite<'ast>(module: &mut HirModule, declarations: &HashMap<ID, &'ast StaticDeclaration>) {
+pub fn rewrite(module: &mut HirModule, declarations: &HashMap<ID, &StaticDeclaration>) {
     // TODO: this doesn't account for the parent being a function call
 
     // Find all places where a parent expects a child to be a struct
@@ -48,7 +48,7 @@ pub fn rewrite<'ast>(module: &mut HirModule, declarations: &HashMap<ID, &'ast St
             }
         }
         HirNodeValue::Assignment(lhs, rhs) => {
-            add_required_conversion(declarations, &mut struct_expectations, &lhs.ty, &rhs);
+            add_required_conversion(declarations, &mut struct_expectations, &lhs.ty, rhs);
         }
         HirNodeValue::Return(_) => {
             // TODO: returning interfaces from functions
