@@ -1,6 +1,8 @@
 linear IR:
 - define an instruction set
 - lower high level IR into linear IR
+- AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
+- AST rewrite the HIR to disambiguate between variable references and function references
 - rewrite the interpreter to target linear IR
 
 syntax:

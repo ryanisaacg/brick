@@ -3,14 +3,16 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 use async_recursion::async_recursion;
 
 use crate::{
-    hir::{HirBinOp, HirFunction, HirNode, HirNodeValue},
+    hir::{HirBinOp, HirNode, HirNodeValue},
     id::ID,
+    interpreter::Numeric,
+    linear_ir::{LinearBlock, LinearFunction, LinearNode, LinearNodeValue},
+    Value,
 };
 
-#[derive(Clone, Debug, PartialEq)]
+/*#[derive(Clone, Debug)]
 pub enum Value {
     Null,
-    ID(ID),
     Int(i64),
     Float(f64),
     Bool(bool),
@@ -18,12 +20,10 @@ pub enum Value {
     String(String),
     Array(Vec<Value>),
     Struct(HashMap<String, Value>),
-    Function(Function),
-    Interface(Box<Value>, HashMap<ID, Function>),
 }
 
 impl Value {
-    pub fn to_numeric(&self) -> Option<Numeric> {
+    fn to_numeric(&self) -> Option<Numeric> {
         match self {
             Value::Int(x) => Some(Numeric::Int(*x)),
             Value::Float(x) => Some(Numeric::Float(*x)),
@@ -33,34 +33,23 @@ impl Value {
 }
 
 pub type ExternBinding =
-    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>> + Send + Sync;
+    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>> + Send + Sync;*/
 
-#[derive(Clone)]
 pub enum Function {
-    Ir(HirFunction),
-    Extern(Arc<ExternBinding>),
-}
-
-impl PartialEq for Function {
-    fn eq(&self, other: &Self) -> bool {
-        use Function::*;
-        match (self, other) {
-            (Ir(a), Ir(b)) => a.id == b.id,
-            _ => false,
-        }
-    }
+    Ir(LinearFunction),
+    //Extern(Arc<ExternBinding>),
 }
 
 impl std::fmt::Debug for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Function::Ir(inner) => write!(f, "Function::Ir({:?})", inner),
-            Function::Extern(_) => write!(f, "Function::Extern(opaque)"),
+            //Function::Extern(_) => write!(f, "Function::Extern(opaque)"),
         }
     }
 }
 
-pub async fn evaluate_function(
+/*pub async fn evaluate_function(
     fns: &HashMap<ID, Function>,
     function: &Function,
     params: Vec<Value>,
@@ -71,56 +60,123 @@ pub async fn evaluate_function(
             ctx.add_fns(fns);
             match evaluate_node(fns, &mut ctx, &func.body).await {
                 Ok(_) => ctx.value_stack.pop(),
-                Err(EvaluationStop::Returned(val)) => Some(val),
+                Err(Unwind::Returned(val)) => Some(val),
             }
         }
         Function::Extern(ext) => ext(params).await,
     }
+}*/
+
+pub enum Unwind {
+    Returned, // TODO: return values
+    Break,
 }
 
-pub enum Numeric {
-    Int(i64),
-    Float(f64),
+pub struct VM {
+    pub memory: [u8; 1024],
+    pub stack: Vec<Value>,
 }
 
-pub struct Context {
-    params: Vec<Value>,
-    variables: HashMap<ID, Value>,
-    value_stack: Vec<Value>,
-}
-
-impl Context {
-    pub fn new(params: Vec<Value>) -> Context {
-        Context {
-            params,
-            variables: HashMap::new(),
-            value_stack: Vec::new(),
+impl VM {
+    pub fn new() -> VM {
+        VM {
+            memory: [0; 1024],
+            stack: Vec::new(),
         }
     }
-
-    pub fn add_fns(&mut self, fns: &HashMap<ID, Function>) {
-        for (id, fn_val) in fns.iter() {
-            self.variables.insert(*id, Value::Function(fn_val.clone()));
-        }
-    }
-
-    pub fn values(self) -> Vec<Value> {
-        self.value_stack
-    }
-}
-
-pub enum EvaluationStop {
-    Returned(Value),
 }
 
 // Kinda a hack: when we return, unwind the stack via Result
 #[async_recursion]
-pub async fn evaluate_node(
+pub async fn evaluate_block(
     fns: &HashMap<ID, Function>,
-    ctx: &mut Context,
-    node: &HirNode,
-) -> Result<(), EvaluationStop> {
+    params: &[Vec<u8>],
+    vm: &mut VM,
+    node: &LinearNode,
+) -> Result<(), Unwind> {
     match &node.value {
+        LinearNodeValue::BasePtr => todo!(),
+        LinearNodeValue::StackAlloc(_) => todo!(),
+        LinearNodeValue::Parameter(_) => todo!(),
+        LinearNodeValue::Read {
+            location,
+            offset,
+            size,
+        } => todo!(),
+        LinearNodeValue::Write {
+            location,
+            offset,
+            size,
+            value,
+        } => todo!(),
+        LinearNodeValue::Call(_, _) => todo!(),
+        LinearNodeValue::Return(_) => todo!(),
+        LinearNodeValue::If(_, _, _) => todo!(),
+        LinearNodeValue::Break => todo!(),
+        LinearNodeValue::Loop(_) => todo!(),
+        LinearNodeValue::BinOp(op, _ty, lhs, rhs) => {
+            evaluate_block(fns, params, vm, rhs).await?;
+            evaluate_block(fns, params, vm, lhs).await?;
+            let left = vm.stack.pop().unwrap().to_numeric().unwrap();
+            let right = vm.stack.pop().unwrap().to_numeric().unwrap();
+            let val = match (left, right) {
+                (Numeric::Int(left), Numeric::Int(right)) => match op {
+                    HirBinOp::Add => Value::Int(left + right),
+                    HirBinOp::Subtract => Value::Int(left - right),
+                    HirBinOp::Multiply => Value::Int(left * right),
+                    HirBinOp::Divide => Value::Int(left / right),
+                    HirBinOp::LessThan => Value::Bool(left < right),
+                    HirBinOp::GreaterThan => Value::Bool(left > right),
+                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
+                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
+                    HirBinOp::EqualTo => Value::Bool(left == right),
+                    HirBinOp::NotEquals => Value::Bool(left != right),
+                },
+                (Numeric::Float(left), Numeric::Float(right)) => match op {
+                    HirBinOp::Add => Value::Float(left + right),
+                    HirBinOp::Subtract => Value::Float(left - right),
+                    HirBinOp::Multiply => Value::Float(left * right),
+                    HirBinOp::Divide => Value::Float(left / right),
+                    HirBinOp::LessThan => Value::Bool(left < right),
+                    HirBinOp::GreaterThan => Value::Bool(left > right),
+                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
+                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
+                    HirBinOp::EqualTo => Value::Bool(left == right),
+                    HirBinOp::NotEquals => Value::Bool(left != right),
+                },
+                (_, _) => unreachable!(),
+            };
+            vm.stack.push(dbg!(val));
+        }
+        LinearNodeValue::ID(_) => todo!(),
+        LinearNodeValue::Size(_) => todo!(),
+        LinearNodeValue::Int(x) => {
+            vm.stack.push(Value::Int(*x));
+        }
+        LinearNodeValue::Float(x) => {
+            vm.stack.push(Value::Float(*x));
+        }
+        LinearNodeValue::Bool(x) => {
+            vm.stack.push(Value::Bool(*x));
+        }
+        LinearNodeValue::Null => {
+            vm.stack.push(Value::Null);
+        }
+        LinearNodeValue::CharLiteral(x) => {
+            vm.stack.push(Value::Char(*x));
+        }
+        LinearNodeValue::StringLiteral(x) => {
+            vm.stack.push(Value::String(x.clone()));
+        }
+        LinearNodeValue::FunctionID(x) => {
+            vm.stack.push(Value::ID(*x));
+        }
+    }
+
+    Ok(())
+}
+
+/*
         HirNodeValue::Parameter(idx, id) => {
             ctx.variables.insert(*id, ctx.params[*idx].clone());
         }
@@ -235,7 +291,7 @@ pub async fn evaluate_node(
         }
         HirNodeValue::Return(val) => {
             evaluate_node(fns, ctx, val).await?;
-            return Err(EvaluationStop::Returned(
+            return Err(Unwind::Returned(
                 ctx.value_stack.pop().expect("value on stack"),
             ));
         }
@@ -304,3 +360,4 @@ pub async fn evaluate_node(
 
     Ok(())
 }
+        */
