@@ -123,7 +123,7 @@ pub enum AstNodeValue<'a> {
     },
     DictLiteral(Vec<(AstNode<'a>, AstNode<'a>)>),
     ArrayLiteral(Vec<AstNode<'a>>),
-    ArrayLiteralLength(&'a mut AstNode<'a>, u64),
+    ArrayLiteralLength(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
     Block(Vec<AstNode<'a>>),
 
     // Types
@@ -1247,15 +1247,15 @@ fn array_literal<'a>(
             ))
         }
         TokenValue::Semicolon => {
-            let (length, range) =
-                integer(source, start, "expected number after ; in array literal")?;
+            let length = expression(source, context, separator.range.end(), true)?;
             let close = assert_next_lexeme_eq(
                 source.next(),
                 TokenValue::CloseSquare,
-                range.end(),
+                length.provenance.end(),
                 "expected ] after array length in array literal",
             )?;
             let expr = add_node(context, expr);
+            let length = add_node(context, length);
             Ok(AstNode::new(
                 AstNodeValue::ArrayLiteralLength(expr, length),
                 SourceRange::new(start, close.range.end()),

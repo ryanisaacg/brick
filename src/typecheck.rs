@@ -456,7 +456,31 @@ fn typecheck_expression<'a>(
                 _ => todo!("illegal lhs type"),
             }
         }
-        AstNodeValue::BinExpr(BinOp::Index, _, _) => todo!(),
+        AstNodeValue::BinExpr(BinOp::Index, collection, index) => {
+            let collection_ty =
+                typecheck_expression(collection, outer_scopes, current_scope, context)?;
+            match collection_ty {
+                ExpressionType::Array(item_ty) => {
+                    // TODO: new type for indexing arrays?
+                    // TODO: int64?
+                    let index_ty =
+                        typecheck_expression(index, outer_scopes, current_scope, context)?;
+                    if !is_assignable_to(
+                        &context.id_to_decl,
+                        &ExpressionType::Primitive(PrimitiveType::Int32),
+                        index_ty,
+                    ) {
+                        return Err(TypecheckError::TypeMismatch {
+                            received: index_ty.clone(),
+                            expected: ExpressionType::Primitive(PrimitiveType::Int32),
+                        });
+                    }
+
+                    *item_ty.clone()
+                }
+                _ => todo!("can't index that"),
+            }
+        }
         AstNodeValue::BinExpr(
             BinOp::Add | BinOp::Subtract | BinOp::Multiply | BinOp::Divide,
             left,
@@ -677,12 +701,36 @@ fn typecheck_expression<'a>(
             PointerKind::Shared,
             Box::new(typecheck_expression(inner, outer_scopes, current_scope, context)?.clone()),
         ),
-        AstNodeValue::ArrayLiteral(_items) => {
-            // TODO: how to determine what the intended array type is?
-            todo!();
+        AstNodeValue::ArrayLiteral(items) => {
+            if items.len() == 0 {
+                todo!("how to typecheck 0-length collections?");
+            }
+            let mut iter = items.iter();
+            let ty =
+                typecheck_expression(iter.next().unwrap(), outer_scopes, current_scope, context)?
+                    .clone();
+            for remaining in iter {
+                let this_ty =
+                    typecheck_expression(remaining, outer_scopes, current_scope, context)?;
+                if &ty != this_ty {
+                    return Err(TypecheckError::TypeMismatch {
+                        received: this_ty.clone(),
+                        expected: ty,
+                    });
+                }
+            }
+            ExpressionType::Array(Box::new(ty))
         }
-        AstNodeValue::ArrayLiteralLength(value, _length) => {
+        AstNodeValue::ArrayLiteralLength(value, length) => {
             let inner = typecheck_expression(value, outer_scopes, current_scope, context)?;
+            let length = typecheck_expression(length, outer_scopes, current_scope, context)?;
+            // TODO: array index type
+            if length != &ExpressionType::Primitive(PrimitiveType::Int32) {
+                return Err(TypecheckError::TypeMismatch {
+                    expected: ExpressionType::Primitive(PrimitiveType::Int32),
+                    received: length.clone(),
+                });
+            }
             ExpressionType::Array(Box::new(inner.clone()))
         }
     };

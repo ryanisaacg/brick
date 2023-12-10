@@ -69,7 +69,8 @@ pub fn rewrite<'ast>(module: &mut IrModule, declarations: &HashMap<ID, &'ast Sta
                 );
             }
         }
-        IrNodeValue::ArrayLiteral(_) | IrNodeValue::ArrayLiteralLength(_, _) => todo!("arrays"),
+        // TODO: can entire collections be converted implicitly?
+        IrNodeValue::ArrayLiteral(_) | IrNodeValue::ArrayLiteralLength(_, _) => {}
         IrNodeValue::StructToInterface { .. } => {
             todo!("can this even exist at this stage")
         }

@@ -218,8 +218,15 @@ fn lower_node<'ast>(
             IrNodeValue::StructLiteral(*id, fields)
         }
         AstNodeValue::DictLiteral(_) => todo!(),
-        AstNodeValue::ArrayLiteral(_) => todo!(),
-        AstNodeValue::ArrayLiteralLength(_, _) => todo!(),
+        AstNodeValue::ArrayLiteral(arr) => {
+            let arr = arr.iter().map(|elem| lower_node(decls, elem)).collect();
+            IrNodeValue::ArrayLiteral(arr)
+        }
+        AstNodeValue::ArrayLiteralLength(elem, count) => {
+            let elem = lower_node_alloc(decls, elem);
+            let count = lower_node_alloc(decls, count);
+            IrNodeValue::ArrayLiteralLength(elem, count)
+        }
 
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
