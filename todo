@@ -1,3 +1,8 @@
+linear IR:
+- define an instruction set
+- lower high level IR into linear IR
+- rewrite the interpreter to target linear IR
+
 syntax:
 - remove ; and , requirements?
 - keyword arguments

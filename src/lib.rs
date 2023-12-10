@@ -6,8 +6,8 @@ use std::{
 };
 
 pub use interpreter::Value;
-use interpreter::{evaluate_node, Context, ExternBinding, Function};
-use ir::IrModule;
+use interpreter::{evaluate_node, Context, Function};
+use hir::HirModule;
 use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
 
@@ -15,16 +15,16 @@ mod arena;
 mod id;
 mod tokenizer;
 
-pub mod interpreter;
-pub mod ir;
-pub mod parser;
-pub mod provenance;
-pub mod typecheck;
+mod interpreter;
+mod hir;
+mod parser;
+mod provenance;
+mod typecheck;
 
 use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
-use crate::{id::ID, ir::lower_module, typecheck::ModuleType};
+use crate::{id::ID, hir::lower_module, typecheck::ModuleType};
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -38,6 +38,8 @@ pub async fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
     interpret_code("eval", source.to_string(), HashMap::new()).await
 }
 
+pub use interpreter::ExternBinding;
+
 // TODO: move this to a separate crate
 pub async fn interpret_code(
     source_name: &'static str,
@@ -48,7 +50,7 @@ pub async fn interpret_code(
     let CompilationResults {
         modules,
         declarations,
-    } = compile_file("main", source_name, contents)?;
+    } = typecheck_module("main", source_name, contents)?;
     let mut statements = Vec::new();
     let mut functions = HashMap::new();
 
@@ -86,11 +88,11 @@ pub async fn interpret_code(
 }
 
 pub struct CompilationResults {
-    pub modules: HashMap<String, IrModule>,
+    pub modules: HashMap<String, HirModule>,
     pub declarations: HashMap<String, StaticDeclaration>,
 }
 
-pub fn compile_file<'a>(
+pub fn typecheck_module<'a>(
     module_name: &'a str,
     source_name: &'static str,
     contents: String,

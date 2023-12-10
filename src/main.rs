@@ -1,4 +1,4 @@
-use brick::{interpret_code, interpreter::ExternBinding, Value};
+use brick::{interpret_code, ExternBinding, Value};
 use std::{collections::HashMap, fs::read_to_string, future::Future, io::stdin, sync::Arc};
 
 #[tokio::main(flavor = "current_thread")]

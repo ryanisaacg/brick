@@ -1,8 +1,8 @@
-use brick::compile_file;
+use brick::typecheck_module;
 
 #[tokio::test]
 async fn arrays() {
-    compile_file(
+    typecheck_module(
         "test",
         "test",
         r#"
@@ -20,7 +20,7 @@ total
 #[tokio::test]
 #[should_panic]
 async fn bad_arrays() {
-    compile_file(
+    typecheck_module(
         "test",
         "test",
         r#"

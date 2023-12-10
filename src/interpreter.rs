@@ -4,7 +4,7 @@ use async_recursion::async_recursion;
 
 use crate::{
     id::ID,
-    ir::{IrBinOp, IrFunction, IrNode, IrNodeValue},
+    hir::{HirBinOp, HirFunction, HirNode, HirNodeValue},
 };
 
 #[derive(Clone, Debug)]
@@ -36,7 +36,7 @@ pub type ExternBinding =
 
 #[derive(Clone)]
 pub enum Function {
-    Ir(IrFunction),
+    Ir(HirFunction),
     Extern(Arc<ExternBinding>),
 }
 
@@ -108,20 +108,20 @@ pub enum EvaluationStop {
 pub async fn evaluate_node(
     fns: &HashMap<ID, Function>,
     ctx: &mut Context,
-    node: &IrNode,
+    node: &HirNode,
 ) -> Result<(), EvaluationStop> {
     match &node.value {
-        IrNodeValue::Parameter(idx, id) => {
+        HirNodeValue::Parameter(idx, id) => {
             ctx.variables.insert(*id, ctx.params[*idx].clone());
         }
-        IrNodeValue::VariableReference(id) => {
+        HirNodeValue::VariableReference(id) => {
             // TODO: don't clone?
             ctx.value_stack
                 .push(ctx.variables.get(id).expect("var to be assigned").clone());
         }
         // No-op in the interpeter
-        IrNodeValue::Declaration(_) => {}
-        IrNodeValue::Call(fn_id, args) => {
+        HirNodeValue::Declaration(_) => {}
+        HirNodeValue::Call(fn_id, args) => {
             evaluate_node(fns, ctx, fn_id).await?;
             let Some(Value::Function(func)) = ctx.value_stack.pop() else {
                 panic!("expected functions");
@@ -136,7 +136,7 @@ pub async fn evaluate_node(
             let results = evaluate_function(fns, &func, params);
             ctx.value_stack.extend(results.await.into_iter());
         }
-        IrNodeValue::VtableCall(var, virtual_fn_id, args) => {
+        HirNodeValue::VtableCall(var, virtual_fn_id, args) => {
             evaluate_node(fns, ctx, var).await?;
             let Some(Value::Interface(value, vtable)) = ctx.value_stack.pop() else {
                 panic!("expected interface");
@@ -153,7 +153,7 @@ pub async fn evaluate_node(
             let results = evaluate_function(fns, function, params);
             ctx.value_stack.extend(results.await.into_iter());
         }
-        IrNodeValue::Access(val, name) => {
+        HirNodeValue::Access(val, name) => {
             evaluate_node(fns, ctx, val).await?;
             let Some(Value::Struct(val)) = ctx.value_stack.pop() else {
                 panic!("ICE: left side of '.' must be struct");
@@ -162,10 +162,10 @@ pub async fn evaluate_node(
             ctx.value_stack
                 .push(val.get(name).expect("field must be present").clone());
         }
-        IrNodeValue::Assignment(lvalue, rvalue) => {
+        HirNodeValue::Assignment(lvalue, rvalue) => {
             evaluate_node(fns, ctx, rvalue).await?;
             // TODO: more lvalues
-            let IrNodeValue::VariableReference(id) = &lvalue.value else {
+            let HirNodeValue::VariableReference(id) = &lvalue.value else {
                 todo!("complex lvalues");
             };
             ctx.variables.insert(
@@ -176,7 +176,7 @@ pub async fn evaluate_node(
             );
         }
         // TODO: floating arithmetic
-        IrNodeValue::BinOp(op, left, right) => {
+        HirNodeValue::BinOp(op, left, right) => {
             evaluate_node(fns, ctx, right).await?;
             evaluate_node(fns, ctx, left).await?;
             let left = ctx
@@ -195,52 +195,52 @@ pub async fn evaluate_node(
 
             let val = match (left, right) {
                 (Numeric::Int(left), Numeric::Int(right)) => match op {
-                    IrBinOp::Add => Value::Int(left + right),
-                    IrBinOp::Subtract => Value::Int(left - right),
-                    IrBinOp::Multiply => Value::Int(left * right),
-                    IrBinOp::Divide => Value::Int(left / right),
-                    IrBinOp::LessThan => Value::Bool(left < right),
-                    IrBinOp::GreaterThan => Value::Bool(left > right),
-                    IrBinOp::LessEqualThan => Value::Bool(left <= right),
-                    IrBinOp::GreaterEqualThan => Value::Bool(left >= right),
-                    IrBinOp::EqualTo => Value::Bool(left == right),
-                    IrBinOp::NotEquals => Value::Bool(left != right),
+                    HirBinOp::Add => Value::Int(left + right),
+                    HirBinOp::Subtract => Value::Int(left - right),
+                    HirBinOp::Multiply => Value::Int(left * right),
+                    HirBinOp::Divide => Value::Int(left / right),
+                    HirBinOp::LessThan => Value::Bool(left < right),
+                    HirBinOp::GreaterThan => Value::Bool(left > right),
+                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
+                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
+                    HirBinOp::EqualTo => Value::Bool(left == right),
+                    HirBinOp::NotEquals => Value::Bool(left != right),
                 },
                 (Numeric::Float(left), Numeric::Float(right)) => match op {
-                    IrBinOp::Add => Value::Float(left + right),
-                    IrBinOp::Subtract => Value::Float(left - right),
-                    IrBinOp::Multiply => Value::Float(left * right),
-                    IrBinOp::Divide => Value::Float(left / right),
-                    IrBinOp::LessThan => Value::Bool(left < right),
-                    IrBinOp::GreaterThan => Value::Bool(left > right),
-                    IrBinOp::LessEqualThan => Value::Bool(left <= right),
-                    IrBinOp::GreaterEqualThan => Value::Bool(left >= right),
-                    IrBinOp::EqualTo => Value::Bool(left == right),
-                    IrBinOp::NotEquals => Value::Bool(left != right),
+                    HirBinOp::Add => Value::Float(left + right),
+                    HirBinOp::Subtract => Value::Float(left - right),
+                    HirBinOp::Multiply => Value::Float(left * right),
+                    HirBinOp::Divide => Value::Float(left / right),
+                    HirBinOp::LessThan => Value::Bool(left < right),
+                    HirBinOp::GreaterThan => Value::Bool(left > right),
+                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
+                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
+                    HirBinOp::EqualTo => Value::Bool(left == right),
+                    HirBinOp::NotEquals => Value::Bool(left != right),
                 },
                 (_, _) => unreachable!(),
             };
 
             ctx.value_stack.push(val);
         }
-        IrNodeValue::Return(val) => {
+        HirNodeValue::Return(val) => {
             evaluate_node(fns, ctx, val).await?;
             return Err(EvaluationStop::Returned(
                 ctx.value_stack.pop().expect("value on stack"),
             ));
         }
-        IrNodeValue::Int(val) => ctx.value_stack.push(Value::Int(*val)),
-        IrNodeValue::Float(val) => ctx.value_stack.push(Value::Float(*val)),
-        IrNodeValue::Bool(val) => ctx.value_stack.push(Value::Bool(*val)),
-        IrNodeValue::Null => ctx.value_stack.push(Value::Null),
-        IrNodeValue::StringLiteral(val) => ctx.value_stack.push(Value::String(val.clone())),
-        IrNodeValue::CharLiteral(val) => ctx.value_stack.push(Value::Char(*val)),
-        IrNodeValue::Sequence(nodes) => {
+        HirNodeValue::Int(val) => ctx.value_stack.push(Value::Int(*val)),
+        HirNodeValue::Float(val) => ctx.value_stack.push(Value::Float(*val)),
+        HirNodeValue::Bool(val) => ctx.value_stack.push(Value::Bool(*val)),
+        HirNodeValue::Null => ctx.value_stack.push(Value::Null),
+        HirNodeValue::StringLiteral(val) => ctx.value_stack.push(Value::String(val.clone())),
+        HirNodeValue::CharLiteral(val) => ctx.value_stack.push(Value::Char(*val)),
+        HirNodeValue::Sequence(nodes) => {
             for node in nodes.iter() {
                 evaluate_node(fns, ctx, node).await?;
             }
         }
-        IrNodeValue::If(cond, if_branch, else_branch) => {
+        HirNodeValue::If(cond, if_branch, else_branch) => {
             evaluate_node(fns, ctx, cond).await?;
             let Some(Value::Bool(cond)) = ctx.value_stack.pop() else {
                 panic!("ICE: expected boolean");
@@ -251,7 +251,7 @@ pub async fn evaluate_node(
                 evaluate_node(fns, ctx, else_branch).await?;
             }
         }
-        IrNodeValue::While(cond, block) => loop {
+        HirNodeValue::While(cond, block) => loop {
             evaluate_node(fns, ctx, cond).await?;
             let Some(Value::Bool(cond)) = ctx.value_stack.pop() else {
                 panic!("ICE: expected boolean");
@@ -261,7 +261,7 @@ pub async fn evaluate_node(
             }
             evaluate_node(fns, ctx, block).await?;
         },
-        IrNodeValue::StructLiteral(_, fields) => {
+        HirNodeValue::StructLiteral(_, fields) => {
             let mut values = HashMap::new();
             for (field, value) in fields.iter() {
                 evaluate_node(fns, ctx, value).await?;
@@ -270,15 +270,15 @@ pub async fn evaluate_node(
             ctx.value_stack.push(Value::Struct(values));
         }
 
-        IrNodeValue::TakeUnique(_) => todo!(),
-        IrNodeValue::TakeShared(_) => todo!(),
-        IrNodeValue::Dereference(_) => todo!(),
+        HirNodeValue::TakeUnique(_) => todo!(),
+        HirNodeValue::TakeShared(_) => todo!(),
+        HirNodeValue::Dereference(_) => todo!(),
 
-        IrNodeValue::Index(_, _) => todo!(),
-        IrNodeValue::ArrayLiteral(_) => todo!(),
-        IrNodeValue::ArrayLiteralLength(_, _) => todo!(),
+        HirNodeValue::Index(_, _) => todo!(),
+        HirNodeValue::ArrayLiteral(_) => todo!(),
+        HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
 
-        IrNodeValue::StructToInterface { value, vtable } => {
+        HirNodeValue::StructToInterface { value, vtable } => {
             evaluate_node(fns, ctx, value).await?;
             let value = ctx.value_stack.pop().unwrap();
             let vtable = vtable
