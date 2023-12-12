@@ -62,6 +62,7 @@ pub enum LinearNodeValue {
     // Memory
     BasePtr,
     StackAlloc(usize),
+    /// Each parameter may only appear once in a given method body
     Parameter(usize),
     Read {
         location: Box<LinearNode>,
@@ -118,7 +119,7 @@ pub fn linearize_nodes(
             HirNodeValue::Declaration(id) => {
                 let alloc_size = expression_type_size(declarations, &node.ty);
                 stack_entries.insert(id, *stack_offset);
-                *stack_offset *= alloc_size;
+                *stack_offset += alloc_size;
                 let alloc = LinearNode::new(LinearNodeValue::StackAlloc(alloc_size));
                 values.push(alloc);
             }
@@ -127,7 +128,7 @@ pub fn linearize_nodes(
 
                 let alloc_size = expression_type_size(declarations, &node.ty);
                 stack_entries.insert(id, *stack_offset);
-                *stack_offset *= alloc_size;
+                *stack_offset += alloc_size;
                 let alloc = LinearNode::new(LinearNodeValue::StackAlloc(alloc_size));
                 values.push(alloc);
 
@@ -247,7 +248,19 @@ fn lower_expression(
                 ty,
             }
         }
-        HirNodeValue::Call(_, _) => todo!(),
+        HirNodeValue::Call(lhs, params) => {
+            let HirNodeValue::VariableReference(fn_id) = lhs.value else {
+                unreachable!("lhs of function call must be a function ID")
+            };
+            let params = params
+                .into_iter()
+                .map(|param| lower_expression(declarations, stack_entries, param))
+                .collect();
+            LinearNodeValue::Call(
+                Box::new(LinearNode::new(LinearNodeValue::FunctionID(fn_id))),
+                params,
+            )
+        }
         HirNodeValue::Access(_, _) => todo!(),
         HirNodeValue::Index(_, _) => todo!(),
 

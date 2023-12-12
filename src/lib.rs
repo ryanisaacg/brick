@@ -150,7 +150,7 @@ pub async fn linear_interpret_code(
 
     let mut vm = VM::new();
     for statement in statements.statements {
-        let _ = evaluate_block(&functions, &[], &mut vm, &statement).await;
+        let _ = evaluate_block(&functions, &mut [], &mut vm, &statement).await;
     }
 
     Ok(vm.op_stack)

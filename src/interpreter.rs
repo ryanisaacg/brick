@@ -83,6 +83,7 @@ pub async fn evaluate_function(
     }
 }
 
+#[derive(Debug)]
 pub enum Numeric {
     Int32(i32),
     Float32(f32),

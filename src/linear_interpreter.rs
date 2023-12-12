@@ -95,7 +95,7 @@ impl VM {
 #[async_recursion]
 pub async fn evaluate_block(
     fns: &HashMap<ID, Function>,
-    params: &[Vec<u8>],
+    params: &mut [Value],
     vm: &mut VM,
     node: &LinearNode,
 ) -> Result<(), Unwind> {
@@ -106,7 +106,11 @@ pub async fn evaluate_block(
         LinearNodeValue::StackAlloc(amount) => {
             vm.stack_ptr += amount;
         }
-        LinearNodeValue::Parameter(_) => todo!(),
+        LinearNodeValue::Parameter(idx) => {
+            let mut temp = Value::Null;
+            std::mem::swap(&mut temp, &mut params[*idx]);
+            vm.op_stack.push(temp);
+        }
         LinearNodeValue::Read {
             location,
             offset,
@@ -155,7 +159,23 @@ pub async fn evaluate_block(
             };
             (&mut vm.memory[location..(location + size)]).copy_from_slice(bytes);
         }
-        LinearNodeValue::Call(_, _) => todo!(),
+        LinearNodeValue::Call(lhs, parameters) => {
+            evaluate_block(fns, params, vm, lhs).await?;
+            let Some(Value::ID(fn_id)) = vm.op_stack.pop() else { unreachable!() };
+            let Some(function) = fns.get(&fn_id) else { unreachable!() };
+            for param in parameters.iter().rev() {
+                evaluate_block(fns, params, vm, param).await?;
+            }
+            let mut parameters: Vec<_> = (0..parameters.len()).map(|_| vm.op_stack.pop().unwrap()).collect();
+            // TODO: do parameters
+            match function {
+                Function::Ir(function) => {
+                    for node in function.body.statements.iter() {
+                        evaluate_block(fns, &mut parameters[..], vm, node).await?;
+                    }
+                }
+            }
+        }
         LinearNodeValue::Return(_) => todo!(),
         LinearNodeValue::If(_, _, _) => todo!(),
         LinearNodeValue::Break => todo!(),
