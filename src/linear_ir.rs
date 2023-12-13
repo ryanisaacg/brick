@@ -60,17 +60,17 @@ pub enum LinearNodeValue {
     // TODO: how to handle function parameters?
 
     // Memory
-    BasePtr,
+    StackFrame,
     StackAlloc(usize),
     /// Each parameter may only appear once in a given method body
     Parameter(usize),
-    Read {
+    ReadMemory {
         location: Box<LinearNode>,
         offset: usize,
         size: usize,
         ty: ExpressionType,
     },
-    Write {
+    WriteMemory {
         location: Box<LinearNode>,
         offset: usize,
         size: usize,
@@ -133,8 +133,8 @@ pub fn linearize_nodes(
                 values.push(alloc);
 
                 values.push(LinearNode {
-                    value: LinearNodeValue::Write {
-                        location: Box::new(LinearNode::new(LinearNodeValue::BasePtr)),
+                    value: LinearNodeValue::WriteMemory {
+                        location: Box::new(LinearNode::new(LinearNodeValue::StackFrame)),
                         offset,
                         size: alloc_size,
                         value: Box::new(LinearNode::new(LinearNodeValue::Parameter(idx))),
@@ -147,7 +147,7 @@ pub fn linearize_nodes(
                 let (location, offset) = lower_lvalue(stack_entries, *lhs);
                 let rhs = lower_expression(declarations, stack_entries, *rhs);
                 values.push(LinearNode {
-                    value: LinearNodeValue::Write {
+                    value: LinearNodeValue::WriteMemory {
                         location: Box::new(location),
                         offset,
                         size,
@@ -241,8 +241,8 @@ fn lower_expression(
         }
         HirNodeValue::VariableReference(id) => {
             let offset = *stack_entries.get(&id).unwrap();
-            LinearNodeValue::Read {
-                location: Box::new(LinearNode::new(LinearNodeValue::BasePtr)),
+            LinearNodeValue::ReadMemory {
+                location: Box::new(LinearNode::new(LinearNodeValue::StackFrame)),
                 offset,
                 size: expression_type_size(declarations, &ty),
                 ty,
@@ -290,7 +290,7 @@ fn lower_lvalue(stack_entries: &HashMap<ID, usize>, lvalue: HirNode) -> (LinearN
         HirNodeValue::VariableReference(id) => {
             let offset = stack_entries.get(&id).unwrap();
 
-            (LinearNode::new(LinearNodeValue::BasePtr), *offset)
+            (LinearNode::new(LinearNodeValue::StackFrame), *offset)
         }
 
         HirNodeValue::Parameter(_, _) => todo!(),

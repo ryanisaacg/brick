@@ -69,7 +69,7 @@ impl std::fmt::Debug for Function {
 }*/
 
 pub enum Unwind {
-    Returned, // TODO: return values
+    Return(Value),
     Break,
 }
 
@@ -100,8 +100,9 @@ pub async fn evaluate_block(
     node: &LinearNode,
 ) -> Result<(), Unwind> {
     match &node.value {
-        LinearNodeValue::BasePtr => {
-            vm.op_stack.push(Value::Size(vm.base_ptr));
+        LinearNodeValue::StackFrame => {
+            vm.op_stack
+                .push(Value::Size(vm.base_ptr + std::mem::size_of::<usize>()));
         }
         LinearNodeValue::StackAlloc(amount) => {
             vm.stack_ptr += amount;
@@ -111,7 +112,7 @@ pub async fn evaluate_block(
             std::mem::swap(&mut temp, &mut params[*idx]);
             vm.op_stack.push(temp);
         }
-        LinearNodeValue::Read {
+        LinearNodeValue::ReadMemory {
             location,
             offset,
             size,
@@ -137,7 +138,7 @@ pub async fn evaluate_block(
                 PrimitiveType::Bool => todo!(), //Value::Bool(*bytemuck::from_bytes(memory)),
             });
         }
-        LinearNodeValue::Write {
+        LinearNodeValue::WriteMemory {
             location,
             offset,
             size,
@@ -161,24 +162,64 @@ pub async fn evaluate_block(
         }
         LinearNodeValue::Call(lhs, parameters) => {
             evaluate_block(fns, params, vm, lhs).await?;
-            let Some(Value::ID(fn_id)) = vm.op_stack.pop() else { unreachable!() };
-            let Some(function) = fns.get(&fn_id) else { unreachable!() };
+            let Some(Value::ID(fn_id)) = vm.op_stack.pop() else {
+                unreachable!()
+            };
+            let Some(function) = fns.get(&fn_id) else {
+                unreachable!()
+            };
             for param in parameters.iter().rev() {
                 evaluate_block(fns, params, vm, param).await?;
             }
-            let mut parameters: Vec<_> = (0..parameters.len()).map(|_| vm.op_stack.pop().unwrap()).collect();
-            // TODO: do parameters
+            let mut parameters: Vec<_> = (0..parameters.len())
+                .map(|_| vm.op_stack.pop().unwrap())
+                .collect();
+            // TODO: manage stack frames (might require some new instructions)
             match function {
                 Function::Ir(function) => {
+                    // Write the current base ptr at the stack ptr location
+                    let base_ptr = vm.base_ptr.to_le_bytes();
+                    (&mut vm.memory[vm.stack_ptr..(vm.stack_ptr + base_ptr.len())])
+                        .copy_from_slice(&base_ptr);
+                    vm.base_ptr = vm.stack_ptr;
+                    vm.stack_ptr += base_ptr.len();
+
                     for node in function.body.statements.iter() {
-                        evaluate_block(fns, &mut parameters[..], vm, node).await?;
+                        let result = evaluate_block(fns, &mut parameters[..], vm, node).await;
+                        if let Err(Unwind::Return(val)) = result {
+                            vm.op_stack.push(val);
+                            break;
+                        }
                     }
+
+                    let base_ptr = dbg!(&vm.memory[vm.base_ptr..(vm.base_ptr + base_ptr.len())]);
+                    let base_ptr: usize = usize::from_le_bytes(base_ptr.try_into().unwrap());
+                    vm.stack_ptr = vm.base_ptr;
+                    vm.base_ptr = base_ptr;
                 }
             }
         }
-        LinearNodeValue::Return(_) => todo!(),
-        LinearNodeValue::If(_, _, _) => todo!(),
-        LinearNodeValue::Break => todo!(),
+        LinearNodeValue::Return(expr) => {
+            evaluate_block(fns, params, vm, expr).await?;
+            let val = vm.op_stack.pop().unwrap();
+            return Err(Unwind::Return(val));
+        }
+        LinearNodeValue::If(cond, if_branch, else_branch) => {
+            evaluate_block(fns, params, vm, cond).await?;
+            let Some(Value::Bool(cond)) = vm.op_stack.pop() else {
+                unreachable!()
+            };
+            if cond {
+                for node in if_branch.statements.iter() {
+                    evaluate_block(fns, params, vm, node).await?;
+                }
+            } else if let Some(else_branch) = else_branch {
+                for node in else_branch.statements.iter() {
+                    evaluate_block(fns, params, vm, node).await?;
+                }
+            }
+        }
+        LinearNodeValue::Break => return Err(Unwind::Break),
         LinearNodeValue::Loop(_) => todo!(),
         LinearNodeValue::BinOp(op, _ty, lhs, rhs) => {
             evaluate_block(fns, params, vm, rhs).await?;
@@ -262,6 +303,11 @@ pub async fn evaluate_block(
             vm.op_stack.push(Value::ID(*x));
         }
     }
+    dbg!(&node.value);
+    for i in 0..32 {
+        print!("{},", vm.memory[i]);
+    }
+    println!(" B: {}, S: {}", vm.base_ptr, vm.stack_ptr);
 
     Ok(())
 }
