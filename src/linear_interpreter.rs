@@ -234,20 +234,14 @@ pub async fn evaluate_block(
         }
         LinearNodeValue::Break => return Err(Unwind::Break),
         LinearNodeValue::Loop(inner) => {
-            let mut iteration = 0;
             'outer: loop {
-                println!("{}", iteration);
                 for node in inner.iter() {
                     match evaluate_block(fns, params, vm, node).await {
-                        Err(Unwind::Break) => {
-                            dbg!(node);
-                            break 'outer;
-                        }
+                        Err(Unwind::Break) => break 'outer,
                         other @ Err(_)  => return other,
                         Ok(_) => {}
                     }
                 }
-                iteration += 1;
             }
         }
         LinearNodeValue::BinOp(op, _ty, lhs, rhs) => {

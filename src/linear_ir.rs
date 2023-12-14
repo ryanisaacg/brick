@@ -193,10 +193,9 @@ pub fn linearize_nodes(
                 let mut inner = Vec::new();
                 inner.push(LinearNode::new(LinearNodeValue::If(
                     Box::new(cond),
-                    vec![LinearNode::new(LinearNodeValue::Break)],
-                    None,
+                    block,
+                    Some(vec![LinearNode::new(LinearNodeValue::Break)]),
                 )));
-                inner.extend(block.into_iter());
                 values.push(LinearNode {
                     value: LinearNodeValue::Loop(inner),
                     provenance: node.provenance,
