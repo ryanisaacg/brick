@@ -1,12 +1,12 @@
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::collections::HashMap;
 
 use async_recursion::async_recursion;
 
 use crate::{
-    hir::{HirBinOp, HirNode, HirNodeValue},
+    hir::HirBinOp,
     id::ID,
     interpreter::Numeric,
-    linear_ir::{LinearBlock, LinearFunction, LinearNode, LinearNodeValue},
+    linear_ir::{LinearFunction, LinearNode, LinearNodeValue},
     typecheck::{ExpressionType, PrimitiveType},
     Value,
 };
@@ -91,6 +91,39 @@ impl VM {
     }
 }
 
+pub async fn evaluate_function(
+    fns: &HashMap<ID, Function>,
+    params: &mut [Value],
+    vm: &mut VM,
+    fn_id: ID,
+) {
+    let function = fns.get(&fn_id).unwrap();
+    match function {
+        Function::Ir(function) => {
+            // Write the current base ptr at the stack ptr location
+            let base_ptr = vm.base_ptr.to_le_bytes();
+            (&mut vm.memory[vm.stack_ptr..(vm.stack_ptr + base_ptr.len())])
+                .copy_from_slice(&base_ptr);
+            vm.base_ptr = vm.stack_ptr;
+            vm.stack_ptr += base_ptr.len();
+
+            for node in function.body.iter() {
+                let result = evaluate_block(fns, params, vm, node).await;
+                if let Err(Unwind::Return(val)) = result {
+                    vm.op_stack.push(val);
+                    break;
+                }
+            }
+
+            let base_ptr = dbg!(&vm.memory[vm.base_ptr..(vm.base_ptr + base_ptr.len())]);
+            let base_ptr: usize = usize::from_le_bytes(base_ptr.try_into().unwrap());
+            vm.stack_ptr = vm.base_ptr;
+            vm.base_ptr = base_ptr;
+        }
+    }
+}
+
+
 // Kinda a hack: when we return, unwind the stack via Result
 #[async_recursion]
 pub async fn evaluate_block(
@@ -100,9 +133,14 @@ pub async fn evaluate_block(
     node: &LinearNode,
 ) -> Result<(), Unwind> {
     match &node.value {
+        LinearNodeValue::Sequence(seq) => {
+            for node in seq.iter() {
+                evaluate_block(fns, params, vm, node).await?;
+            }
+        }
         LinearNodeValue::StackFrame => {
             vm.op_stack
-                .push(Value::Size(vm.base_ptr + std::mem::size_of::<usize>()));
+                .push(Value::Size(vm.base_ptr));
         }
         LinearNodeValue::StackAlloc(amount) => {
             vm.stack_ptr += amount;
@@ -126,7 +164,7 @@ pub async fn evaluate_block(
             let memory = &vm.memory[location..(location + size)];
             // TODO: complex types
             let ExpressionType::Primitive(ty) = ty else {
-                todo!()
+                todo!("{:?}", node.provenance);
             };
             vm.op_stack.push(match ty {
                 PrimitiveType::Char => todo!(), //Value::Char(*bytemuck::from_bytes(memory)),
@@ -165,39 +203,14 @@ pub async fn evaluate_block(
             let Some(Value::ID(fn_id)) = vm.op_stack.pop() else {
                 unreachable!()
             };
-            let Some(function) = fns.get(&fn_id) else {
-                unreachable!()
-            };
             for param in parameters.iter().rev() {
                 evaluate_block(fns, params, vm, param).await?;
             }
             let mut parameters: Vec<_> = (0..parameters.len())
                 .map(|_| vm.op_stack.pop().unwrap())
                 .collect();
-            // TODO: manage stack frames (might require some new instructions)
-            match function {
-                Function::Ir(function) => {
-                    // Write the current base ptr at the stack ptr location
-                    let base_ptr = vm.base_ptr.to_le_bytes();
-                    (&mut vm.memory[vm.stack_ptr..(vm.stack_ptr + base_ptr.len())])
-                        .copy_from_slice(&base_ptr);
-                    vm.base_ptr = vm.stack_ptr;
-                    vm.stack_ptr += base_ptr.len();
 
-                    for node in function.body.statements.iter() {
-                        let result = evaluate_block(fns, &mut parameters[..], vm, node).await;
-                        if let Err(Unwind::Return(val)) = result {
-                            vm.op_stack.push(val);
-                            break;
-                        }
-                    }
-
-                    let base_ptr = dbg!(&vm.memory[vm.base_ptr..(vm.base_ptr + base_ptr.len())]);
-                    let base_ptr: usize = usize::from_le_bytes(base_ptr.try_into().unwrap());
-                    vm.stack_ptr = vm.base_ptr;
-                    vm.base_ptr = base_ptr;
-                }
-            }
+            evaluate_function(fns, &mut parameters[..], vm, fn_id).await;
         }
         LinearNodeValue::Return(expr) => {
             evaluate_block(fns, params, vm, expr).await?;
@@ -210,17 +223,33 @@ pub async fn evaluate_block(
                 unreachable!()
             };
             if cond {
-                for node in if_branch.statements.iter() {
+                for node in if_branch.iter() {
                     evaluate_block(fns, params, vm, node).await?;
                 }
             } else if let Some(else_branch) = else_branch {
-                for node in else_branch.statements.iter() {
+                for node in else_branch.iter() {
                     evaluate_block(fns, params, vm, node).await?;
                 }
             }
         }
         LinearNodeValue::Break => return Err(Unwind::Break),
-        LinearNodeValue::Loop(_) => todo!(),
+        LinearNodeValue::Loop(inner) => {
+            let mut iteration = 0;
+            'outer: loop {
+                println!("{}", iteration);
+                for node in inner.iter() {
+                    match evaluate_block(fns, params, vm, node).await {
+                        Err(Unwind::Break) => {
+                            dbg!(node);
+                            break 'outer;
+                        }
+                        other @ Err(_)  => return other,
+                        Ok(_) => {}
+                    }
+                }
+                iteration += 1;
+            }
+        }
         LinearNodeValue::BinOp(op, _ty, lhs, rhs) => {
             evaluate_block(fns, params, vm, rhs).await?;
             evaluate_block(fns, params, vm, lhs).await?;
@@ -279,7 +308,6 @@ pub async fn evaluate_block(
             };
             vm.op_stack.push(val);
         }
-        LinearNodeValue::ID(_) => todo!(),
         LinearNodeValue::Size(_) => todo!(),
         LinearNodeValue::Int(x) => {
             vm.op_stack.push(Value::Int32(*x as i32));
@@ -303,11 +331,6 @@ pub async fn evaluate_block(
             vm.op_stack.push(Value::ID(*x));
         }
     }
-    dbg!(&node.value);
-    for i in 0..32 {
-        print!("{},", vm.memory[i]);
-    }
-    println!(" B: {}, S: {}", vm.base_ptr, vm.stack_ptr);
 
     Ok(())
 }

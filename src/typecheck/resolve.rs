@@ -53,11 +53,6 @@ fn resolve_declaration(
             fields,
             associated_functions,
             ..
-        })
-        | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
-            fields,
-            associated_functions,
-            ..
         }) => {
             let fields = fields.iter().map(|NameAndType { id: _, name, type_ }| {
                 Ok((
@@ -65,6 +60,35 @@ fn resolve_declaration(
                     resolve_type_name(names_to_declarations, type_)?,
                 ))
             });
+            let associated_functions = associated_functions
+                .iter()
+                .map(|node| {
+                    Ok(match &node.value {
+                        AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+                            name,
+                            ..
+                        }) => (
+                            name.clone(),
+                            resolve_declaration(names_to_declarations, node, true)?,
+                        ),
+                        _ => panic!(
+                            "Associated function should not be anything but function declaration"
+                        ),
+                    })
+                })
+                .collect::<Result<HashMap<_, _>, _>>()?;
+            let fields = fields.collect::<Result<_, _>>()?;
+
+            StaticDeclaration::Struct(StructType {
+                id: node.id,
+                fields,
+                associated_functions,
+            })
+        }
+        AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
+            associated_functions,
+            ..
+        }) => {
             let associated_functions = associated_functions
                 .iter()
                 .map(|node| {
@@ -86,21 +110,11 @@ fn resolve_declaration(
                     })
                 })
                 .collect::<Result<HashMap<_, _>, _>>()?;
-            let fields = fields.collect::<Result<_, _>>()?;
 
-            if let AstNodeValue::StructDeclaration(_) = &node.value {
-                StaticDeclaration::Struct(StructType {
-                    id: node.id,
-                    fields,
-                    associated_functions,
-                })
-            } else {
-                StaticDeclaration::Interface(InterfaceType {
-                    id: node.id,
-                    fields,
-                    associated_functions,
-                })
-            }
+            StaticDeclaration::Interface(InterfaceType {
+                id: node.id,
+                associated_functions,
+            })
         }
         AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, .. }) => {
             StaticDeclaration::Union(UnionType {

@@ -73,7 +73,6 @@ pub struct UnionDeclarationValue<'a> {
 #[derive(Debug, PartialEq)]
 pub struct InterfaceDeclarationValue<'a> {
     pub name: String,
-    pub fields: Vec<NameAndType<'a>>,
     pub associated_functions: Vec<AstNode<'a>>,
 }
 
@@ -223,9 +222,27 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                     children.push(*returns);
                 }
             }
-            StructDeclaration(StructDeclarationValue { fields, .. })
-            | InterfaceDeclaration(InterfaceDeclarationValue { fields, .. })
-            | UnionDeclaration(UnionDeclarationValue {
+            StructDeclaration(StructDeclarationValue {
+                fields,
+                associated_functions,
+                ..
+            }) => {
+                for field in fields.iter() {
+                    children.push(field.type_);
+                }
+                for node in associated_functions.iter() {
+                    children.push(node);
+                }
+            }
+            InterfaceDeclaration(InterfaceDeclarationValue {
+                associated_functions: fields,
+                ..
+            }) => {
+                for field in fields.iter() {
+                    children.push(field);
+                }
+            }
+            UnionDeclaration(UnionDeclarationValue {
                 variants: fields, ..
             }) => {
                 for field in fields.iter() {
@@ -423,11 +440,11 @@ fn interface_declaration<'a>(
     let (name, provenance) = word(source, cursor, "expected name after 'interface'")?;
     let (end, fields, associated_functions) =
         interface_or_struct_body(source, context, provenance.end(), true)?;
+    // TODO: error when fields are present
 
     Ok(AstNode::new(
         AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
             name,
-            fields,
             associated_functions,
         }),
         SourceRange::new(cursor, end),

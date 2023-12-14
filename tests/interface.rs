@@ -2,24 +2,6 @@ use assert_matches::assert_matches;
 use brick::{eval, Value};
 
 #[tokio::test]
-async fn basic_interfaces() {
-    eval(
-        r#"
-interface Vector {
-    x: f32,
-    y: f32,
-}
-
-fn length2(vector: Vector): f32 {
-    vector.x * vector.x + vector.y * vector.y
-}
-"#,
-    )
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
 async fn associated_functions() {
     eval(
         r#"

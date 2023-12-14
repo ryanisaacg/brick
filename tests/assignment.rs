@@ -43,3 +43,14 @@ async fn numeric_assignment() {
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(4)]);
 }
+
+#[tokio::test]
+async fn multiple_variables() {
+    let result = eval(r#"
+let a = 5;
+let b = 3 + a;
+let c = b / 2;
+a - c
+"#).await.unwrap();
+    assert_matches!(&result[..], [Value::Int32(1)]);
+}

@@ -9,7 +9,7 @@ use hir::HirModule;
 pub use interpreter::Value;
 use interpreter::{evaluate_node, Context, Function};
 use linear_interpreter::{evaluate_block, VM};
-use linear_ir::{linearize_function, linearize_nodes};
+use linear_ir::{linearize_function, linearize_nodes, layout_types};
 use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
 
@@ -108,8 +108,8 @@ pub async fn linear_interpret_code(
         declarations,
     } = typecheck_module("main", source_name, contents)?;
 
-    // TODO: convert declarations into TypeMemoryLayout
-    let declarations = HashMap::new();
+    let mut ty_declarations = HashMap::new();
+    layout_types(&declarations, &mut ty_declarations);
 
     let mut statements = Vec::new();
     let mut functions = HashMap::new();
@@ -120,7 +120,7 @@ pub async fn linear_interpret_code(
             statements.extend(module.top_level_statements);
         }
         for function in module.functions {
-            let function = linearize_function(&declarations, function);
+            let function = linearize_function(&ty_declarations, function);
             functions.insert(function.id, linear_interpreter::Function::Ir(function));
         }
     }
@@ -140,16 +140,16 @@ pub async fn linear_interpret_code(
     });*/
 
     let mut stack_entries = HashMap::new();
-    let mut stack_offset = 0;
+    let mut stack_offset = std::mem::size_of::<usize>();
     let statements = linearize_nodes(
-        &declarations,
+        &ty_declarations,
         &mut stack_entries,
         &mut stack_offset,
         statements.into(),
     );
 
     let mut vm = VM::new();
-    for statement in statements.statements {
+    for statement in statements {
         let _ = evaluate_block(&functions, &mut [], &mut vm, &statement).await;
     }
 

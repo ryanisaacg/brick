@@ -115,7 +115,7 @@ fn lower_node<'ast>(
             ));
             let rvalue = lower_node_alloc(decls, rvalue);
             let statements = vec![
-                HirNode::from_ast_void(node, HirNodeValue::Declaration(node.id)),
+                HirNode::from_ast(node, HirNodeValue::Declaration(node.id), rvalue.ty.clone()),
                 HirNode::from_ast_void(node, HirNodeValue::Assignment(lvalue, rvalue)),
             ];
             HirNodeValue::Sequence(statements)

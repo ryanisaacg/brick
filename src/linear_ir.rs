@@ -4,7 +4,7 @@ use crate::{
     hir::{HirBinOp, HirFunction, HirNode, HirNodeValue},
     id::ID,
     provenance::SourceRange,
-    typecheck::{ExpressionType, PrimitiveType},
+    typecheck::{ExpressionType, PrimitiveType, StaticDeclaration},
 };
 
 #[derive(Debug)]
@@ -13,17 +13,22 @@ pub struct LinearFunction {
     // TODO: memory layouts instead of expression types?
     pub params: Vec<ExpressionType>,
     pub returns: Option<ExpressionType>,
-    pub body: LinearBlock,
+    pub body: Vec<LinearNode>,
 }
 
 pub fn linearize_function(
-    declarations: &HashMap<ID, &TypeMemoryLayout>,
+    declarations: &HashMap<ID, TypeMemoryLayout>,
     function: HirFunction,
 ) -> LinearFunction {
     let HirNodeValue::Sequence(block) = function.body.value else {
         unreachable!()
     };
-    let body = linearize_nodes(declarations, &mut HashMap::new(), &mut 0, block.into());
+    let body = linearize_nodes(
+        declarations,
+        &mut HashMap::new(),
+        &mut std::mem::size_of::<usize>(),
+        block.into(),
+    );
     LinearFunction {
         id: function.id,
         body,
@@ -31,12 +36,6 @@ pub fn linearize_function(
         params: Vec::new(),
         returns: None,
     }
-}
-
-#[derive(Debug)]
-pub struct LinearBlock {
-    pub id: ID,
-    pub statements: Vec<LinearNode>,
 }
 
 #[derive(Debug)]
@@ -80,13 +79,14 @@ pub enum LinearNodeValue {
     // Control flow
     Call(Box<LinearNode>, Vec<LinearNode>),
     Return(Box<LinearNode>),
-    If(Box<LinearNode>, LinearBlock, Option<LinearBlock>),
+    If(Box<LinearNode>, Vec<LinearNode>, Option<Vec<LinearNode>>),
     // TODO: labelled breaks?
     Break,
-    Loop(LinearBlock),
+    Loop(Vec<LinearNode>),
+
+    Sequence(Vec<LinearNode>),
 
     BinOp(HirBinOp, PrimitiveType, Box<LinearNode>, Box<LinearNode>),
-    ID(ID),
     Size(usize),
     Int(i64),
     Float(f64),
@@ -100,12 +100,12 @@ pub enum LinearNodeValue {
 // TODO: produce a more CFG shaped result?
 
 pub fn linearize_nodes(
-    declarations: &HashMap<ID, &TypeMemoryLayout>,
+    declarations: &HashMap<ID, TypeMemoryLayout>,
     stack_entries: &mut HashMap<ID, usize>,
     stack_offset: &mut usize,
     //blocks: &mut VecDeque<LinearBlock>,
     mut nodes: VecDeque<HirNode>,
-) -> LinearBlock {
+) -> Vec<LinearNode> {
     let mut values = Vec::new();
 
     while let Some(node) = nodes.pop_front() {
@@ -185,7 +185,23 @@ pub fn linearize_nodes(
                     provenance: node.provenance,
                 });
             }
-            HirNodeValue::While(_, _) => todo!(),
+            HirNodeValue::While(cond, block) => {
+                let cond = lower_expression(declarations, stack_entries, *cond);
+                let mut vec_deque = VecDeque::new();
+                vec_deque.push_back(*block);
+                let block = linearize_nodes(declarations, stack_entries, stack_offset, vec_deque);
+                let mut inner = Vec::new();
+                inner.push(LinearNode::new(LinearNodeValue::If(
+                    Box::new(cond),
+                    vec![LinearNode::new(LinearNodeValue::Break)],
+                    None,
+                )));
+                inner.extend(block.into_iter());
+                values.push(LinearNode {
+                    value: LinearNodeValue::Loop(inner),
+                    provenance: node.provenance,
+                })
+            }
 
             HirNodeValue::TakeUnique(_) => todo!(),
             HirNodeValue::TakeShared(_) => todo!(),
@@ -203,14 +219,11 @@ pub fn linearize_nodes(
         }
     }
 
-    LinearBlock {
-        id: ID::new(),
-        statements: values,
-    }
+    values
 }
 
 fn lower_expression(
-    declarations: &HashMap<ID, &TypeMemoryLayout>,
+    declarations: &HashMap<ID, TypeMemoryLayout>,
     stack_entries: &HashMap<ID, usize>,
     expression: HirNode,
 ) -> LinearNode {
@@ -261,7 +274,24 @@ fn lower_expression(
                 params,
             )
         }
-        HirNodeValue::Access(_, _) => todo!(),
+        HirNodeValue::Access(lhs, rhs) => {
+            let ExpressionType::DeclaredType(ty_id) = lhs.ty else {
+                unreachable!()
+            };
+            let TypeMemoryLayout { value, size } = declarations.get(&ty_id).unwrap();
+            let (lhs, mut offset) = lower_lvalue(stack_entries, *lhs);
+            offset += match value {
+                TypeLayoutValue::Structure(fields) => fields.get(&rhs).unwrap().0,
+                TypeLayoutValue::Interface(_fields) => todo!(), //*fields.get(&rhs).unwrap(),
+                TypeLayoutValue::FunctionPointer => unreachable!(),
+            };
+            LinearNodeValue::ReadMemory {
+                location: Box::new(lhs),
+                offset,
+                size: *size,
+                ty,
+            }
+        }
         HirNodeValue::Index(_, _) => todo!(),
 
         HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Return(_) => {
@@ -275,11 +305,90 @@ fn lower_expression(
         HirNodeValue::TakeShared(_) => todo!(),
         HirNodeValue::Dereference(_) => todo!(),
         HirNodeValue::Sequence(_) => todo!(),
-        HirNodeValue::StructLiteral(_, _) => todo!(),
+        HirNodeValue::StructLiteral(struct_id, values) => {
+            let Some(TypeMemoryLayout {
+                value: TypeLayoutValue::Structure(layouts),
+                ..
+            }) = declarations.get(&struct_id)
+            else {
+                unreachable!()
+            };
+            // TODO: does this suck
+            let mut values: Vec<_> = values
+                .into_iter()
+                .map(|(name, value)| {
+                    (
+                        layouts.get(&name).unwrap().0,
+                        lower_expression(declarations, stack_entries, value),
+                    )
+                })
+                .collect();
+            values.sort_by(|(a, _), (b, _)| a.cmp(b));
+            // TODO: this definitely sucks
+            LinearNodeValue::Sequence(values.into_iter().map(|(_, val)| val).collect())
+        }
         HirNodeValue::ArrayLiteral(_) => todo!(),
         HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
-        HirNodeValue::VtableCall(_, _, _) => todo!(),
-        HirNodeValue::StructToInterface { .. } => todo!(),
+        HirNodeValue::VtableCall(table, fn_id, params) => {
+            let ExpressionType::DeclaredType(ty_id) = &table.ty else {
+                unreachable!()
+            };
+            let Some(TypeMemoryLayout {
+                value: TypeLayoutValue::Interface(fields),
+                ..
+            }) = declarations.get(ty_id)
+            else {
+                unreachable!()
+            };
+            let (table, mut offset) = lower_lvalue(stack_entries, *table);
+            offset += fields
+                .iter()
+                .enumerate()
+                .find_map(|(idx, id)| {
+                    if *id == fn_id {
+                        Some((idx + 1) * POINTER_SIZE)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            let params = params
+                .into_iter()
+                .map(|param| lower_expression(declarations, stack_entries, param))
+                .collect();
+            LinearNodeValue::Call(
+                Box::new(LinearNode::new(LinearNodeValue::ReadMemory {
+                    location: Box::new(table),
+                    offset,
+                    size: POINTER_SIZE,
+                    // TODO: what the hell type do we put here
+                    ty: ExpressionType::Null,
+                })),
+                params,
+            )
+        }
+        HirNodeValue::StructToInterface { value, vtable } => {
+            let mut values = Vec::new();
+            values.push(lower_expression(declarations, stack_entries, *value));
+
+            let ExpressionType::DeclaredType(ty_id) = &ty else {
+                unreachable!()
+            };
+            let Some(TypeMemoryLayout {
+                value: TypeLayoutValue::Interface(fields),
+                ..
+            }) = declarations.get(ty_id)
+            else {
+                unreachable!()
+            };
+            for field in fields.iter() {
+                values.push(LinearNode::new(LinearNodeValue::FunctionID(
+                    *vtable.get(field).unwrap(),
+                )));
+            }
+
+            LinearNodeValue::Sequence(values)
+        }
     };
 
     LinearNode { value, provenance }
@@ -324,20 +433,12 @@ fn lower_lvalue(stack_entries: &HashMap<ID, usize>, lvalue: HirNode) -> (LinearN
 const POINTER_SIZE: usize = 4;
 
 fn expression_type_size(
-    declarations: &HashMap<ID, &TypeMemoryLayout>,
+    declarations: &HashMap<ID, TypeMemoryLayout>,
     expr: &ExpressionType,
 ) -> usize {
     match expr {
         ExpressionType::Void => 0,
-        ExpressionType::Primitive(prim) => match prim {
-            PrimitiveType::Char => 1,
-            PrimitiveType::String => POINTER_SIZE,
-            PrimitiveType::Int32 => 4,
-            PrimitiveType::Float32 => 4,
-            PrimitiveType::Int64 => 8,
-            PrimitiveType::Float64 => 8,
-            PrimitiveType::Bool => 1,
-        },
+        ExpressionType::Primitive(prim) => primitive_type_size(*prim),
         ExpressionType::DeclaredType(id) => declarations.get(id).unwrap().size(),
         ExpressionType::Pointer(_, _) => POINTER_SIZE,
         ExpressionType::Array(_) => POINTER_SIZE,
@@ -349,18 +450,137 @@ fn expression_type_size(
     }
 }
 
+fn primitive_type_size(prim: PrimitiveType) -> usize {
+    match prim {
+        PrimitiveType::Char => 1,
+        PrimitiveType::String => POINTER_SIZE,
+        PrimitiveType::Int32 => 4,
+        PrimitiveType::Float32 => 4,
+        PrimitiveType::Int64 => 8,
+        PrimitiveType::Float64 => 8,
+        PrimitiveType::Bool => 1,
+    }
+}
+
 // TODO
 
 pub struct TypeMemoryLayout {
+    pub value: TypeLayoutValue,
     pub size: usize,
+}
+
+pub enum TypeLayoutValue {
+    Structure(HashMap<String, (usize, TypeLayoutField)>),
+    Interface(Vec<ID>),
+    FunctionPointer,
+}
+
+pub enum TypeLayoutField {
+    Primitive(PrimitiveType),
+    Referenced(ID),
+    Nullable(Box<TypeLayoutField>),
+    Pointer,
 }
 
 impl TypeMemoryLayout {
     fn size(&self) -> usize {
         self.size
     }
+}
 
-    fn is_function(&self) -> bool {
-        false
+pub fn layout_types(
+    declarations: &HashMap<String, StaticDeclaration>,
+    layouts: &mut HashMap<ID, TypeMemoryLayout>,
+) {
+    let declarations: HashMap<_, _> = declarations
+        .iter()
+        .map(|(_, decl)| (decl.id(), decl))
+        .collect();
+    for decl in declarations.values() {
+        layout_static_decl(&declarations, layouts, decl);
+    }
+}
+
+fn layout_static_decl(
+    declarations: &HashMap<ID, &StaticDeclaration>,
+    layouts: &mut HashMap<ID, TypeMemoryLayout>,
+    decl: &StaticDeclaration,
+) -> usize {
+    if let Some(layout) = layouts.get(&decl.id()) {
+        return layout.size;
+    }
+
+    let layout = match decl {
+        StaticDeclaration::Struct(struct_ty) => {
+            let mut size = 0;
+            let fields = struct_ty
+                .fields
+                .iter()
+                .map(|(name, field)| {
+                    let (field, field_size) = layout_type(declarations, layouts, field);
+                    size += field_size;
+                    (name.clone(), (field_size, field))
+                })
+                .collect();
+            TypeMemoryLayout {
+                value: TypeLayoutValue::Structure(fields),
+                size,
+            }
+        }
+        StaticDeclaration::Func(_) => TypeMemoryLayout {
+            value: TypeLayoutValue::FunctionPointer,
+            size: 8,
+        },
+        StaticDeclaration::Interface(interface_ty) => {
+            let mut size = POINTER_SIZE;
+            let fields = interface_ty
+                .associated_functions
+                .iter()
+                .map(|(_, decl)| {
+                    size += POINTER_SIZE;
+                    decl.id()
+                })
+                .collect();
+            TypeMemoryLayout {
+                value: TypeLayoutValue::Interface(fields),
+                size,
+            }
+        }
+        StaticDeclaration::Union(_) => todo!(),
+
+        // Modules are completely compiled out
+        StaticDeclaration::Module(module) => {
+            layout_types(&module.exports, layouts);
+            return 0;
+        }
+    };
+    let size = layout.size;
+    layouts.insert(decl.id(), layout);
+
+    size
+}
+
+fn layout_type(
+    declarations: &HashMap<ID, &StaticDeclaration>,
+    layouts: &mut HashMap<ID, TypeMemoryLayout>,
+    ty: &ExpressionType,
+) -> (TypeLayoutField, usize) {
+    match ty {
+        ExpressionType::Void => unreachable!(),
+        ExpressionType::Null => unreachable!(),
+        ExpressionType::Primitive(p) => {
+            let size = primitive_type_size(*p);
+            (TypeLayoutField::Primitive(*p), size)
+        }
+        ExpressionType::DeclaredType(id) => {
+            let size = layout_static_decl(declarations, layouts, declarations.get(id).unwrap());
+            (TypeLayoutField::Referenced(*id), size)
+        }
+        ExpressionType::Pointer(_, _) => (TypeLayoutField::Pointer, POINTER_SIZE),
+        ExpressionType::Array(_) => (TypeLayoutField::Pointer, POINTER_SIZE),
+        ExpressionType::Nullable(inner) => {
+            let (inner, size) = layout_type(declarations, layouts, inner);
+            (TypeLayoutField::Nullable(Box::new(inner)), size + 1)
+        }
     }
 }

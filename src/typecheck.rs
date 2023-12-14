@@ -112,7 +112,6 @@ pub struct UnionType {
 #[derive(Debug, PartialEq, Eq)]
 pub struct InterfaceType {
     pub id: ID,
-    pub fields: HashMap<String, ExpressionType>,
     pub associated_functions: HashMap<String, StaticDeclaration>,
 }
 
@@ -421,18 +420,11 @@ fn typecheck_expression<'a>(
             // TODO: fallible
             let lhs_type = context.decl(id);
             match lhs_type {
-                Some(
-                    StaticDeclaration::Struct(StructType {
-                        fields,
-                        associated_functions,
-                        ..
-                    })
-                    | StaticDeclaration::Interface(InterfaceType {
-                        fields,
-                        associated_functions,
-                        ..
-                    }),
-                ) => fields
+                Some(StaticDeclaration::Struct(StructType {
+                    fields,
+                    associated_functions,
+                    ..
+                })) => fields
                     .get(name)
                     .cloned()
                     .or_else(|| {
@@ -440,6 +432,13 @@ fn typecheck_expression<'a>(
                             .get(name)
                             .map(|decl| ExpressionType::DeclaredType(decl.id()))
                     })
+                    .expect("TODO: field is present"),
+                Some(StaticDeclaration::Interface(InterfaceType {
+                    associated_functions,
+                    ..
+                })) => associated_functions
+                    .get(name)
+                    .map(|decl| ExpressionType::DeclaredType(decl.id()))
                     .expect("TODO: field is present"),
                 Some(StaticDeclaration::Union(lhs_type)) => ExpressionType::Nullable(Box::new(
                     lhs_type
