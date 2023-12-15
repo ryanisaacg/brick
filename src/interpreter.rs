@@ -32,6 +32,7 @@ impl Value {
             Value::Float32(x) => Some(Numeric::Float32(*x)),
             Value::Int64(x) => Some(Numeric::Int64(*x)),
             Value::Float64(x) => Some(Numeric::Float64(*x)),
+            Value::Size(x) => Some(Numeric::Size(*x)),
             _ => None,
         }
     }
@@ -89,6 +90,7 @@ pub enum Numeric {
     Float32(f32),
     Int64(i64),
     Float64(f64),
+    Size(usize),
 }
 
 pub struct Context {

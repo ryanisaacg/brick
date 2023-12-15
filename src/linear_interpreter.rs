@@ -82,11 +82,12 @@ pub struct VM {
 
 impl VM {
     pub fn new() -> VM {
+        let memory = [0; 1024];
         VM {
-            memory: [0; 1024],
+            memory,
             op_stack: Vec::new(),
-            base_ptr: 0,
-            stack_ptr: 0,
+            base_ptr: memory.len(),
+            stack_ptr: memory.len(),
         }
     }
 }
@@ -102,10 +103,10 @@ pub async fn evaluate_function(
         Function::Ir(function) => {
             // Write the current base ptr at the stack ptr location
             let base_ptr = vm.base_ptr.to_le_bytes();
-            (&mut vm.memory[vm.stack_ptr..(vm.stack_ptr + base_ptr.len())])
+            (&mut vm.memory[(vm.stack_ptr - base_ptr.len())..vm.stack_ptr])
                 .copy_from_slice(&base_ptr);
             vm.base_ptr = vm.stack_ptr;
-            vm.stack_ptr += base_ptr.len();
+            vm.stack_ptr -= base_ptr.len();
 
             for node in function.body.iter() {
                 let result = evaluate_block(fns, params, vm, node).await;
@@ -115,8 +116,8 @@ pub async fn evaluate_function(
                 }
             }
 
-            let base_ptr = dbg!(&vm.memory[vm.base_ptr..(vm.base_ptr + base_ptr.len())]);
-            let base_ptr: usize = usize::from_le_bytes(base_ptr.try_into().unwrap());
+            let base_ptr = &vm.memory[(vm.base_ptr - base_ptr.len())..vm.base_ptr];
+            let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
             vm.stack_ptr = vm.base_ptr;
             vm.base_ptr = base_ptr;
         }
@@ -143,7 +144,7 @@ pub async fn evaluate_block(
                 .push(Value::Size(vm.base_ptr));
         }
         LinearNodeValue::StackAlloc(amount) => {
-            vm.stack_ptr += amount;
+            vm.stack_ptr -= amount;
         }
         LinearNodeValue::Parameter(idx) => {
             let mut temp = Value::Null;
@@ -174,6 +175,7 @@ pub async fn evaluate_block(
                 PrimitiveType::Int64 => Value::Int64(*bytemuck::from_bytes(memory)),
                 PrimitiveType::Float64 => Value::Float64(*bytemuck::from_bytes(memory)),
                 PrimitiveType::Bool => todo!(), //Value::Bool(*bytemuck::from_bytes(memory)),
+                PrimitiveType::PointerSize => todo!(),
             });
         }
         LinearNodeValue::WriteMemory {
@@ -195,6 +197,7 @@ pub async fn evaluate_block(
                 Numeric::Int32(value) => bytemuck::bytes_of(value),
                 Numeric::Float64(value) => bytemuck::bytes_of(value),
                 Numeric::Int64(value) => bytemuck::bytes_of(value),
+                Numeric::Size(value) => bytemuck::bytes_of(value),
             };
             (&mut vm.memory[location..(location + size)]).copy_from_slice(bytes);
         }
@@ -298,11 +301,25 @@ pub async fn evaluate_block(
                     HirBinOp::EqualTo => Value::Bool(left == right),
                     HirBinOp::NotEquals => Value::Bool(left != right),
                 },
+                (Numeric::Size(left), Numeric::Size(right)) => match op {
+                    HirBinOp::Add => Value::Size(left + right),
+                    HirBinOp::Subtract => Value::Size(left - right),
+                    HirBinOp::Multiply => Value::Size(left * right),
+                    HirBinOp::Divide => Value::Size(left / right),
+                    HirBinOp::LessThan => Value::Bool(left < right),
+                    HirBinOp::GreaterThan => Value::Bool(left > right),
+                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
+                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
+                    HirBinOp::EqualTo => Value::Bool(left == right),
+                    HirBinOp::NotEquals => Value::Bool(left != right),
+                },
                 (_, _) => unreachable!(),
             };
             vm.op_stack.push(val);
         }
-        LinearNodeValue::Size(_) => todo!(),
+        LinearNodeValue::Size(size) => {
+            vm.op_stack.push(Value::Size(*size));
+        }
         LinearNodeValue::Int(x) => {
             vm.op_stack.push(Value::Int32(*x as i32));
         }

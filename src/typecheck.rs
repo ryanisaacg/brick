@@ -124,6 +124,9 @@ pub enum PrimitiveType {
     Int64,
     Float64,
     Bool,
+
+    // TODO?
+    PointerSize,
 }
 
 // TODO: get the lifetimes out of these typecheck errors

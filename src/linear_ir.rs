@@ -118,23 +118,23 @@ pub fn linearize_nodes(
             }
             HirNodeValue::Declaration(id) => {
                 let alloc_size = expression_type_size(declarations, &node.ty);
-                stack_entries.insert(id, *stack_offset);
                 *stack_offset += alloc_size;
+                stack_entries.insert(id, *stack_offset);
                 let alloc = LinearNode::new(LinearNodeValue::StackAlloc(alloc_size));
                 values.push(alloc);
             }
             HirNodeValue::Parameter(idx, id) => {
-                let offset = *stack_offset;
-
                 let alloc_size = expression_type_size(declarations, &node.ty);
-                stack_entries.insert(id, *stack_offset);
                 *stack_offset += alloc_size;
+                stack_entries.insert(id, *stack_offset);
                 let alloc = LinearNode::new(LinearNodeValue::StackAlloc(alloc_size));
                 values.push(alloc);
 
+                let (location, offset) = variable_location(stack_entries, &id);
+
                 values.push(LinearNode {
                     value: LinearNodeValue::WriteMemory {
-                        location: Box::new(LinearNode::new(LinearNodeValue::StackFrame)),
+                        location: Box::new(location),
                         offset,
                         size: alloc_size,
                         value: Box::new(LinearNode::new(LinearNodeValue::Parameter(idx))),
@@ -252,9 +252,9 @@ fn lower_expression(
             )
         }
         HirNodeValue::VariableReference(id) => {
-            let offset = *stack_entries.get(&id).unwrap();
+            let (location, offset) = variable_location(stack_entries, &id);
             LinearNodeValue::ReadMemory {
-                location: Box::new(LinearNode::new(LinearNodeValue::StackFrame)),
+                location: Box::new(location),
                 offset,
                 size: expression_type_size(declarations, &ty),
                 ty,
@@ -395,11 +395,7 @@ fn lower_expression(
 
 fn lower_lvalue(stack_entries: &HashMap<ID, usize>, lvalue: HirNode) -> (LinearNode, usize) {
     match lvalue.value {
-        HirNodeValue::VariableReference(id) => {
-            let offset = stack_entries.get(&id).unwrap();
-
-            (LinearNode::new(LinearNodeValue::StackFrame), *offset)
-        }
+        HirNodeValue::VariableReference(id) => variable_location(stack_entries, &id),
 
         HirNodeValue::Parameter(_, _) => todo!(),
         HirNodeValue::Declaration(_) => todo!(),
@@ -425,8 +421,22 @@ fn lower_lvalue(stack_entries: &HashMap<ID, usize>, lvalue: HirNode) -> (LinearN
         HirNodeValue::ArrayLiteral(_) => todo!(),
         HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
         HirNodeValue::VtableCall(_, _, _) => todo!(),
-        HirNodeValue::StructToInterface { value, vtable } => todo!(),
+        HirNodeValue::StructToInterface { .. } => todo!(),
     }
+}
+
+fn variable_location(stack_entries: &HashMap<ID, usize>, var_id: &ID) -> (LinearNode, usize) {
+    let offset = stack_entries.get(var_id).unwrap();
+
+    (
+        LinearNode::new(LinearNodeValue::BinOp(
+            HirBinOp::Subtract,
+            PrimitiveType::PointerSize,
+            Box::new(LinearNode::new(LinearNodeValue::StackFrame)),
+            Box::new(LinearNode::new(LinearNodeValue::Size(*offset))),
+        )),
+        0,
+    )
 }
 
 const POINTER_SIZE: usize = 4;
@@ -458,6 +468,7 @@ fn primitive_type_size(prim: PrimitiveType) -> usize {
         PrimitiveType::Int64 => 8,
         PrimitiveType::Float64 => 8,
         PrimitiveType::Bool => 1,
+        PrimitiveType::PointerSize => POINTER_SIZE,
     }
 }
 
