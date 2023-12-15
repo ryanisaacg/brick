@@ -1,5 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use bytemuck::{Pod, Zeroable};
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ID(u32);
 
@@ -18,3 +20,10 @@ static COUNTER: AtomicUsize = AtomicUsize::new(1);
 fn get_id() -> usize {
     COUNTER.fetch_add(1, Ordering::Relaxed)
 }
+
+unsafe impl Zeroable for ID {
+    fn zeroed() -> Self {
+        ID(0)
+    }
+}
+unsafe impl Pod for ID {}

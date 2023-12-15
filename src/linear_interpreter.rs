@@ -6,7 +6,10 @@ use crate::{
     hir::HirBinOp,
     id::ID,
     interpreter::Numeric,
-    linear_ir::{LinearFunction, LinearNode, LinearNodeValue},
+    linear_ir::{
+        LinearFunction, LinearNode, LinearNodeValue, TypeLayoutField, TypeLayoutValue,
+        TypeMemoryLayout,
+    },
     typecheck::{ExpressionType, PrimitiveType},
     Value,
 };
@@ -75,16 +78,18 @@ pub enum Unwind {
 
 pub struct VM {
     pub memory: [u8; 1024],
+    pub layouts: HashMap<ID, TypeMemoryLayout>,
     pub op_stack: Vec<Value>,
     pub base_ptr: usize,
     pub stack_ptr: usize,
 }
 
 impl VM {
-    pub fn new() -> VM {
+    pub fn new(layouts: HashMap<ID, TypeMemoryLayout>) -> VM {
         let memory = [0; 1024];
         VM {
             memory,
+            layouts,
             op_stack: Vec::new(),
             base_ptr: memory.len(),
             stack_ptr: memory.len(),
@@ -124,7 +129,6 @@ pub async fn evaluate_function(
     }
 }
 
-
 // Kinda a hack: when we return, unwind the stack via Result
 #[async_recursion]
 pub async fn evaluate_block(
@@ -140,8 +144,7 @@ pub async fn evaluate_block(
             }
         }
         LinearNodeValue::StackFrame => {
-            vm.op_stack
-                .push(Value::Size(vm.base_ptr));
+            vm.op_stack.push(Value::Size(vm.base_ptr));
         }
         LinearNodeValue::StackAlloc(amount) => {
             vm.stack_ptr -= amount;
@@ -154,7 +157,6 @@ pub async fn evaluate_block(
         LinearNodeValue::ReadMemory {
             location,
             offset,
-            size,
             ty,
         } => {
             evaluate_block(fns, params, vm, location).await?;
@@ -162,44 +164,21 @@ pub async fn evaluate_block(
                 unreachable!()
             };
             location += offset;
-            let memory = &vm.memory[location..(location + size)];
-            // TODO: complex types
-            let ExpressionType::Primitive(ty) = ty else {
-                todo!("{:?}", node.provenance);
-            };
-            vm.op_stack.push(match ty {
-                PrimitiveType::Char => todo!(), //Value::Char(*bytemuck::from_bytes(memory)),
-                PrimitiveType::String => todo!(),
-                PrimitiveType::Int32 => Value::Int32(*bytemuck::from_bytes(memory)),
-                PrimitiveType::Float32 => Value::Float32(*bytemuck::from_bytes(memory)),
-                PrimitiveType::Int64 => Value::Int64(*bytemuck::from_bytes(memory)),
-                PrimitiveType::Float64 => Value::Float64(*bytemuck::from_bytes(memory)),
-                PrimitiveType::Bool => todo!(), //Value::Bool(*bytemuck::from_bytes(memory)),
-                PrimitiveType::PointerSize => todo!(),
-            });
+            read(&mut vm.op_stack, &vm.layouts, &vm.memory, location, &ty);
         }
         LinearNodeValue::WriteMemory {
             location,
             offset,
-            size,
             value,
+            ty,
         } => {
             evaluate_block(fns, params, vm, value).await?;
-            // TODO: complex types
-            let value = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             evaluate_block(fns, params, vm, location).await?;
             let Some(Value::Size(mut location)) = vm.op_stack.pop() else {
                 unreachable!()
             };
             location += offset;
-            let bytes = match &value {
-                Numeric::Float32(value) => bytemuck::bytes_of(value),
-                Numeric::Int32(value) => bytemuck::bytes_of(value),
-                Numeric::Float64(value) => bytemuck::bytes_of(value),
-                Numeric::Int64(value) => bytemuck::bytes_of(value),
-                Numeric::Size(value) => bytemuck::bytes_of(value),
-            };
-            (&mut vm.memory[location..(location + size)]).copy_from_slice(bytes);
+            write(&mut vm.op_stack, &vm.layouts, &mut vm.memory, location, ty);
         }
         LinearNodeValue::Call(lhs, parameters) => {
             evaluate_block(fns, params, vm, lhs).await?;
@@ -236,17 +215,15 @@ pub async fn evaluate_block(
             }
         }
         LinearNodeValue::Break => return Err(Unwind::Break),
-        LinearNodeValue::Loop(inner) => {
-            'outer: loop {
-                for node in inner.iter() {
-                    match evaluate_block(fns, params, vm, node).await {
-                        Err(Unwind::Break) => break 'outer,
-                        other @ Err(_)  => return other,
-                        Ok(_) => {}
-                    }
+        LinearNodeValue::Loop(inner) => 'outer: loop {
+            for node in inner.iter() {
+                match evaluate_block(fns, params, vm, node).await {
+                    Err(Unwind::Break) => break 'outer,
+                    other @ Err(_) => return other,
+                    Ok(_) => {}
                 }
             }
-        }
+        },
         LinearNodeValue::BinOp(op, _ty, lhs, rhs) => {
             evaluate_block(fns, params, vm, rhs).await?;
             evaluate_block(fns, params, vm, lhs).await?;
@@ -346,188 +323,129 @@ pub async fn evaluate_block(
     Ok(())
 }
 
-/*
-        HirNodeValue::Parameter(idx, id) => {
-            ctx.variables.insert(*id, ctx.params[*idx].clone());
-        }
-        HirNodeValue::VariableReference(id) => {
-            // TODO: don't clone?
-            ctx.value_stack
-                .push(ctx.variables.get(id).expect("var to be assigned").clone());
-        }
-        // No-op in the interpeter
-        HirNodeValue::Declaration(_) => {}
-        HirNodeValue::Call(fn_id, args) => {
-            evaluate_node(fns, ctx, fn_id).await?;
-            let Some(Value::Function(func)) = ctx.value_stack.pop() else {
-                panic!("expected functions");
-            };
-            // TODO: reverse order?
-            for param in args.iter().rev() {
-                evaluate_node(fns, ctx, param).await?;
+fn write(
+    op_stack: &mut Vec<Value>,
+    layouts: &HashMap<ID, TypeMemoryLayout>,
+    memory: &mut [u8],
+    location: usize,
+    ty: &ExpressionType,
+) {
+    match ty {
+        ExpressionType::Void => unreachable!(),
+        ExpressionType::Primitive(_) => write_primitive(op_stack, memory, location),
+        ExpressionType::DeclaredType(id) => match &layouts.get(id).unwrap().value {
+            TypeLayoutValue::Structure(fields) => {
+                for (_, offset, ty) in fields.iter() {
+                    let location = location + offset;
+                    match ty {
+                        TypeLayoutField::Primitive(_) => write_primitive(op_stack, memory, location),
+                        TypeLayoutField::Referenced(id) => write(op_stack, layouts, memory, location, &ExpressionType::DeclaredType(*id)),
+                        TypeLayoutField::Nullable(_) => todo!(),
+                        TypeLayoutField::Pointer => todo!(),
+                    }
+                }
             }
-            let params: Vec<_> = (0..args.len())
-                .map(|_| ctx.value_stack.pop().expect("param on stack"))
-                .collect();
-            let results = evaluate_function(fns, &func, params);
-            ctx.value_stack.extend(results.await.into_iter());
+            TypeLayoutValue::Interface(_) => todo!(),
+            TypeLayoutValue::FunctionPointer => todo!(),
         }
-        HirNodeValue::VtableCall(var, virtual_fn_id, args) => {
-            evaluate_node(fns, ctx, var).await?;
-            let Some(Value::Interface(value, vtable)) = ctx.value_stack.pop() else {
-                panic!("expected interface");
-            };
-            let function = vtable.get(virtual_fn_id).unwrap();
-            // TODO: reverse order?
-            for param in args.iter().rev() {
-                evaluate_node(fns, ctx, param).await?;
-            }
-            ctx.value_stack.push(*value);
-            let params: Vec<_> = (0..args.len())
-                .map(|_| ctx.value_stack.pop().expect("param on stack"))
-                .collect();
-            let results = evaluate_function(fns, function, params);
-            ctx.value_stack.extend(results.await.into_iter());
-        }
-        HirNodeValue::Access(val, name) => {
-            evaluate_node(fns, ctx, val).await?;
-            let Some(Value::Struct(val)) = ctx.value_stack.pop() else {
-                panic!("ICE: left side of '.' must be struct");
-            };
-            // TODO: clone
-            ctx.value_stack
-                .push(val.get(name).expect("field must be present").clone());
-        }
-        HirNodeValue::Assignment(lvalue, rvalue) => {
-            evaluate_node(fns, ctx, rvalue).await?;
-            // TODO: more lvalues
-            let HirNodeValue::VariableReference(id) = &lvalue.value else {
-                todo!("complex lvalues");
-            };
-            ctx.variables.insert(
-                *id,
-                ctx.value_stack
-                    .pop()
-                    .expect("right hand side should leave assignable value on stack"),
-            );
-        }
-        // TODO: floating arithmetic
-        HirNodeValue::BinOp(op, left, right) => {
-            evaluate_node(fns, ctx, right).await?;
-            evaluate_node(fns, ctx, left).await?;
-            let left = ctx
-                .value_stack
-                .pop()
-                .expect("value present")
-                .to_numeric()
-                .expect("value numeric");
-
-            let right = ctx
-                .value_stack
-                .pop()
-                .expect("value present")
-                .to_numeric()
-                .expect("value numeric");
-
-            let val = match (left, right) {
-                (Numeric::Int(left), Numeric::Int(right)) => match op {
-                    HirBinOp::Add => Value::Int(left + right),
-                    HirBinOp::Subtract => Value::Int(left - right),
-                    HirBinOp::Multiply => Value::Int(left * right),
-                    HirBinOp::Divide => Value::Int(left / right),
-                    HirBinOp::LessThan => Value::Bool(left < right),
-                    HirBinOp::GreaterThan => Value::Bool(left > right),
-                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
-                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
-                    HirBinOp::EqualTo => Value::Bool(left == right),
-                    HirBinOp::NotEquals => Value::Bool(left != right),
-                },
-                (Numeric::Float(left), Numeric::Float(right)) => match op {
-                    HirBinOp::Add => Value::Float(left + right),
-                    HirBinOp::Subtract => Value::Float(left - right),
-                    HirBinOp::Multiply => Value::Float(left * right),
-                    HirBinOp::Divide => Value::Float(left / right),
-                    HirBinOp::LessThan => Value::Bool(left < right),
-                    HirBinOp::GreaterThan => Value::Bool(left > right),
-                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
-                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
-                    HirBinOp::EqualTo => Value::Bool(left == right),
-                    HirBinOp::NotEquals => Value::Bool(left != right),
-                },
-                (_, _) => unreachable!(),
-            };
-
-            ctx.value_stack.push(val);
-        }
-        HirNodeValue::Return(val) => {
-            evaluate_node(fns, ctx, val).await?;
-            return Err(Unwind::Returned(
-                ctx.value_stack.pop().expect("value on stack"),
-            ));
-        }
-        HirNodeValue::Int(val) => ctx.value_stack.push(Value::Int(*val)),
-        HirNodeValue::Float(val) => ctx.value_stack.push(Value::Float(*val)),
-        HirNodeValue::Bool(val) => ctx.value_stack.push(Value::Bool(*val)),
-        HirNodeValue::Null => ctx.value_stack.push(Value::Null),
-        HirNodeValue::StringLiteral(val) => ctx.value_stack.push(Value::String(val.clone())),
-        HirNodeValue::CharLiteral(val) => ctx.value_stack.push(Value::Char(*val)),
-        HirNodeValue::Sequence(nodes) => {
-            for node in nodes.iter() {
-                evaluate_node(fns, ctx, node).await?;
-            }
-        }
-        HirNodeValue::If(cond, if_branch, else_branch) => {
-            evaluate_node(fns, ctx, cond).await?;
-            let Some(Value::Bool(cond)) = ctx.value_stack.pop() else {
-                panic!("ICE: expected boolean");
-            };
-            if cond {
-                evaluate_node(fns, ctx, if_branch).await?;
-            } else if let Some(else_branch) = else_branch {
-                evaluate_node(fns, ctx, else_branch).await?;
-            }
-        }
-        HirNodeValue::While(cond, block) => loop {
-            evaluate_node(fns, ctx, cond).await?;
-            let Some(Value::Bool(cond)) = ctx.value_stack.pop() else {
-                panic!("ICE: expected boolean");
-            };
-            if !cond {
-                break;
-            }
-            evaluate_node(fns, ctx, block).await?;
-        },
-        HirNodeValue::StructLiteral(_, fields) => {
-            let mut values = HashMap::new();
-            for (field, value) in fields.iter() {
-                evaluate_node(fns, ctx, value).await?;
-                values.insert(field.clone(), ctx.value_stack.pop().unwrap());
-            }
-            ctx.value_stack.push(Value::Struct(values));
-        }
-
-        HirNodeValue::TakeUnique(_) => todo!(),
-        HirNodeValue::TakeShared(_) => todo!(),
-        HirNodeValue::Dereference(_) => todo!(),
-
-        HirNodeValue::Index(_, _) => todo!(),
-        HirNodeValue::ArrayLiteral(_) => todo!(),
-        HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
-
-        HirNodeValue::StructToInterface { value, vtable } => {
-            evaluate_node(fns, ctx, value).await?;
-            let value = ctx.value_stack.pop().unwrap();
-            let vtable = vtable
-                .iter()
-                .map(|(virtual_fn_id, concrete_fn_id)| {
-                    (*virtual_fn_id, fns.get(concrete_fn_id).unwrap().clone())
-                })
-                .collect();
-            ctx.value_stack
-                .push(Value::Interface(Box::new(value), vtable));
-        }
+        ExpressionType::Pointer(_, _) => todo!(),
+        ExpressionType::Array(_) => todo!(),
+        ExpressionType::Null => todo!(),
+        ExpressionType::Nullable(_) => todo!(),
     }
-
-    Ok(())
 }
-        */
+
+fn write_primitive(
+    op_stack: &mut Vec<Value>,
+    memory: &mut [u8],
+    location: usize,
+) {
+    let value = op_stack.pop().unwrap();
+    let bytes = match &value {
+        Value::Null => todo!(),
+        Value::ID(id) => bytemuck::bytes_of(id),
+        Value::Size(x) => bytemuck::bytes_of(x),
+        Value::Int32(x) => bytemuck::bytes_of(x),
+        Value::Int64(x) => bytemuck::bytes_of(x),
+        Value::Float32(x) => bytemuck::bytes_of(x),
+        Value::Float64(x) => bytemuck::bytes_of(x),
+        Value::Bool(x) => bytemuck::bytes_of(x),
+        Value::Char(x) => bytemuck::bytes_of(x),
+        Value::String(_) => todo!(),
+        Value::Array(_) |
+        Value::Struct(_) |
+        Value::Function(_) |
+        Value::Interface(_, _) => unreachable!("only used in the non-linear interpreter"),
+    };
+    (&mut memory[location..(location + bytes.len())]).copy_from_slice(bytes);
+}
+
+fn read(
+    op_stack: &mut Vec<Value>,
+    layouts: &HashMap<ID, TypeMemoryLayout>,
+    memory: &[u8],
+    location: usize,
+    ty: &ExpressionType,
+) {
+    match ty {
+        ExpressionType::Void | ExpressionType::Null => unreachable!(),
+        ExpressionType::Primitive(p) => {
+            read_primitive(op_stack, memory, location, *p);
+        }
+        ExpressionType::DeclaredType(id) => match &layouts.get(id).unwrap().value {
+            TypeLayoutValue::Structure(fields) => {
+                for (_, offset, ty) in fields.iter().rev() {
+                    let location = location + offset;
+                    match ty {
+                        TypeLayoutField::Primitive(p) => {
+                            read_primitive(op_stack, memory, location, *p)
+                        }
+                        TypeLayoutField::Referenced(id) => read(
+                            op_stack,
+                            layouts,
+                            memory,
+                            location,
+                            &ExpressionType::DeclaredType(*id),
+                        ),
+                        TypeLayoutField::Nullable(_) => todo!(),
+                        TypeLayoutField::Pointer => todo!(),
+                    }
+                }
+            }
+            TypeLayoutValue::Interface(_fields) => todo!(),
+            TypeLayoutValue::FunctionPointer => {
+                let fn_id: ID = *bytemuck::from_bytes(&memory[location..(location + 4)]);
+                op_stack.push(Value::ID(fn_id));
+            }
+        },
+        ExpressionType::Pointer(_, _) => todo!(),
+        ExpressionType::Array(_) => todo!(),
+        ExpressionType::Nullable(_) => todo!(),
+    }
+}
+
+fn read_primitive(
+    op_stack: &mut Vec<Value>,
+    memory: &[u8],
+    location: usize,
+    primitive: PrimitiveType,
+) {
+    op_stack.push(match primitive {
+        PrimitiveType::Char => todo!(), //Value::Char(*bytemuck::from_bytes(memory)),
+        PrimitiveType::String => todo!(),
+        PrimitiveType::Int32 => {
+            Value::Int32(*bytemuck::from_bytes(&memory[location..(location + 4)]))
+        }
+        PrimitiveType::Float32 => {
+            Value::Float32(*bytemuck::from_bytes(&memory[location..(location + 4)]))
+        }
+        PrimitiveType::Int64 => {
+            Value::Int64(*bytemuck::from_bytes(&memory[location..(location + 8)]))
+        }
+        PrimitiveType::Float64 => {
+            Value::Float64(*bytemuck::from_bytes(&memory[location..(location + 8)]))
+        }
+        PrimitiveType::Bool => todo!(), //Value::Bool(*bytemuck::from_bytes(memory)),
+        PrimitiveType::PointerSize => todo!(),
+    });
+}

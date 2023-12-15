@@ -66,13 +66,12 @@ pub enum LinearNodeValue {
     ReadMemory {
         location: Box<LinearNode>,
         offset: usize,
-        size: usize,
         ty: ExpressionType,
     },
     WriteMemory {
         location: Box<LinearNode>,
         offset: usize,
-        size: usize,
+        ty: ExpressionType,
         value: Box<LinearNode>,
     },
 
@@ -136,22 +135,24 @@ pub fn linearize_nodes(
                     value: LinearNodeValue::WriteMemory {
                         location: Box::new(location),
                         offset,
-                        size: alloc_size,
                         value: Box::new(LinearNode::new(LinearNodeValue::Parameter(idx))),
+                        // TODO: hm
+                        ty: node.ty,
                     },
                     provenance: node.provenance,
                 });
             }
             HirNodeValue::Assignment(lhs, rhs) => {
                 let size = expression_type_size(declarations, &lhs.ty);
+                let ty = lhs.ty.clone();
                 let (location, offset) = lower_lvalue(stack_entries, *lhs);
                 let rhs = lower_expression(declarations, stack_entries, *rhs);
                 values.push(LinearNode {
                     value: LinearNodeValue::WriteMemory {
                         location: Box::new(location),
                         offset,
-                        size,
                         value: Box::new(rhs),
+                        ty,
                     },
                     provenance: node.provenance,
                 });
@@ -256,7 +257,6 @@ fn lower_expression(
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
-                size: expression_type_size(declarations, &ty),
                 ty,
             }
         }
@@ -280,14 +280,16 @@ fn lower_expression(
             let TypeMemoryLayout { value, size } = declarations.get(&ty_id).unwrap();
             let (lhs, mut offset) = lower_lvalue(stack_entries, *lhs);
             offset += match value {
-                TypeLayoutValue::Structure(fields) => fields.get(&rhs).unwrap().0,
+                TypeLayoutValue::Structure(fields) => fields
+                    .iter()
+                    .find_map(|(name, offset, _)| if name == &rhs { Some(offset) } else { None })
+                    .unwrap(),
                 TypeLayoutValue::Interface(_fields) => todo!(), //*fields.get(&rhs).unwrap(),
                 TypeLayoutValue::FunctionPointer => unreachable!(),
             };
             LinearNodeValue::ReadMemory {
                 location: Box::new(lhs),
                 offset,
-                size: *size,
                 ty,
             }
         }
@@ -304,7 +306,7 @@ fn lower_expression(
         HirNodeValue::TakeShared(_) => todo!(),
         HirNodeValue::Dereference(_) => todo!(),
         HirNodeValue::Sequence(_) => todo!(),
-        HirNodeValue::StructLiteral(struct_id, values) => {
+        HirNodeValue::StructLiteral(struct_id, mut values) => {
             let Some(TypeMemoryLayout {
                 value: TypeLayoutValue::Structure(layouts),
                 ..
@@ -312,19 +314,15 @@ fn lower_expression(
             else {
                 unreachable!()
             };
-            // TODO: does this suck
-            let mut values: Vec<_> = values
-                .into_iter()
-                .map(|(name, value)| {
-                    (
-                        layouts.get(&name).unwrap().0,
-                        lower_expression(declarations, stack_entries, value),
-                    )
-                })
-                .collect();
-            values.sort_by(|(a, _), (b, _)| a.cmp(b));
-            // TODO: this definitely sucks
-            LinearNodeValue::Sequence(values.into_iter().map(|(_, val)| val).collect())
+            // TODO: push this down a layer of abstraction
+            LinearNodeValue::Sequence(
+                layouts
+                    .iter()
+                    .rev()
+                    .map(|(key, _, _)| values.remove(key).unwrap())
+                    .map(|value| lower_expression(declarations, stack_entries, value))
+                    .collect(),
+            )
         }
         HirNodeValue::ArrayLiteral(_) => todo!(),
         HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
@@ -359,7 +357,6 @@ fn lower_expression(
                 Box::new(LinearNode::new(LinearNodeValue::ReadMemory {
                     location: Box::new(table),
                     offset,
-                    size: POINTER_SIZE,
                     // TODO: what the hell type do we put here
                     ty: ExpressionType::Null,
                 })),
@@ -425,6 +422,20 @@ fn lower_lvalue(stack_entries: &HashMap<ID, usize>, lvalue: HirNode) -> (LinearN
     }
 }
 
+/*fn read(
+    declarations: &HashMap<ID, TypeMemoryLayout>,
+    location: Box<LinearNode>,
+    offset: usize,
+    ty: ExpressionType,
+) -> LinearNodeValue {
+    LinearNodeValue::ReadMemory {
+        location: Box::new(location),
+        offset,
+        size: expression_type_size(declarations, &ty),
+        ty,
+    }
+}*/
+
 fn variable_location(stack_entries: &HashMap<ID, usize>, var_id: &ID) -> (LinearNode, usize) {
     let offset = stack_entries.get(var_id).unwrap();
 
@@ -480,7 +491,7 @@ pub struct TypeMemoryLayout {
 }
 
 pub enum TypeLayoutValue {
-    Structure(HashMap<String, (usize, TypeLayoutField)>),
+    Structure(Vec<(String, usize, TypeLayoutField)>),
     Interface(Vec<ID>),
     FunctionPointer,
 }
@@ -529,7 +540,7 @@ fn layout_static_decl(
                 .map(|(name, field)| {
                     let (field, field_size) = layout_type(declarations, layouts, field);
                     size += field_size;
-                    (name.clone(), (field_size, field))
+                    (name.clone(), size, field)
                 })
                 .collect();
             TypeMemoryLayout {

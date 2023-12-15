@@ -9,7 +9,7 @@ use hir::HirModule;
 pub use interpreter::Value;
 use interpreter::{evaluate_node, Context, Function};
 use linear_interpreter::{evaluate_block, VM};
-use linear_ir::{linearize_function, linearize_nodes, layout_types};
+use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
 
@@ -148,7 +148,7 @@ pub async fn linear_interpret_code(
         statements.into(),
     );
 
-    let mut vm = VM::new();
+    let mut vm = VM::new(ty_declarations);
     for statement in statements {
         let _ = evaluate_block(&functions, &mut [], &mut vm, &statement).await;
     }

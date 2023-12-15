@@ -46,11 +46,15 @@ async fn numeric_assignment() {
 
 #[tokio::test]
 async fn multiple_variables() {
-    let result = eval(r#"
+    let result = eval(
+        r#"
 let a = 5;
 let b = 3 + a;
 let c = b / 2;
 a - c
-"#).await.unwrap();
+"#,
+    )
+    .await
+    .unwrap();
     assert_matches!(&result[..], [Value::Int32(1)]);
 }
