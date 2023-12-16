@@ -1172,11 +1172,11 @@ fn expression_pratt<'a>(
 }
 
 const ASSIGNMENT: u8 = 2;
-const REFERENCE: u8 = ASSIGNMENT + 1;
-const COMPARE: u8 = REFERENCE + 2;
+const COMPARE: u8 = ASSIGNMENT + 2;
 const SUM: u8 = COMPARE + 2;
 const FACTOR: u8 = SUM + 2;
-const CALL: u8 = FACTOR + 2;
+const REFERENCE: u8 = FACTOR + 1;
+const CALL: u8 = REFERENCE + 2;
 const DOT: u8 = CALL + 1;
 
 fn prefix_binding_power(op: &TokenValue) -> Option<((), u8)> {

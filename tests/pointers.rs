@@ -53,6 +53,7 @@ fn incremented(x: ref i32): i32 {
 
 let x = 2;
 add_one(unique x);
+x
 "#).await.unwrap();
     assert_matches!(&result[..], [Value::Int32(3)]);
 }
