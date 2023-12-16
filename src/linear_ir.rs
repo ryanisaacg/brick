@@ -209,8 +209,6 @@ pub fn linearize_nodes(
             HirNodeValue::StructLiteral(_, _) => todo!(),
             HirNodeValue::ArrayLiteral(_) => todo!(),
             HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
-            HirNodeValue::VtableCall(_, _, _) => todo!(),
-            HirNodeValue::StructToInterface { .. } => todo!(),
 
             // TODO: auto-returns?
             _ => {
@@ -326,12 +324,14 @@ fn lower_expression(
                 unreachable!()
             };
             let (table, mut offset) = lower_lvalue(declarations, stack_entries, *table);
+            offset += POINTER_SIZE;
             offset += fields
                 .iter()
                 .enumerate()
                 .find_map(|(idx, id)| {
                     if *id == fn_id {
-                        Some((idx + 1) * POINTER_SIZE)
+                        // TODO: fix this constant
+                        Some(idx * 4)
                     } else {
                         None
                     }
@@ -345,15 +345,13 @@ fn lower_expression(
                 Box::new(LinearNode::new(LinearNodeValue::ReadMemory {
                     location: Box::new(table),
                     offset,
-                    // TODO: what the hell type do we put here
-                    ty: ExpressionType::Null,
+                    ty: ExpressionType::Primitive(PrimitiveType::FunctionID),
                 })),
                 params,
             )
         }
         HirNodeValue::StructToInterface { value, vtable } => {
             let mut values = Vec::new();
-            values.push(lower_expression(declarations, stack_entries, *value));
 
             let ExpressionType::DeclaredType(ty_id) = &ty else {
                 unreachable!()
@@ -365,11 +363,21 @@ fn lower_expression(
             else {
                 unreachable!()
             };
-            for field in fields.iter() {
+            for field in fields.iter().rev() {
                 values.push(LinearNode::new(LinearNodeValue::FunctionID(
                     *vtable.get(field).unwrap(),
                 )));
             }
+
+            let (pointer, offset) = lower_lvalue(declarations, stack_entries, *value);
+            let offset = LinearNode::new(LinearNodeValue::Size(offset));
+            let pointer = LinearNode::new(LinearNodeValue::BinOp(
+                HirBinOp::Add,
+                PrimitiveType::PointerSize,
+                Box::new(pointer),
+                Box::new(offset),
+            ));
+            values.push(pointer);
 
             LinearNodeValue::Sequence(values)
         }
@@ -465,7 +473,8 @@ fn access_location(
     (lhs, offset)
 }
 
-const POINTER_SIZE: usize = 4;
+// TODO: this should probably be determined by the backend...
+const POINTER_SIZE: usize = 8;
 
 fn expression_type_size(
     declarations: &HashMap<ID, TypeMemoryLayout>,
@@ -495,6 +504,7 @@ fn primitive_type_size(prim: PrimitiveType) -> usize {
         PrimitiveType::Float64 => 8,
         PrimitiveType::Bool => 1,
         PrimitiveType::PointerSize => POINTER_SIZE,
+        PrimitiveType::FunctionID => 4,
     }
 }
 

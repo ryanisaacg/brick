@@ -4,7 +4,6 @@ use std::fmt;
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct SourceRange {
     source_name: &'static str,
-    #[allow(dead_code)]
     source_text: &'static str,
     start_line: u32,
     start_offset: u32,
@@ -49,6 +48,12 @@ impl SourceRange {
 
     fn is_one_char(&self) -> bool {
         self.start_line == self.end_line && self.start_offset == self.end_offset
+    }
+
+    pub fn text(&self) -> &str {
+        let start = self.start().index();
+        let end = self.end().index();
+        &self.source_text[start..end]
     }
 }
 
@@ -110,6 +115,20 @@ impl SourceMarker {
             line,
             offset,
         }
+    }
+
+    pub fn index(&self) -> usize {
+        let mut index = 0;
+        let mut current_line = 1;
+        let mut chars = self.source_text.chars();
+        while current_line < self.line {
+            if chars.next().unwrap() == '\n' {
+                current_line += 1;
+            }
+            index += 1;
+        }
+
+        index + (self.offset as usize)
     }
 }
 

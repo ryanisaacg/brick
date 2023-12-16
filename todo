@@ -1,5 +1,6 @@
 linear IR:
-- structs and other complex types
+- separate PrimitiveType abstraction and Value abstraction for linear IR
+- interfaces are broken, see "interfaces" below
 - (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
 - (maybe) AST rewrite the HIR to disambiguate between variable references and function references
 
@@ -22,6 +23,12 @@ returns:
 
 interfaces:
 - remove fields from interfaces? vtables just make more sense...
+- self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
+    - by-reference parameters
+        - declaring a parameter is a reference
+        - typechecking it correctly
+        - when making the method -> function conversion, automatically take a reference if it's required
+    - mandate by-reference parameters for interfaces
 - structs:
     - struct associated functions support "self"
         - self can be declared as a typeless parameter syntactically
@@ -32,7 +39,8 @@ interfaces:
     - union associated functions support "self"
     - union associated functions work
     - unions have associated functions
-- modules can be converted to interfaces
+- modules can be converted to interfaces:
+    - produce and consume a nullpointer for the vtable call? (might mean we need to generate shim functions)
 - interfaces can be converted between each other:
     - in typechecking
     - in the IR

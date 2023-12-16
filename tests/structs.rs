@@ -83,3 +83,27 @@ rect.area()
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(100)]);
 }
+
+#[tokio::test]
+async fn order_matters() {
+    let result = eval(r#"
+struct Triplet {
+    a: Point,
+    b: Point,
+    c: Point,
+}
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+let a = Point { x: 1, y: 0 };
+let b = Point { x: 0, y: 2 };
+let c = Point { x: 3, y: 0 };
+let n = Triplet { a, b, c};
+
+n.a.x + n.b.y * n.c.x
+"#).await.unwrap();
+    assert_matches!(&result[..], [Value::Int32(7)]);
+}
+
