@@ -203,10 +203,6 @@ pub fn linearize_nodes(
                 })
             }
 
-            HirNodeValue::TakeUnique(_) => todo!(),
-            HirNodeValue::TakeShared(_) => todo!(),
-            HirNodeValue::Dereference(_) => todo!(),
-            HirNodeValue::StructLiteral(_, _) => todo!(),
             HirNodeValue::ArrayLiteral(_) => todo!(),
             HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
 
@@ -288,9 +284,20 @@ fn lower_expression(
         HirNodeValue::Parameter(_, _) => todo!(),
         HirNodeValue::Declaration(_) => todo!(),
         HirNodeValue::Assignment(_, _) => todo!(),
-        HirNodeValue::TakeUnique(_) => todo!(),
-        HirNodeValue::TakeShared(_) => todo!(),
-        HirNodeValue::Dereference(_) => todo!(),
+        HirNodeValue::TakeUnique(inner) | HirNodeValue::TakeShared(inner) => {
+            let (ptr, offset) = lower_lvalue(declarations, stack_entries, *inner);
+            LinearNodeValue::BinOp(
+                HirBinOp::Add,
+                PrimitiveType::PointerSize,
+                Box::new(ptr),
+                Box::new(LinearNode::new(LinearNodeValue::Size(offset))),
+            )
+        }
+        HirNodeValue::Dereference(inner) => LinearNodeValue::ReadMemory {
+            location: Box::new(lower_expression(declarations, stack_entries, *inner)),
+            offset: 0,
+            ty,
+        },
         HirNodeValue::Sequence(_) => todo!(),
         HirNodeValue::StructLiteral(struct_id, mut values) => {
             let Some(TypeMemoryLayout {
@@ -394,6 +401,9 @@ fn lower_lvalue(
     match lvalue.value {
         HirNodeValue::VariableReference(id) => variable_location(stack_entries, &id),
         HirNodeValue::Access(lhs, rhs) => access_location(declarations, stack_entries, *lhs, rhs),
+        HirNodeValue::Dereference(inner) => {
+            (lower_expression(declarations, stack_entries, *inner), 0)
+        }
 
         HirNodeValue::Parameter(_, _) => todo!(),
         HirNodeValue::Declaration(_) => todo!(),
@@ -410,7 +420,6 @@ fn lower_lvalue(
         HirNodeValue::StringLiteral(_) => todo!(),
         HirNodeValue::TakeUnique(_) => todo!(),
         HirNodeValue::TakeShared(_) => todo!(),
-        HirNodeValue::Dereference(_) => todo!(),
         HirNodeValue::Sequence(_) => todo!(),
         HirNodeValue::If(_, _, _) => todo!(),
         HirNodeValue::While(_, _) => todo!(),

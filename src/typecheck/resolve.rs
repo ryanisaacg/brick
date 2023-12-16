@@ -200,6 +200,7 @@ pub fn resolve_type_name(
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
         | AstNodeValue::Statement(_)
+        | AstNodeValue::Deref(_)
         | AstNodeValue::Int(_)
         | AstNodeValue::Null
         | AstNodeValue::Float(_)
@@ -209,7 +210,7 @@ pub fn resolve_type_name(
         | AstNodeValue::While(_, _)
         | AstNodeValue::Call(_, _)
         | AstNodeValue::TakeUnique(_)
-        | AstNodeValue::TakeShared(_)
+        | AstNodeValue::TakeRef(_)
         | AstNodeValue::StructLiteral { .. }
         | AstNodeValue::ArrayLiteral(_)
         | AstNodeValue::ArrayLiteralLength(_, _)

@@ -21,12 +21,15 @@ returns:
 - typecheck returns
 - allow void returns
 
+references:
+- dereference operator
+- unique refs allow mutation, non-uniques do not
+- dot operator auto-dereferences
+
 interfaces:
 - remove fields from interfaces? vtables just make more sense...
 - self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
     - by-reference parameters
-        - declaring a parameter is a reference
-        - typechecking it correctly
         - when making the method -> function conversion, automatically take a reference if it's required
     - mandate by-reference parameters for interfaces
 - structs:
@@ -95,10 +98,7 @@ errors:
 - functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
 - allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
 
-borrow checker:
-- enforce uniqueness of unique borrows
-- can't use original binding when borrowed
-- can't store borrows in types, or return them
+borrow checker
 
 coroutines:
 - decide on some coroutine facility

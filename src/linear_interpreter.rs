@@ -359,7 +359,9 @@ fn write(
             }
             TypeLayoutValue::FunctionPointer => todo!(),
         }
-        ExpressionType::Pointer(_, _) => todo!(),
+        ExpressionType::Pointer(_, _) => {
+            write_primitive(op_stack, memory, dbg!(location));
+        }
         ExpressionType::Array(_) => todo!(),
         ExpressionType::Null => todo!(),
         ExpressionType::Nullable(_) => todo!(),
@@ -375,7 +377,12 @@ fn write_primitive(
     let bytes = match &value {
         Value::Null => todo!(),
         Value::ID(id) => bytemuck::bytes_of(id),
-        Value::Size(x) => bytemuck::bytes_of(x),
+        Value::Size(x) => {
+            // lifetime issues
+            let bytes = x.to_le_bytes();
+            (&mut memory[location..(location + bytes.len())]).copy_from_slice(&bytes);
+            return bytes.len();
+        }
         Value::Int32(x) => bytemuck::bytes_of(x),
         Value::Int64(x) => bytemuck::bytes_of(x),
         Value::Float32(x) => bytemuck::bytes_of(x),
@@ -439,7 +446,9 @@ fn read(
                 op_stack.push(Value::ID(fn_id));
             }
         },
-        ExpressionType::Pointer(_, _) => todo!(),
+        ExpressionType::Pointer(_, _) => {
+            read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
+        }
         ExpressionType::Array(_) => todo!(),
         ExpressionType::Nullable(_) => todo!(),
     }
@@ -468,7 +477,9 @@ fn read_primitive(
         }
         PrimitiveType::Bool => todo!(), //Value::Bool(*bytemuck::from_bytes(memory)),
         PrimitiveType::PointerSize => {
-            Value::Size(*bytemuck::from_bytes(dbg!(&memory[dbg!(location)..(location + 8)])))
+            let base_ptr = &memory[location..(location+8)];
+            let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
+            Value::Size(base_ptr)
         }
         PrimitiveType::FunctionID => Value::ID(*bytemuck::from_bytes(&memory[location..(location + 4)]))
     });

@@ -38,6 +38,12 @@ pub enum CompileError {
 }
 
 pub async fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
+    let val = linear_interpret_code("eval", source.to_string(), HashMap::new()).await?;
+
+    Ok(val)
+}
+
+pub async fn eval_both(source: &str) -> Result<Vec<Value>, CompileError> {
     let val1 = interpret_code("eval", source.to_string(), HashMap::new()).await?;
     let val2 = linear_interpret_code("eval", source.to_string(), HashMap::new()).await?;
 

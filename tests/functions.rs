@@ -1,9 +1,9 @@
 use assert_matches::assert_matches;
-use brick::{eval, Value};
+use brick::{eval_both, Value};
 
 #[tokio::test]
 async fn add() {
-    let result = eval(
+    let result = eval_both(
         r#"
 fn add(a: i32, b: i32): i32 {
     a + b
@@ -19,7 +19,7 @@ add(1, 2)
 
 #[tokio::test]
 async fn recursion() {
-    let result = eval(
+    let result = eval_both(
         r#"
 fn fib(input: i32): i32 {
     if input < 1 {
@@ -43,7 +43,7 @@ fib(5)
 #[tokio::test]
 #[should_panic]
 async fn return_mismatch() {
-    eval(
+    eval_both(
         r#"
 fn function(): i32 {
     "not an i32"

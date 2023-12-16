@@ -38,6 +38,7 @@ assignment ::= expression "=" expression
 reference ::= "shared" expression | "unique" expression
 compare ::= expression ">" expression | expression "<" expression
 numeric ::= expression "+" expression | expression "-" expression | expression "*" expression | expression "/" expression
+deref ::= "*" expression
 dot ::= expression "." word
 call ::=  expression "(" call_param ")" | expression "(" call_param ")" |
     expression "[" expression "]" | expression "[" expression "]" 

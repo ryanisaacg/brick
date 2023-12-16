@@ -165,10 +165,11 @@ fn create_graph_for_node<'a>(
             (node, node)
         }
         BinExpr(_, _, _)
+        | Deref(_)
         | Statement(_)
         | Call(_, _)
         | TakeUnique(_)
-        | TakeShared(_)
+        | TakeRef(_)
         | StructLiteral { .. }
         | ArrayLiteral(_)
         | ArrayLiteralLength(_, _)

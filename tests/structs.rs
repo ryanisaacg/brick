@@ -1,9 +1,9 @@
 use assert_matches::assert_matches;
-use brick::{eval, Value};
+use brick::{eval_both, Value};
 
 #[tokio::test]
 async fn basic_construction() {
-    let result = eval(
+    let result = eval_both(
         r#"
 struct Triple {
     a: i32,
@@ -23,7 +23,7 @@ tri.a + tri.b + tri.c
 
 #[tokio::test]
 async fn associated_functions() {
-    let result = eval(
+    let result = eval_both(
         r#"
 struct Point2 {
     x: i32,
@@ -46,7 +46,7 @@ x.length2()
 
 #[tokio::test]
 async fn nested_structs() {
-    let result = eval(
+    let result = eval_both(
         r#"
 struct Point2 {
     x: i32,
@@ -86,7 +86,7 @@ rect.area()
 
 #[tokio::test]
 async fn order_matters() {
-    let result = eval(r#"
+    let result = eval_both(r#"
 struct Triplet {
     a: Point,
     b: Point,

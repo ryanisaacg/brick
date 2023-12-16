@@ -1,9 +1,9 @@
 use assert_matches::assert_matches;
-use brick::{eval, Value};
+use brick::{eval_both, Value};
 
 #[tokio::test]
 async fn branching() {
-    let result = eval(
+    let result = eval_both(
         r#"
 let i = 0;
 let n = 2;
@@ -21,7 +21,7 @@ n
 
 #[tokio::test]
 async fn basic_loop() {
-    let result = eval(
+    let result = eval_both(
         r#"
 let i = 0;
 let n = 2;

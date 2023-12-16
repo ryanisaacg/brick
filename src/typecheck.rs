@@ -700,10 +700,17 @@ fn typecheck_expression<'a>(
             PointerKind::Unique,
             Box::new(typecheck_expression(inner, outer_scopes, current_scope, context)?.clone()),
         ),
-        AstNodeValue::TakeShared(inner) => ExpressionType::Pointer(
+        AstNodeValue::TakeRef(inner) => ExpressionType::Pointer(
             PointerKind::Shared,
             Box::new(typecheck_expression(inner, outer_scopes, current_scope, context)?.clone()),
         ),
+        AstNodeValue::Deref(inner) => {
+            let ty = typecheck_expression(inner, outer_scopes, current_scope, context)?;
+            let ExpressionType::Pointer(_, ty) = ty else {
+                todo!("compile error for illegal deref")
+            };
+            *ty.clone()
+        }
         AstNodeValue::ArrayLiteral(items) => {
             if items.is_empty() {
                 todo!("how to typecheck 0-length collections?");

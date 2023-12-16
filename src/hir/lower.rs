@@ -101,7 +101,8 @@ fn lower_node<'ast>(
         }
 
         AstNodeValue::TakeUnique(inner) => HirNodeValue::TakeUnique(lower_node_alloc(decls, inner)),
-        AstNodeValue::TakeShared(inner) => HirNodeValue::Return(lower_node_alloc(decls, inner)),
+        AstNodeValue::TakeRef(inner) => HirNodeValue::TakeShared(lower_node_alloc(decls, inner)),
+        AstNodeValue::Deref(inner) => HirNodeValue::Dereference(lower_node_alloc(decls, inner)),
 
         // Statement doesn't actually add a node - the inner expression
         // has what really counts
