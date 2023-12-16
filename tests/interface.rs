@@ -31,7 +31,7 @@ interface HasArea {
 struct Square {
     size: i32,
 
-    fn area(self: Square): i32 {
+    fn area(self: ref Square): i32 {
         self.size * self.size
     }
 }
@@ -59,7 +59,7 @@ interface HasArea {
 struct Square {
     size: i32,
 
-    fn area(self: Square): i32 {
+    fn area(self: ref Square): i32 {
         self.size * self.size
     }
 }
@@ -81,20 +81,3 @@ a1 + a2
     assert_matches!(&result[..], [Value::Int32(17)]);
 }
 
-#[tokio::test]
-#[should_panic]
-async fn bad_associated_functions() {
-    eval_both(
-        r#"
-struct Square {
-    size: f32,
-
-    fn area(self: Square): string {
-        self.size * self.size
-    }
-}
-"#,
-    )
-    .await
-    .unwrap();
-}

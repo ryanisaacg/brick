@@ -526,14 +526,14 @@ fn typecheck_expression<'a>(
             ExpressionType::Primitive(PrimitiveType::Bool)
         }
         AstNodeValue::BinExpr(BinOp::Assignment, left, right) => {
-            // TODO: ensure left is a valid lvalue
-            let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            let left_ty = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            validate_lvalue(left);
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
 
-            if !is_assignable_to(&context.id_to_decl, left, right) {
+            if !is_assignable_to(&context.id_to_decl, left_ty, right) {
                 return Err(TypecheckError::TypeMismatch {
                     received: right.clone(),
-                    expected: left.clone(),
+                    expected: left_ty.clone(),
                 });
             }
 
@@ -544,20 +544,20 @@ fn typecheck_expression<'a>(
             left,
             right,
         ) => {
-            // TODO: ensure left is a valid lvalue
-            let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            let left_ty = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            validate_lvalue(left);
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
 
-            if !matches!(fully_dereference(left), ExpressionType::Primitive(_))
+            if !matches!(fully_dereference(left_ty), ExpressionType::Primitive(_))
                 || !matches!(fully_dereference(right), ExpressionType::Primitive(_))
             {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
 
-            if !is_assignable_to(&context.id_to_decl, left, right) {
+            if !is_assignable_to(&context.id_to_decl, left_ty, right) {
                 return Err(TypecheckError::TypeMismatch {
                     received: right.clone(),
-                    expected: left.clone(),
+                    expected: left_ty.clone(),
                 });
             }
 
@@ -750,6 +750,52 @@ fn typecheck_expression<'a>(
     Ok(node.ty.get().expect("just set"))
 }
 
+fn validate_lvalue(lvalue: &AstNode<'_>) {
+    let is_valid = match &lvalue.value {
+        // TODO: remove this if I add auto-deref later
+        AstNodeValue::Name { .. } => true,
+        AstNodeValue::Deref(inner) => {
+            let Some(ExpressionType::Pointer(kind, _)) = inner.ty.get() else {
+                unreachable!()
+            };
+            *kind == PointerKind::Unique
+        }
+        AstNodeValue::BinExpr(_, _, _) => todo!("support lhs dot operator"),
+
+        AstNodeValue::FunctionDeclaration(_)
+        | AstNodeValue::ExternFunctionBinding(_)
+        | AstNodeValue::StructDeclaration(_)
+        | AstNodeValue::UnionDeclaration(_)
+        | AstNodeValue::InterfaceDeclaration(_)
+        | AstNodeValue::RequiredFunction(_)
+        | AstNodeValue::Declaration(_, _)
+        | AstNodeValue::Import(_)
+        | AstNodeValue::Return(_)
+        | AstNodeValue::Statement(_)
+        | AstNodeValue::Int(_)
+        | AstNodeValue::Float(_)
+        | AstNodeValue::Bool(_)
+        | AstNodeValue::CharLiteral(_)
+        | AstNodeValue::StringLiteral(_)
+        | AstNodeValue::Null
+        | AstNodeValue::If(_)
+        | AstNodeValue::While(_, _)
+        | AstNodeValue::Call(_, _)
+        | AstNodeValue::TakeUnique(_)
+        | AstNodeValue::TakeRef(_)
+        | AstNodeValue::StructLiteral { .. }
+        | AstNodeValue::DictLiteral(_)
+        | AstNodeValue::ArrayLiteral(_)
+        | AstNodeValue::ArrayLiteralLength(_, _)
+        | AstNodeValue::Block(_)
+        | AstNodeValue::UniqueType(_)
+        | AstNodeValue::SharedType(_)
+        | AstNodeValue::ArrayType(_)
+        | AstNodeValue::NullableType(_) => false,
+    };
+    assert!(is_valid);
+}
+
 fn resolve_name(
     name: &str,
     current_scope: &HashMap<String, (ID, ExpressionType)>,
@@ -778,7 +824,9 @@ fn is_assignable_to(
 
         // Handle pointers and de-referencing
         (Pointer(left_ty, left_inner), Pointer(right_ty, right_inner)) => {
-            left_ty == right_ty && is_assignable_to(id_to_decl, left_inner, right_inner)
+            (left_ty == right_ty
+                || *left_ty == PointerKind::Shared && *right_ty == PointerKind::Unique)
+                && is_assignable_to(id_to_decl, left_inner, right_inner)
         }
         // TODO: auto-dereference in the IR
         (left, Pointer(_, right_inner)) => is_assignable_to(id_to_decl, left, right_inner),
