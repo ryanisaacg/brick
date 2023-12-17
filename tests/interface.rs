@@ -32,7 +32,7 @@ struct Square {
     size: i32,
 
     fn area(self: ref Square): i32 {
-        (*self).size * (*self).size
+        self.size * self.size
     }
 }
 
@@ -50,7 +50,7 @@ area_2(x);
 
 #[tokio::test]
 async fn can_assign_structs() {
-    let result = eval_both(
+    let result = eval(
         r#"
 interface HasArea {
     fn area(area: HasArea): i32,

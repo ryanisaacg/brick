@@ -7,6 +7,7 @@ use crate::{
     typecheck::{ExpressionType, StaticDeclaration, TypecheckedFile},
 };
 
+mod auto_deref_dot;
 mod interface_conversion_pass;
 mod lower;
 mod rewrite_associated_functions;
@@ -19,6 +20,7 @@ pub fn lower_module<'ast>(
 
     module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
     interface_conversion_pass::rewrite(&mut module, declarations);
+    auto_deref_dot::auto_deref_dot(&mut module);
 
     module
 }

@@ -415,7 +415,7 @@ fn typecheck_expression<'a>(
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
-            let ExpressionType::DeclaredType(id) = left else {
+            let ExpressionType::DeclaredType(id) = fully_dereference(left) else {
                 panic!("TODO: left side of dot operator");
             };
             let AstNodeValue::Name { value: name, .. } = &right.value else {
@@ -914,7 +914,7 @@ fn is_assignable_to(
     }
 }
 
-fn fully_dereference(ty: &ExpressionType) -> &ExpressionType {
+pub fn fully_dereference(ty: &ExpressionType) -> &ExpressionType {
     if let ExpressionType::Pointer(_, inner) = ty {
         fully_dereference(inner)
     } else {

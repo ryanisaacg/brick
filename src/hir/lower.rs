@@ -5,7 +5,9 @@ use super::{HirBinOp, HirFunction, HirModule, HirNode, HirNodeValue};
 use crate::{
     id::ID,
     parser::{AstNode, AstNodeValue, BinOp, IfDeclaration},
-    typecheck::{ExpressionType, StaticDeclaration, TypecheckedFile, TypecheckedFunction},
+    typecheck::{
+        fully_dereference, ExpressionType, StaticDeclaration, TypecheckedFile, TypecheckedFunction,
+    },
 };
 
 pub fn lower_module<'ast>(
@@ -127,7 +129,8 @@ fn lower_node<'ast>(
 
         AstNodeValue::Return(inner) => HirNodeValue::Return(lower_node_alloc(decls, inner)),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
-            let Some(ExpressionType::DeclaredType(expr_ty)) = left.ty.get() else {
+            let ExpressionType::DeclaredType(expr_ty) = fully_dereference(left.ty.get().unwrap())
+            else {
                 panic!("expected left side of dot to be declared type");
             };
             let AstNodeValue::Name { value: name, .. } = &right.value else {
