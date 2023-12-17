@@ -89,7 +89,6 @@ arithmetic:
 - automatically promote integers to equivalent floats
 
 strings:
-- escape sequences
 - string manipulation
 - interpolation literals
 - multiline literals

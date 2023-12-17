@@ -139,6 +139,8 @@ pub enum LexError {
     IllegalNullByte(SourceMarker),
     #[error("unterminated literal in source code starting at {0}")]
     UnterminatedLiteral(SourceMarker),
+    #[error("illegal escape sequence at {0}")]
+    IllegalEscapeSequence(SourceMarker),
 }
 
 pub fn lex<'a>(
@@ -181,6 +183,34 @@ impl<T: Iterator<Item = char>> TokenIterator<T> {
                     SourceMarker::new(self.source_name, self.source_text, self.line, self.offset),
                 ))
             }
+        }
+    }
+
+    fn next_char_literal(&mut self, start: SourceMarker) -> Result<(char, SourceRange), LexError> {
+        match self
+            .next_char()
+            .ok_or(LexError::UnterminatedLiteral(start))?
+        {
+            ('\\', cursor) => {
+                let (ch, end) = self
+                    .next_char()
+                    .ok_or(LexError::UnterminatedLiteral(cursor))?;
+                Ok((
+                    match ch {
+                        'n' => '\n',
+                        'r' => '\r',
+                        't' => '\t',
+                        '\\' => '\\',
+                        '0' => '\0',
+                        '\'' => '\'',
+                        '"' => '"',
+                        // TODO: byte and unicode escapes
+                        _ => return Err(LexError::IllegalEscapeSequence(cursor)),
+                    },
+                    SourceRange::new(start, end),
+                ))
+            }
+            (ch, start) => Ok((ch, SourceRange::new(start, start))),
         }
     }
 }
@@ -321,12 +351,13 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 ']' => TokenValue::CloseSquare,
                 '\0' => return Some(Err(LexError::IllegalNullByte(start))),
                 '\'' => {
-                    let Some((value, idx)) = self.next_char() else {
-                        return Some(Err(LexError::UnterminatedLiteral(start)));
+                    let (value, idx) = match self.next_char_literal(start) {
+                        Ok(val) => val,
+                        Err(err) => return Some(Err(err)),
                     };
                     // TODO: handle escape sequences
                     let Some(('\'', end_pos)) = self.next_char() else {
-                        return Some(Err(LexError::UnterminatedLiteral(idx)));
+                        return Some(Err(LexError::UnterminatedLiteral(idx.end())));
                     };
                     end = Some(end_pos);
 
@@ -335,10 +366,11 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 '"' => {
                     let mut string = String::new();
                     loop {
-                        let Some((next, pos)) = self.next_char() else {
-                            return Some(Err(LexError::UnterminatedLiteral(start)));
+                        let (next, idx) = match self.next_char_literal(start) {
+                            Ok(val) => val,
+                            Err(err) => return Some(Err(err)),
                         };
-                        end = Some(pos);
+                        end = Some(idx.end());
                         if next == '"' {
                             break TokenValue::StringLiteral(string);
                         }
