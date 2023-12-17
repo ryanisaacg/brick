@@ -3,6 +3,28 @@ linear IR:
 - (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
 - (maybe) AST rewrite the HIR to disambiguate between variable references and function references
 
+collections:
+- arrays in linear IR:
+    - heapalloc
+    - array support
+- index operator
+- array literals typechecking
+- dicts:
+    - dict type syntax
+    - typechecking
+    - interpreter
+- slices
+- boxes
+- rc's
+- cells
+
+allocator:
+- support alloc
+- support dealloc
+
+interpreter:
+- union support
+
 syntax:
 - remove ; and , requirements?
 - keyword arguments
@@ -48,7 +70,10 @@ interfaces:
     - checks return statements
     - checks implicit returns due to the end of blocks
 - interfaces are supported in the interpreter:
-    - mutable interfaces (requires references, significant borrowck implications)
+    - mutable interfaces (significant borrowck implications)
+
+interface adapters:
+- allow an interface to define an impl for itself on foreign types, limited version of Rust's traits
 
 static associated functions:
 - structs
@@ -116,19 +141,6 @@ unsafe:
 - functions can be declared unsafe
 - you can have unsafe blocks (or statements?)
 - you can only call unsafe functions from within unsafe blocks
-
-collections:
-- index operator
-- array literals typechecking
-- dicts:
-    - dict type syntax
-    - typechecking
-    - interpreter
-
-interpreter:
-- reference support
-- array support
-- union support
 
 units of measure:
 - design some system to separate units of measure into various domains (e.g. a "screen pixel" different from a "logical pixel")
