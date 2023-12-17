@@ -27,6 +27,7 @@ pub fn rewrite(module: &mut HirModule, declarations: &HashMap<ID, &StaticDeclara
         | HirNodeValue::TakeShared(_)
         | HirNodeValue::Dereference(_)
         | HirNodeValue::BinOp(_, _, _)
+        | HirNodeValue::InterfaceAddress(_)
         | HirNodeValue::Declaration(_) => {}
         HirNodeValue::VtableCall(_, fn_id, params) => {
             let Some(StaticDeclaration::Func(func)) = declarations.get(fn_id) else {

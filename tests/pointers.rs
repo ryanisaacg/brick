@@ -4,7 +4,7 @@ use brick::{eval, Value};
 
 #[tokio::test]
 #[should_panic]
-async fn reference_immutability() {
+async fn reference_immutability_violation() {
     eval(r#"
 fn immutable_mutation(x: ref i32) {
     *x += 5;
@@ -13,6 +13,19 @@ fn immutable_mutation(x: ref i32) {
 let x = 2;
 immutable_mutation(ref x);
 "#).await.unwrap();
+}
+
+#[tokio::test]
+async fn immutable_reference() {
+    let result = eval(r#"
+fn plus_one(x: ref i32): i32 {
+    *x + 1
+}
+
+let x = 2;
+plus_one(ref x)
+"#).await.unwrap();
+    assert_matches!(&result[..], [Value::Int32(3)]);
 }
 
 #[tokio::test]

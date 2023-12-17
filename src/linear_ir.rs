@@ -319,6 +319,14 @@ fn lower_expression(
         }
         HirNodeValue::ArrayLiteral(_) => todo!(),
         HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
+        HirNodeValue::InterfaceAddress(table) => {
+            let (table, offset) = lower_lvalue(declarations, stack_entries, *table);
+            LinearNodeValue::ReadMemory {
+                location: Box::new(table),
+                offset,
+                ty: ExpressionType::Primitive(PrimitiveType::PointerSize),
+            }
+        }
         HirNodeValue::VtableCall(table, fn_id, params) => {
             let ExpressionType::DeclaredType(ty_id) = &table.ty else {
                 unreachable!()
@@ -348,6 +356,7 @@ fn lower_expression(
                 .into_iter()
                 .map(|param| lower_expression(declarations, stack_entries, param))
                 .collect();
+
             LinearNodeValue::Call(
                 Box::new(LinearNode::new(LinearNodeValue::ReadMemory {
                     location: Box::new(table),
@@ -428,6 +437,7 @@ fn lower_lvalue(
         HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
         HirNodeValue::VtableCall(_, _, _) => todo!(),
         HirNodeValue::StructToInterface { .. } => todo!(),
+        HirNodeValue::InterfaceAddress(_) => todo!(),
     }
 }
 
@@ -598,7 +608,8 @@ fn layout_static_decl(
                 .associated_functions
                 .iter()
                 .map(|(_, decl)| {
-                    size += POINTER_SIZE;
+                    // TODO: don't hardcode function ID
+                    size += 4;
                     decl.id()
                 })
                 .collect();

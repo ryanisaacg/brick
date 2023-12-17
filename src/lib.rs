@@ -146,11 +146,10 @@ pub async fn linear_interpret_code(
     });*/
 
     let mut stack_entries = HashMap::new();
-    let mut stack_offset = std::mem::size_of::<usize>();
     let statements = linearize_nodes(
         &ty_declarations,
         &mut stack_entries,
-        &mut stack_offset,
+        &mut 0,
         statements.into(),
     );
 

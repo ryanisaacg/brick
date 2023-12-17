@@ -28,8 +28,7 @@ references:
 interfaces:
 - remove fields from interfaces? vtables just make more sense...
 - self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
-    - by-reference parameters
-        - when making the method -> function conversion, automatically take a reference if it's required
+    - when making the method -> function conversion, automatically take a reference if it's required
     - mandate by-reference parameters for interfaces
 - structs:
     - struct associated functions support "self"

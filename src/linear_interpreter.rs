@@ -144,7 +144,7 @@ pub async fn evaluate_block(
             }
         }
         LinearNodeValue::StackFrame => {
-            vm.op_stack.push(Value::Size(vm.base_ptr));
+            vm.op_stack.push(Value::Size(dbg!(vm.base_ptr)));
         }
         LinearNodeValue::StackAlloc(amount) => {
             vm.stack_ptr -= amount;
@@ -183,7 +183,7 @@ pub async fn evaluate_block(
         LinearNodeValue::Call(lhs, parameters) => {
             evaluate_block(fns, params, vm, lhs).await?;
             // TODO: should I figure out
-            let Some(Value::ID(fn_id)) = dbg!(vm.op_stack.pop()) else { unreachable!() };
+            let Some(Value::ID(fn_id)) = vm.op_stack.pop() else { unreachable!() };
             for param in parameters.iter().rev() {
                 evaluate_block(fns, params, vm, param).await?;
             }
@@ -349,18 +349,16 @@ fn write(
                 }
             }
             TypeLayoutValue::Interface(fields) => {
-                dbg!(op_stack.last().unwrap());
+                println!("I'm an interface");
                 let mut offset = write_primitive(op_stack, memory, location);
-                dbg!(offset);
                 for _field in fields.iter() {
-                    dbg!(op_stack.last().unwrap());
                     offset += write_primitive(op_stack, memory, location + offset);
                 }
             }
             TypeLayoutValue::FunctionPointer => todo!(),
         }
         ExpressionType::Pointer(_, _) => {
-            write_primitive(op_stack, memory, dbg!(location));
+            write_primitive(op_stack, memory, location);
         }
         ExpressionType::Array(_) => todo!(),
         ExpressionType::Null => todo!(),
@@ -373,6 +371,7 @@ fn write_primitive(
     memory: &mut [u8],
     location: usize,
 ) -> usize {
+    dbg!(location, op_stack.last().unwrap());
     let value = op_stack.pop().unwrap();
     let bytes = match &value {
         Value::Null => todo!(),
@@ -406,13 +405,17 @@ fn read(
     location: usize,
     ty: &ExpressionType,
 ) {
+    dbg!(ty);
     match ty {
         ExpressionType::Void | ExpressionType::Null => unreachable!("{:?}", ty),
         ExpressionType::Primitive(p) => {
             read_primitive(op_stack, memory, location, *p);
         }
-        ExpressionType::DeclaredType(id) => match &layouts.get(id).unwrap().value {
+        ExpressionType::DeclaredType(id) => {
+            let layout = layouts.get(id).unwrap();
+            match &layout.value {
             TypeLayoutValue::Structure(fields) => {
+                println!("I'm a struct");
                 for (_, offset, ty) in fields.iter().rev() {
                     let location = location + offset;
                     match ty {
@@ -432,19 +435,19 @@ fn read(
                 }
             }
             TypeLayoutValue::Interface(fields) => {
-                let mut offset = 0;
+                println!("I'm an interface");
+                let mut location = location + dbg!(layout.size);
                 for _ in fields.iter().rev() {
-                    read_primitive(op_stack, memory, location + offset, PrimitiveType::FunctionID);
-                    dbg!(op_stack.last().unwrap());
-                    offset += 4;
+                    read_primitive(op_stack, memory, location, PrimitiveType::FunctionID);
+                    location -= 4;
                 }
-                read_primitive(op_stack, memory, location + offset, PrimitiveType::PointerSize);
-                dbg!(op_stack.last().unwrap());
+                read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
             }
             TypeLayoutValue::FunctionPointer => {
                 let fn_id: ID = *bytemuck::from_bytes(&memory[location..(location + 4)]);
                 op_stack.push(Value::ID(fn_id));
             }
+        }
         },
         ExpressionType::Pointer(_, _) => {
             read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
@@ -483,4 +486,5 @@ fn read_primitive(
         }
         PrimitiveType::FunctionID => Value::ID(*bytemuck::from_bytes(&memory[location..(location + 4)]))
     });
+    dbg!(location, op_stack.last().unwrap());
 }

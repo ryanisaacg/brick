@@ -321,6 +321,7 @@ pub async fn evaluate_node(
         HirNodeValue::Index(_, _) => todo!(),
         HirNodeValue::ArrayLiteral(_) => todo!(),
         HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
+        HirNodeValue::InterfaceAddress(_) => todo!(),
 
         HirNodeValue::StructToInterface { value, vtable } => {
             evaluate_node(fns, ctx, value).await?;
