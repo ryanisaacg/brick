@@ -21,7 +21,6 @@ returns:
 - allow void returns
 
 references:
-- dot operator auto-dereferences (checking mutability for lvalue)
 - allow calls to associated functions through references (checking correct reference type)
 
 interfaces:
