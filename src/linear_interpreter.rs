@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc, pin::Pin, future::Future};
 
 use async_recursion::async_recursion;
 
@@ -34,21 +34,21 @@ impl Value {
             _ => None,
         }
     }
-}
+}*/
 
 pub type ExternBinding =
-    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>> + Send + Sync;*/
+    dyn Fn(&mut [Value]) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>> + Send + Sync;
 
 pub enum Function {
     Ir(LinearFunction),
-    //Extern(Arc<ExternBinding>),
+    Extern(Arc<ExternBinding>),
 }
 
 impl std::fmt::Debug for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Function::Ir(inner) => write!(f, "Function::Ir({:?})", inner),
-            //Function::Extern(_) => write!(f, "Function::Extern(opaque)"),
+            Function::Extern(_) => write!(f, "Function::Extern(opaque)"),
         }
     }
 }
@@ -125,6 +125,11 @@ pub async fn evaluate_function(
             let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
             vm.stack_ptr = vm.base_ptr;
             vm.base_ptr = base_ptr;
+        }
+        Function::Extern(ext) => {
+            if let Some(returned) = ext(params).await {
+                vm.op_stack.push(returned);
+            }
         }
     }
 }

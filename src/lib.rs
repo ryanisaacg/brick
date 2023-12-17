@@ -106,7 +106,7 @@ pub async fn interpret_code(
 pub async fn linear_interpret_code(
     source_name: &'static str,
     contents: String,
-    mut bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
+    mut bindings: HashMap<String, std::sync::Arc<linear_interpreter::ExternBinding>>,
 ) -> Result<Vec<Value>, CompileError> {
     // TODO: "main"?
     let CompilationResults {
@@ -130,7 +130,7 @@ pub async fn linear_interpret_code(
             functions.insert(function.id, linear_interpreter::Function::Ir(function));
         }
     }
-    /*let module = StaticDeclaration::Module(ModuleType {
+    let module = StaticDeclaration::Module(ModuleType {
         id: ID::new(),
         exports: declarations,
     });
@@ -143,7 +143,7 @@ pub async fn linear_interpret_code(
                 }
             }
         }
-    });*/
+    });
 
     let mut stack_entries = HashMap::new();
     let statements = linearize_nodes(
