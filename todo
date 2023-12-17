@@ -22,10 +22,8 @@ returns:
 - allow void returns
 
 references:
-- unique refs allow mutation, non-uniques do not
-- unique refs can be passed to shared refs
-- dot operator auto-dereferences
-- allow calls to associated functions through references
+- dot operator auto-dereferences (checking mutability for lvalue)
+- allow calls to associated functions through references (checking correct reference type)
 
 interfaces:
 - remove fields from interfaces? vtables just make more sense...
