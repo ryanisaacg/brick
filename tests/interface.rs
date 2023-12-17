@@ -71,7 +71,7 @@ fn area_2(shape: HasArea): i32 {
 
 let x = Square { size: 2 };
 let a1 = area_2(x);
-x = Square { size: 1 };
+let x = Square { size: 1 };
 let a2 = area_2(x);
 a1 + a2
 "#,

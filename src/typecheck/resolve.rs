@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
-use crate::parser::{
-    AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
-    InterfaceDeclarationValue, NameAndType, StructDeclarationValue, UnionDeclarationValue,
+use crate::{
+    id::ID,
+    parser::{
+        AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
+        InterfaceDeclarationValue, NameAndType, StructDeclarationValue, UnionDeclarationValue,
+    },
 };
 
 use super::{
@@ -32,19 +35,23 @@ pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, StaticDeclarati
 pub fn resolve_top_level_declarations(
     names_to_declarations: &HashMap<String, &AstNode<'_>>,
 ) -> Result<HashMap<String, StaticDeclaration>, TypecheckError> {
+    let name_to_type_id = names_to_declarations
+        .iter()
+        .map(|(name, node)| (name.as_str(), node.id))
+        .collect();
     names_to_declarations
         .iter()
         .map(|(name, node)| {
             Ok((
                 name.clone(),
-                resolve_declaration(names_to_declarations, node, false)?,
+                resolve_declaration(&name_to_type_id, node, false)?,
             ))
         })
         .collect::<Result<HashMap<_, _>, _>>()
 }
 
 fn resolve_declaration(
-    names_to_declarations: &HashMap<String, &AstNode<'_>>,
+    names_to_type_id: &HashMap<&str, ID>,
     node: &AstNode<'_>,
     is_associated: bool,
 ) -> Result<StaticDeclaration, TypecheckError> {
@@ -55,10 +62,7 @@ fn resolve_declaration(
             ..
         }) => {
             let fields = fields.iter().map(|NameAndType { id: _, name, type_ }| {
-                Ok((
-                    name.clone(),
-                    resolve_type_name(names_to_declarations, type_)?,
-                ))
+                Ok((name.clone(), resolve_type_expr(names_to_type_id, type_)?))
             });
             let associated_functions = associated_functions
                 .iter()
@@ -69,7 +73,7 @@ fn resolve_declaration(
                             ..
                         }) => (
                             name.clone(),
-                            resolve_declaration(names_to_declarations, node, true)?,
+                            resolve_declaration(names_to_type_id, node, true)?,
                         ),
                         _ => panic!(
                             "Associated function should not be anything but function declaration"
@@ -95,14 +99,14 @@ fn resolve_declaration(
                     Ok(match &node.value {
                         AstNodeValue::RequiredFunction(FunctionHeaderValue { name, .. }) => (
                             name.clone(),
-                            resolve_declaration(names_to_declarations, node, true)?,
+                            resolve_declaration(names_to_type_id, node, true)?,
                         ),
                         AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
                             name,
                             ..
                         }) => (
                             name.clone(),
-                            resolve_declaration(names_to_declarations, node, true)?,
+                            resolve_declaration(names_to_type_id, node, true)?,
                         ),
                         _ => panic!(
                             "Associated function should not be anything but function declaration"
@@ -122,10 +126,7 @@ fn resolve_declaration(
                 variants: variants
                     .iter()
                     .map(|NameAndType { id: _, name, type_ }| {
-                        Ok((
-                            name.clone(),
-                            resolve_type_name(names_to_declarations, type_)?,
-                        ))
+                        Ok((name.clone(), resolve_type_expr(names_to_type_id, type_)?))
                     })
                     .collect::<Result<HashMap<_, _>, _>>()?,
             })
@@ -143,11 +144,11 @@ fn resolve_declaration(
             id: node.id,
             params: params
                 .iter()
-                .map(|NameAndType { type_, .. }| resolve_type_name(names_to_declarations, type_))
+                .map(|NameAndType { type_, .. }| resolve_type_expr(names_to_type_id, type_))
                 .collect::<Result<Vec<_>, _>>()?,
             returns: returns
                 .as_ref()
-                .map(|returns| resolve_type_name(names_to_declarations, returns))
+                .map(|returns| resolve_type_expr(names_to_type_id, returns))
                 .unwrap_or(Ok(ExpressionType::Void))?,
             is_associated,
         }),
@@ -155,8 +156,8 @@ fn resolve_declaration(
     })
 }
 
-pub fn resolve_type_name(
-    types: &HashMap<String, &AstNode<'_>>,
+pub fn resolve_type_expr(
+    name_to_type_id: &HashMap<&str, ID>,
     node: &AstNode<'_>,
 ) -> Result<ExpressionType, TypecheckError> {
     Ok(match &node.value {
@@ -170,25 +171,24 @@ pub fn resolve_type_name(
             "char" => ExpressionType::Primitive(PrimitiveType::Char),
             "string" => ExpressionType::Primitive(PrimitiveType::String),
             other => ExpressionType::DeclaredType(
-                types
+                *name_to_type_id
                     .get(other)
-                    .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?
-                    .id,
+                    .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?,
             ),
         },
         AstNodeValue::UniqueType(inner) => ExpressionType::Pointer(
             PointerKind::Unique,
-            Box::new(resolve_type_name(types, inner)?),
+            Box::new(resolve_type_expr(name_to_type_id, inner)?),
         ),
         AstNodeValue::SharedType(inner) => ExpressionType::Pointer(
             PointerKind::Shared,
-            Box::new(resolve_type_name(types, inner)?),
+            Box::new(resolve_type_expr(name_to_type_id, inner)?),
         ),
         AstNodeValue::ArrayType(inner) => {
-            ExpressionType::Array(Box::new(resolve_type_name(types, inner)?))
+            ExpressionType::Array(Box::new(resolve_type_expr(name_to_type_id, inner)?))
         }
         AstNodeValue::NullableType(inner) => {
-            ExpressionType::Nullable(Box::new(resolve_type_name(types, inner)?))
+            ExpressionType::Nullable(Box::new(resolve_type_expr(name_to_type_id, inner)?))
         }
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::RequiredFunction(_)
@@ -196,7 +196,7 @@ pub fn resolve_type_name(
         | AstNodeValue::StructDeclaration(_)
         | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::InterfaceDeclaration(_)
-        | AstNodeValue::Declaration(_, _)
+        | AstNodeValue::Declaration(_, _, _)
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
         | AstNodeValue::Statement(_)

@@ -58,3 +58,30 @@ a - c
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(1)]);
 }
+
+#[tokio::test]
+async fn type_hint() {
+    let result = eval(
+        r#"
+let x: i32 = 50;
+x
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(50)]);
+}
+
+#[tokio::test]
+#[should_panic]
+async fn illegal_type_hint() {
+    eval(
+        r#"
+struct Test {}
+let x: Test= 50;
+x
+"#,
+    )
+    .await
+    .unwrap();
+}

@@ -173,7 +173,7 @@ fn create_graph_for_node<'a>(
         | StructLiteral { .. }
         | ArrayLiteral(_)
         | ArrayLiteralLength(_, _)
-        | Declaration(_, _)
+        | Declaration(_, _, _)
         | Block(_)
         | DictLiteral(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));

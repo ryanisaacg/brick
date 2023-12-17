@@ -110,7 +110,7 @@ fn lower_node<'ast>(
         // has what really counts
         AstNodeValue::Statement(inner) => return lower_node(decls, inner),
 
-        AstNodeValue::Declaration(_lvalue, rvalue) => {
+        AstNodeValue::Declaration(_lvalue, _type_hint, rvalue) => {
             let lvalue = Box::new(HirNode::from_ast(
                 node,
                 HirNodeValue::VariableReference(node.id),

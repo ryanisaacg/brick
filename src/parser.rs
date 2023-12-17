@@ -92,7 +92,7 @@ pub enum AstNodeValue<'a> {
     UnionDeclaration(UnionDeclarationValue<'a>),
     InterfaceDeclaration(InterfaceDeclarationValue<'a>),
     RequiredFunction(FunctionHeaderValue<'a>),
-    Declaration(String, &'a mut AstNode<'a>),
+    Declaration(String, Option<&'a mut AstNode<'a>>, &'a mut AstNode<'a>),
     Import(String),
     Return(&'a mut AstNode<'a>),
     // Any non-specific expression that ends in ; is a statement
@@ -147,8 +147,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
         use AstNodeValue::*;
 
         match &self.value {
-            Declaration(_, child)
-            | TakeRef(child)
+            TakeRef(child)
             | TakeUnique(child)
             | ArrayLiteralLength(child, _)
             | UniqueType(child)
@@ -174,6 +173,12 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                 if let Some(else_branch) = else_branch {
                     children.push(*else_branch);
                 }
+            }
+            Declaration(_, type_hint, child) => {
+                if let Some(type_hint) = type_hint {
+                    children.push(*type_hint);
+                }
+                children.push(*child);
             }
             ArrayLiteral(values) | Block(values) => {
                 for value in values.iter() {
@@ -803,7 +808,7 @@ fn variable_declaration<'a>(
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     // TODO: store type hint in declarations
-    let (name, mut provenance, _) = name_and_type_hint(
+    let (name, mut provenance, type_hint) = name_and_type_hint(
         source,
         context,
         cursor,
@@ -820,8 +825,10 @@ fn variable_declaration<'a>(
     let value = expression(source, context, cursor, true)?;
     provenance.set_end(value.provenance.end());
 
+    let type_hint = type_hint.map(|type_hint| add_node(context, type_hint));
+
     Ok(AstNode::new(
-        AstNodeValue::Declaration(name, add_node(context, value)),
+        AstNodeValue::Declaration(name, type_hint, add_node(context, value)),
         provenance,
     ))
 }

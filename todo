@@ -73,6 +73,7 @@ interfaces:
 - interface conversion:
     - checks return statements
     - checks implicit returns due to the end of blocks
+    - check assignments
 - interfaces are supported in the interpreter:
     - mutable interfaces (significant borrowck implications)
 

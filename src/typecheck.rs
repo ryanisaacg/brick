@@ -11,7 +11,7 @@ use crate::{
     provenance::SourceRange,
 };
 
-use self::control_flow_graph::build_control_flow_graph;
+use self::{control_flow_graph::build_control_flow_graph, resolve::resolve_type_expr};
 
 mod control_flow_graph;
 pub mod resolve;
@@ -152,7 +152,8 @@ pub enum TypecheckError {
 }
 
 struct Declarations<'a> {
-    name_to_expr: HashMap<String, (ID, ExpressionType)>,
+    name_to_type_id: HashMap<&'a str, ID>,
+    name_to_context_entry: HashMap<String, (ID, ExpressionType)>,
     id_to_decl: HashMap<ID, &'a StaticDeclaration>,
 }
 
@@ -199,18 +200,21 @@ pub fn typecheck<'a>(
 ) -> Result<TypecheckedFile<'a>, TypecheckError> {
     // TODO: verify validity of type and function declarations
 
-    let mut name_to_expr = HashMap::new();
+    let mut name_to_context_entry = HashMap::new();
+    let mut name_to_type_id = HashMap::new();
     let mut id_to_decl = HashMap::new();
 
     for (name, value) in declarations {
         match value {
             StaticDeclaration::Module(module) if current_module_name == name => {
                 for (name, value) in module.exports.iter() {
-                    name_to_expr.insert(name.clone(), (value.id(), value.expr()));
+                    name_to_context_entry.insert(name.clone(), (value.id(), value.expr()));
+                    name_to_type_id.insert(name.as_str(), value.id());
                 }
             }
             _ => {
-                name_to_expr.insert(name.clone(), (value.id(), value.expr()));
+                name_to_context_entry.insert(name.clone(), (value.id(), value.expr()));
+                name_to_type_id.insert(name.as_str(), value.id());
             }
         }
         value.visit(&mut |decl| {
@@ -219,7 +223,8 @@ pub fn typecheck<'a>(
     }
 
     let context = Declarations {
-        name_to_expr,
+        name_to_context_entry,
+        name_to_type_id,
         id_to_decl,
     };
 
@@ -298,7 +303,7 @@ fn typecheck_node<'ast>(
         _ => {
             typecheck_expression(
                 statement,
-                &[&context.name_to_expr],
+                &[&context.name_to_context_entry],
                 top_level_scope,
                 context,
             )?;
@@ -325,7 +330,7 @@ fn typecheck_function<'a>(
 
     let return_value = typecheck_expression(
         function.body,
-        &[&context.name_to_expr, &parameters],
+        &[&context.name_to_context_entry, &parameters],
         &mut HashMap::new(),
         context,
     )?;
@@ -371,10 +376,17 @@ fn typecheck_expression<'a>(
             typecheck_expression(inner, outer_scopes, current_scope, context)?;
             ExpressionType::Void
         }
-        AstNodeValue::Declaration(name, value) => {
+        AstNodeValue::Declaration(name, type_hint, value) => {
             // TODO: do I want shadowing? currently this shadows
             let value = typecheck_expression(value, outer_scopes, current_scope, context)?;
-            current_scope.insert(name.clone(), (node.id, value.clone()));
+            if let Some(type_hint) = type_hint {
+                let ty = resolve_type_expr(&context.name_to_type_id, type_hint)?;
+                // TODO: generate type error
+                assert!(is_assignable_to(&context.id_to_decl, &ty, value));
+                current_scope.insert(name.clone(), (node.id, ty));
+            } else {
+                current_scope.insert(name.clone(), (node.id, value.clone()));
+            }
 
             ExpressionType::Void
         }
@@ -768,7 +780,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) {
         | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::InterfaceDeclaration(_)
         | AstNodeValue::RequiredFunction(_)
-        | AstNodeValue::Declaration(_, _)
+        | AstNodeValue::Declaration(_, _, _)
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
         | AstNodeValue::Statement(_)
