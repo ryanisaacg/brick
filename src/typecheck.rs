@@ -112,7 +112,6 @@ pub struct UnionType {
 #[derive(Debug, PartialEq, Eq)]
 pub struct InterfaceType {
     pub id: ID,
-    pub fields: HashMap<String, ExpressionType>,
     pub associated_functions: HashMap<String, StaticDeclaration>,
 }
 
@@ -125,6 +124,10 @@ pub enum PrimitiveType {
     Int64,
     Float64,
     Bool,
+
+    // TODO?
+    PointerSize,
+    FunctionID,
 }
 
 // TODO: get the lifetimes out of these typecheck errors
@@ -297,7 +300,7 @@ fn typecheck_node<'ast>(
                 statement,
                 &[&context.name_to_expr],
                 top_level_scope,
-                &context,
+                context,
             )?;
             top_level_statements.push(statement);
         }
@@ -321,16 +324,16 @@ fn typecheck_function<'a>(
         .collect();
 
     let return_value = typecheck_expression(
-        &function.body,
+        function.body,
         &[&context.name_to_expr, &parameters],
         &mut HashMap::new(),
         context,
     )?;
-    let _cfg = build_control_flow_graph(&function.body);
+    let _cfg = build_control_flow_graph(function.body);
     // TODO: check all the return values for matching
     // TODO: check to see reachability
 
-    if !is_assignable_to(&context.id_to_decl, &function_type.returns, &return_value) {
+    if !is_assignable_to(&context.id_to_decl, &function_type.returns, return_value) {
         return Err(TypecheckError::TypeMismatch {
             expected: function_type.returns.clone(),
             received: return_value.clone(),
@@ -412,27 +415,20 @@ fn typecheck_expression<'a>(
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
-            let ExpressionType::DeclaredType(id) = left else {
+            let ExpressionType::DeclaredType(id) = fully_dereference(left) else {
                 panic!("TODO: left side of dot operator");
             };
             let AstNodeValue::Name { value: name, .. } = &right.value else {
                 panic!("TODO: right side of dot operator");
             };
             // TODO: fallible
-            let lhs_type = context.decl(&id);
+            let lhs_type = context.decl(id);
             match lhs_type {
-                Some(
-                    StaticDeclaration::Struct(StructType {
-                        fields,
-                        associated_functions,
-                        ..
-                    })
-                    | StaticDeclaration::Interface(InterfaceType {
-                        fields,
-                        associated_functions,
-                        ..
-                    }),
-                ) => fields
+                Some(StaticDeclaration::Struct(StructType {
+                    fields,
+                    associated_functions,
+                    ..
+                })) => fields
                     .get(name)
                     .cloned()
                     .or_else(|| {
@@ -440,6 +436,13 @@ fn typecheck_expression<'a>(
                             .get(name)
                             .map(|decl| ExpressionType::DeclaredType(decl.id()))
                     })
+                    .expect("TODO: field is present"),
+                Some(StaticDeclaration::Interface(InterfaceType {
+                    associated_functions,
+                    ..
+                })) => associated_functions
+                    .get(name)
+                    .map(|decl| ExpressionType::DeclaredType(decl.id()))
                     .expect("TODO: field is present"),
                 Some(StaticDeclaration::Union(lhs_type)) => ExpressionType::Nullable(Box::new(
                     lhs_type
@@ -487,11 +490,11 @@ fn typecheck_expression<'a>(
             right,
         ) => {
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
-            let ExpressionType::Primitive(left) = fully_dereference(&left) else {
+            let ExpressionType::Primitive(left) = fully_dereference(left) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
-            let ExpressionType::Primitive(right) = fully_dereference(&right) else {
+            let ExpressionType::Primitive(right) = fully_dereference(right) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             if left == right {
@@ -512,25 +515,25 @@ fn typecheck_expression<'a>(
             right,
         ) => {
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
-            let ExpressionType::Primitive(_) = fully_dereference(&left) else {
+            let ExpressionType::Primitive(_) = fully_dereference(left) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
-            let ExpressionType::Primitive(_) = fully_dereference(&right) else {
+            let ExpressionType::Primitive(_) = fully_dereference(right) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
 
             ExpressionType::Primitive(PrimitiveType::Bool)
         }
         AstNodeValue::BinExpr(BinOp::Assignment, left, right) => {
-            // TODO: ensure left is a valid lvalue
-            let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            let left_ty = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            validate_lvalue(left);
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
 
-            if !is_assignable_to(&context.id_to_decl, &left, &right) {
+            if !is_assignable_to(&context.id_to_decl, left_ty, right) {
                 return Err(TypecheckError::TypeMismatch {
                     received: right.clone(),
-                    expected: left.clone(),
+                    expected: left_ty.clone(),
                 });
             }
 
@@ -541,20 +544,20 @@ fn typecheck_expression<'a>(
             left,
             right,
         ) => {
-            // TODO: ensure left is a valid lvalue
-            let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            let left_ty = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            validate_lvalue(left);
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
 
-            if !matches!(fully_dereference(&left), ExpressionType::Primitive(_))
-                || !matches!(fully_dereference(&right), ExpressionType::Primitive(_))
+            if !matches!(fully_dereference(left_ty), ExpressionType::Primitive(_))
+                || !matches!(fully_dereference(right), ExpressionType::Primitive(_))
             {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
 
-            if !is_assignable_to(&context.id_to_decl, &left, &right) {
+            if !is_assignable_to(&context.id_to_decl, left_ty, right) {
                 return Err(TypecheckError::TypeMismatch {
                     received: right.clone(),
-                    expected: left.clone(),
+                    expected: left_ty.clone(),
                 });
             }
 
@@ -562,7 +565,7 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::While(condition, body) => {
             let condition = typecheck_expression(condition, outer_scopes, current_scope, context)?;
-            let condition_deref = fully_dereference(&condition);
+            let condition_deref = fully_dereference(condition);
             if !matches!(
                 condition_deref,
                 ExpressionType::Primitive(PrimitiveType::Bool)
@@ -583,7 +586,7 @@ fn typecheck_expression<'a>(
             else_branch,
         }) => {
             let condition = typecheck_expression(condition, outer_scopes, current_scope, context)?;
-            let condition_deref = fully_dereference(&condition);
+            let condition_deref = fully_dereference(condition);
             if !matches!(
                 condition_deref,
                 ExpressionType::Primitive(PrimitiveType::Bool)
@@ -639,7 +642,7 @@ fn typecheck_expression<'a>(
             else {
                 return Err(TypecheckError::CantCall(node.provenance.clone()));
             };
-            let func = context.id_to_func(&func);
+            let func = context.id_to_func(func);
 
             let params = if func.is_associated {
                 &func.params[1..]
@@ -653,7 +656,7 @@ fn typecheck_expression<'a>(
 
             for (arg, param) in args.iter().zip(params.iter()) {
                 let arg = typecheck_expression(arg, outer_scopes, current_scope, context)?;
-                if !is_assignable_to(&context.id_to_decl, &param, &arg) {
+                if !is_assignable_to(&context.id_to_decl, param, arg) {
                     return Err(TypecheckError::TypeMismatch {
                         received: arg.clone(),
                         expected: param.clone(),
@@ -669,7 +672,7 @@ fn typecheck_expression<'a>(
             else {
                 return Err(TypecheckError::CantCall(node.provenance.clone()));
             };
-            let struct_type = context.id_to_struct(&struct_type_id);
+            let struct_type = context.id_to_struct(struct_type_id);
 
             if struct_type.fields.len() != fields.len() {
                 return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
@@ -681,7 +684,7 @@ fn typecheck_expression<'a>(
                 };
                 let arg_field =
                     typecheck_expression(arg_field, outer_scopes, current_scope, context)?;
-                if !is_assignable_to(&context.id_to_decl, param_field, &arg_field) {
+                if !is_assignable_to(&context.id_to_decl, param_field, arg_field) {
                     return Err(TypecheckError::TypeMismatch {
                         received: arg_field.clone(),
                         expected: param_field.clone(),
@@ -697,12 +700,19 @@ fn typecheck_expression<'a>(
             PointerKind::Unique,
             Box::new(typecheck_expression(inner, outer_scopes, current_scope, context)?.clone()),
         ),
-        AstNodeValue::TakeShared(inner) => ExpressionType::Pointer(
+        AstNodeValue::TakeRef(inner) => ExpressionType::Pointer(
             PointerKind::Shared,
             Box::new(typecheck_expression(inner, outer_scopes, current_scope, context)?.clone()),
         ),
+        AstNodeValue::Deref(inner) => {
+            let ty = typecheck_expression(inner, outer_scopes, current_scope, context)?;
+            let ExpressionType::Pointer(_, ty) = ty else {
+                todo!("compile error for illegal deref")
+            };
+            *ty.clone()
+        }
         AstNodeValue::ArrayLiteral(items) => {
-            if items.len() == 0 {
+            if items.is_empty() {
                 todo!("how to typecheck 0-length collections?");
             }
             let mut iter = items.iter();
@@ -740,6 +750,52 @@ fn typecheck_expression<'a>(
     Ok(node.ty.get().expect("just set"))
 }
 
+fn validate_lvalue(lvalue: &AstNode<'_>) {
+    let is_valid = match &lvalue.value {
+        // TODO: remove this if I add auto-deref later
+        AstNodeValue::Name { .. } => true,
+        AstNodeValue::Deref(inner) => {
+            let Some(ExpressionType::Pointer(kind, _)) = inner.ty.get() else {
+                unreachable!()
+            };
+            *kind == PointerKind::Unique
+        }
+        AstNodeValue::BinExpr(_, _, _) => todo!("support lhs dot operator"),
+
+        AstNodeValue::FunctionDeclaration(_)
+        | AstNodeValue::ExternFunctionBinding(_)
+        | AstNodeValue::StructDeclaration(_)
+        | AstNodeValue::UnionDeclaration(_)
+        | AstNodeValue::InterfaceDeclaration(_)
+        | AstNodeValue::RequiredFunction(_)
+        | AstNodeValue::Declaration(_, _)
+        | AstNodeValue::Import(_)
+        | AstNodeValue::Return(_)
+        | AstNodeValue::Statement(_)
+        | AstNodeValue::Int(_)
+        | AstNodeValue::Float(_)
+        | AstNodeValue::Bool(_)
+        | AstNodeValue::CharLiteral(_)
+        | AstNodeValue::StringLiteral(_)
+        | AstNodeValue::Null
+        | AstNodeValue::If(_)
+        | AstNodeValue::While(_, _)
+        | AstNodeValue::Call(_, _)
+        | AstNodeValue::TakeUnique(_)
+        | AstNodeValue::TakeRef(_)
+        | AstNodeValue::StructLiteral { .. }
+        | AstNodeValue::DictLiteral(_)
+        | AstNodeValue::ArrayLiteral(_)
+        | AstNodeValue::ArrayLiteralLength(_, _)
+        | AstNodeValue::Block(_)
+        | AstNodeValue::UniqueType(_)
+        | AstNodeValue::SharedType(_)
+        | AstNodeValue::ArrayType(_)
+        | AstNodeValue::NullableType(_) => false,
+    };
+    assert!(is_valid);
+}
+
 fn resolve_name(
     name: &str,
     current_scope: &HashMap<String, (ID, ExpressionType)>,
@@ -768,7 +824,9 @@ fn is_assignable_to(
 
         // Handle pointers and de-referencing
         (Pointer(left_ty, left_inner), Pointer(right_ty, right_inner)) => {
-            left_ty == right_ty && is_assignable_to(id_to_decl, left_inner, right_inner)
+            (left_ty == right_ty
+                || *left_ty == PointerKind::Shared && *right_ty == PointerKind::Unique)
+                && is_assignable_to(id_to_decl, left_inner, right_inner)
         }
         // TODO: auto-dereference in the IR
         (left, Pointer(_, right_inner)) => is_assignable_to(id_to_decl, left, right_inner),
@@ -856,7 +914,7 @@ fn is_assignable_to(
     }
 }
 
-fn fully_dereference(ty: &ExpressionType) -> &ExpressionType {
+pub fn fully_dereference(ty: &ExpressionType) -> &ExpressionType {
     if let ExpressionType::Pointer(_, inner) = ty {
         fully_dereference(inner)
     } else {

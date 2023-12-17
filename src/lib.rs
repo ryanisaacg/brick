@@ -2,29 +2,35 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs, io,
+    fs,
+    future::Future,
+    io,
+    sync::Arc,
 };
 
+use hir::HirModule;
 pub use interpreter::Value;
 use interpreter::{evaluate_node, Context, ExternBinding, Function};
-use ir::IrModule;
+use linear_interpreter::{evaluate_block, VM};
+use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
 
 mod arena;
+mod hir;
 mod id;
+mod interpreter;
+mod linear_interpreter;
+mod linear_ir;
+mod parser;
+mod provenance;
 mod tokenizer;
-
-pub mod interpreter;
-pub mod ir;
-pub mod parser;
-pub mod provenance;
-pub mod typecheck;
+mod typecheck;
 
 use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
-use crate::{id::ID, ir::lower_module, typecheck::ModuleType};
+use crate::{hir::lower_module, id::ID, typecheck::ModuleType};
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -34,8 +40,28 @@ pub enum CompileError {
     FilesystemError(io::Error, String),
 }
 
+pub fn bind_fn<F>(closure: impl Fn(Vec<Value>) -> F + Send + Sync + 'static) -> Arc<ExternBinding>
+where
+    F: Future<Output = Option<Value>> + Send + Sync + 'static,
+{
+    Arc::new(move |x| Box::pin(closure(x)))
+}
+
 pub async fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
-    interpret_code("eval", source.to_string(), HashMap::new()).await
+    let val = linear_interpret_code("eval", source.to_string(), HashMap::new()).await?;
+
+    Ok(val)
+}
+
+pub async fn eval_both(source: &str) -> Result<Vec<Value>, CompileError> {
+    let val1 = interpret_code("eval", source.to_string(), HashMap::new()).await?;
+    let val2 = linear_interpret_code("eval", source.to_string(), HashMap::new()).await?;
+
+    if val1 != val2 {
+        assert_eq!(val1, val2);
+    }
+
+    Ok(val1)
 }
 
 // TODO: move this to a separate crate
@@ -48,7 +74,7 @@ pub async fn interpret_code(
     let CompilationResults {
         modules,
         declarations,
-    } = compile_file("main", source_name, contents)?;
+    } = typecheck_module("main", source_name, contents)?;
     let mut statements = Vec::new();
     let mut functions = HashMap::new();
 
@@ -85,13 +111,71 @@ pub async fn interpret_code(
     Ok(context.values())
 }
 
+pub async fn linear_interpret_code(
+    source_name: &'static str,
+    contents: String,
+    mut bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
+) -> Result<Vec<Value>, CompileError> {
+    // TODO: "main"?
+    let CompilationResults {
+        modules,
+        declarations,
+    } = typecheck_module("main", source_name, contents)?;
+
+    let mut ty_declarations = HashMap::new();
+    layout_types(&declarations, &mut ty_declarations);
+
+    let mut statements = Vec::new();
+    let mut functions = HashMap::new();
+
+    for (name, module) in modules {
+        // TODO: execute imported statements?
+        if name == "main" {
+            statements.extend(module.top_level_statements);
+        }
+        for function in module.functions {
+            let function = linearize_function(&ty_declarations, function);
+            functions.insert(function.id, linear_interpreter::Function::Ir(function));
+        }
+    }
+    let module = StaticDeclaration::Module(ModuleType {
+        id: ID::new(),
+        exports: declarations,
+    });
+    module.visit(&mut |decl| {
+        if let StaticDeclaration::Module(ModuleType { exports, .. }) = decl {
+            for (name, decl) in exports.iter() {
+                if let Some(implementation) = bindings.remove(name) {
+                    let id = decl.id();
+                    functions.insert(id, linear_interpreter::Function::Extern(implementation));
+                }
+            }
+        }
+    });
+
+    let mut stack_entries = HashMap::new();
+    let statements = linearize_nodes(
+        &ty_declarations,
+        &mut stack_entries,
+        &mut 0,
+        statements.into(),
+    );
+
+    let mut vm = VM::new(ty_declarations);
+    for statement in statements {
+        let _ = evaluate_block(&functions, &mut [], &mut vm, &statement).await;
+    }
+
+    Ok(vm.op_stack)
+}
+
 pub struct CompilationResults {
-    pub modules: HashMap<String, IrModule>,
+    pub modules: HashMap<String, HirModule>,
     pub declarations: HashMap<String, StaticDeclaration>,
 }
 
-pub fn compile_file<'a>(
-    module_name: &'a str,
+pub fn typecheck_module(
+    module_name: &str,
     source_name: &'static str,
     contents: String,
 ) -> Result<CompilationResults, CompileError> {

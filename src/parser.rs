@@ -73,7 +73,6 @@ pub struct UnionDeclarationValue<'a> {
 #[derive(Debug, PartialEq)]
 pub struct InterfaceDeclarationValue<'a> {
     pub name: String,
-    pub fields: Vec<NameAndType<'a>>,
     pub associated_functions: Vec<AstNode<'a>>,
 }
 
@@ -116,7 +115,7 @@ pub enum AstNodeValue<'a> {
     While(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
     Call(&'a mut AstNode<'a>, Vec<AstNode<'a>>),
     TakeUnique(&'a mut AstNode<'a>),
-    TakeShared(&'a mut AstNode<'a>),
+    TakeRef(&'a mut AstNode<'a>),
     StructLiteral {
         name: &'a mut AstNode<'a>,
         fields: HashMap<String, AstNode<'a>>,
@@ -125,6 +124,7 @@ pub enum AstNodeValue<'a> {
     ArrayLiteral(Vec<AstNode<'a>>),
     ArrayLiteralLength(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
     Block(Vec<AstNode<'a>>),
+    Deref(&'a mut AstNode<'a>),
 
     // Types
     UniqueType(&'a mut AstNode<'a>),
@@ -148,7 +148,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
 
         match &self.value {
             Declaration(_, child)
-            | TakeShared(child)
+            | TakeRef(child)
             | TakeUnique(child)
             | ArrayLiteralLength(child, _)
             | UniqueType(child)
@@ -156,6 +156,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
             | NullableType(child)
             | Return(child)
             | Statement(child)
+            | Deref(child)
             | ArrayType(child) => {
                 children.push(*child);
             }
@@ -223,9 +224,27 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                     children.push(*returns);
                 }
             }
-            StructDeclaration(StructDeclarationValue { fields, .. })
-            | InterfaceDeclaration(InterfaceDeclarationValue { fields, .. })
-            | UnionDeclaration(UnionDeclarationValue {
+            StructDeclaration(StructDeclarationValue {
+                fields,
+                associated_functions,
+                ..
+            }) => {
+                for field in fields.iter() {
+                    children.push(field.type_);
+                }
+                for node in associated_functions.iter() {
+                    children.push(node);
+                }
+            }
+            InterfaceDeclaration(InterfaceDeclarationValue {
+                associated_functions: fields,
+                ..
+            }) => {
+                for field in fields.iter() {
+                    children.push(field);
+                }
+            }
+            UnionDeclaration(UnionDeclarationValue {
                 variants: fields, ..
             }) => {
                 for field in fields.iter() {
@@ -283,11 +302,6 @@ pub enum ParseError {
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, LexError>>;
 type TokenIter<'a> = Peekable<TokenIterInner<'a>>;
 
-pub struct ParsedModule<'a> {
-    pub arena: Arena<AstNode<'a>>,
-    pub top_level_nodes: Vec<AstNode<'a>>,
-}
-
 pub fn parse<'a>(
     arena: &'a Arena<AstNode<'a>>,
     mut source: impl Iterator<Item = Result<Token, LexError>>,
@@ -298,7 +312,7 @@ pub fn parse<'a>(
 
     while let Some(lexeme) = peek_token_optional(&mut source)? {
         let cursor = lexeme.range.start();
-        let statement = statement(&mut source, &arena, cursor)?;
+        let statement = statement(&mut source, arena, cursor)?;
 
         top_level_nodes.push(statement);
     }
@@ -426,13 +440,13 @@ fn interface_declaration<'a>(
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let (name, provenance) = word(source, cursor, "expected name after 'interface'")?;
-    let (end, fields, associated_functions) =
+    let (end, _fields, associated_functions) =
         interface_or_struct_body(source, context, provenance.end(), true)?;
+    // TODO: error when fields are present
 
     Ok(AstNode::new(
         AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
             name,
-            fields,
             associated_functions,
         }),
         SourceRange::new(cursor, end),
@@ -839,14 +853,14 @@ fn type_expression<'a>(
 ) -> Result<AstNode<'a>, ParseError> {
     let next = token(source, cursor, "expected type")?;
     let node = match next.value {
-        ptr @ (TokenValue::Unique | TokenValue::Shared) => {
+        ptr @ (TokenValue::Unique | TokenValue::Ref) => {
             let subtype = type_expression(source, context, next.range.end())?;
             let end = subtype.provenance.end();
             let subtype = add_node(context, subtype);
             AstNode::new(
                 match ptr {
                     TokenValue::Unique => AstNodeValue::UniqueType(subtype),
-                    TokenValue::Shared => AstNodeValue::SharedType(subtype),
+                    TokenValue::Ref => AstNodeValue::SharedType(subtype),
                     _ => unreachable!(),
                 },
                 SourceRange::new(next.range.start(), end),
@@ -957,8 +971,9 @@ fn expression_pratt<'a>(
             let right = add_node(context, right);
             AstNode::new(
                 match value {
-                    TokenValue::Shared => AstNodeValue::TakeShared(right),
+                    TokenValue::Ref => AstNodeValue::TakeRef(right),
                     TokenValue::Unique => AstNodeValue::TakeUnique(right),
+                    TokenValue::Asterisk => AstNodeValue::Deref(right),
                     other => unreachable!("prefix operator {:?}", other),
                 },
                 SourceRange::new(range.start(), end),
@@ -1157,16 +1172,16 @@ fn expression_pratt<'a>(
 }
 
 const ASSIGNMENT: u8 = 2;
-const REFERENCE: u8 = ASSIGNMENT + 1;
-const COMPARE: u8 = REFERENCE + 2;
+const COMPARE: u8 = ASSIGNMENT + 2;
 const SUM: u8 = COMPARE + 2;
 const FACTOR: u8 = SUM + 2;
-const CALL: u8 = FACTOR + 2;
+const REFERENCE: u8 = FACTOR + 1;
+const CALL: u8 = REFERENCE + 2;
 const DOT: u8 = CALL + 1;
 
 fn prefix_binding_power(op: &TokenValue) -> Option<((), u8)> {
     let res = match op {
-        TokenValue::Shared | TokenValue::Unique => ((), REFERENCE),
+        TokenValue::Ref | TokenValue::Unique | TokenValue::Asterisk => ((), REFERENCE),
         _ => return None,
     };
     Some(res)

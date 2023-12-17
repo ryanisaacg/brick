@@ -37,7 +37,7 @@ pub fn resolve_top_level_declarations(
         .map(|(name, node)| {
             Ok((
                 name.clone(),
-                resolve_declaration(names_to_declarations, &node, false)?,
+                resolve_declaration(names_to_declarations, node, false)?,
             ))
         })
         .collect::<Result<HashMap<_, _>, _>>()
@@ -53,18 +53,42 @@ fn resolve_declaration(
             fields,
             associated_functions,
             ..
-        })
-        | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
-            fields,
-            associated_functions,
-            ..
         }) => {
             let fields = fields.iter().map(|NameAndType { id: _, name, type_ }| {
                 Ok((
                     name.clone(),
-                    resolve_type_name(&names_to_declarations, type_)?,
+                    resolve_type_name(names_to_declarations, type_)?,
                 ))
             });
+            let associated_functions = associated_functions
+                .iter()
+                .map(|node| {
+                    Ok(match &node.value {
+                        AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+                            name,
+                            ..
+                        }) => (
+                            name.clone(),
+                            resolve_declaration(names_to_declarations, node, true)?,
+                        ),
+                        _ => panic!(
+                            "Associated function should not be anything but function declaration"
+                        ),
+                    })
+                })
+                .collect::<Result<HashMap<_, _>, _>>()?;
+            let fields = fields.collect::<Result<_, _>>()?;
+
+            StaticDeclaration::Struct(StructType {
+                id: node.id,
+                fields,
+                associated_functions,
+            })
+        }
+        AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
+            associated_functions,
+            ..
+        }) => {
             let associated_functions = associated_functions
                 .iter()
                 .map(|node| {
@@ -86,21 +110,11 @@ fn resolve_declaration(
                     })
                 })
                 .collect::<Result<HashMap<_, _>, _>>()?;
-            let fields = fields.collect::<Result<_, _>>()?;
 
-            if let AstNodeValue::StructDeclaration(_) = &node.value {
-                StaticDeclaration::Struct(StructType {
-                    id: node.id,
-                    fields,
-                    associated_functions,
-                })
-            } else {
-                StaticDeclaration::Interface(InterfaceType {
-                    id: node.id,
-                    fields,
-                    associated_functions,
-                })
-            }
+            StaticDeclaration::Interface(InterfaceType {
+                id: node.id,
+                associated_functions,
+            })
         }
         AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, .. }) => {
             StaticDeclaration::Union(UnionType {
@@ -110,7 +124,7 @@ fn resolve_declaration(
                     .map(|NameAndType { id: _, name, type_ }| {
                         Ok((
                             name.clone(),
-                            resolve_type_name(&names_to_declarations, type_)?,
+                            resolve_type_name(names_to_declarations, type_)?,
                         ))
                     })
                     .collect::<Result<HashMap<_, _>, _>>()?,
@@ -129,11 +143,11 @@ fn resolve_declaration(
             id: node.id,
             params: params
                 .iter()
-                .map(|NameAndType { type_, .. }| resolve_type_name(&names_to_declarations, type_))
+                .map(|NameAndType { type_, .. }| resolve_type_name(names_to_declarations, type_))
                 .collect::<Result<Vec<_>, _>>()?,
             returns: returns
                 .as_ref()
-                .map(|returns| resolve_type_name(&names_to_declarations, returns))
+                .map(|returns| resolve_type_name(names_to_declarations, returns))
                 .unwrap_or(Ok(ExpressionType::Void))?,
             is_associated,
         }),
@@ -186,6 +200,7 @@ pub fn resolve_type_name(
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
         | AstNodeValue::Statement(_)
+        | AstNodeValue::Deref(_)
         | AstNodeValue::Int(_)
         | AstNodeValue::Null
         | AstNodeValue::Float(_)
@@ -195,7 +210,7 @@ pub fn resolve_type_name(
         | AstNodeValue::While(_, _)
         | AstNodeValue::Call(_, _)
         | AstNodeValue::TakeUnique(_)
-        | AstNodeValue::TakeShared(_)
+        | AstNodeValue::TakeRef(_)
         | AstNodeValue::StructLiteral { .. }
         | AstNodeValue::ArrayLiteral(_)
         | AstNodeValue::ArrayLiteralLength(_, _)

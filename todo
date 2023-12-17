@@ -1,3 +1,8 @@
+linear IR:
+- separate PrimitiveType abstraction and Value abstraction for linear IR
+- (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
+- (maybe) AST rewrite the HIR to disambiguate between variable references and function references
+
 syntax:
 - remove ; and , requirements?
 - keyword arguments
@@ -15,8 +20,14 @@ returns:
 - typecheck returns
 - allow void returns
 
+references:
+- allow calls to associated functions through references (checking correct reference type)
+
 interfaces:
 - remove fields from interfaces? vtables just make more sense...
+- self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
+    - when making the method -> function conversion, automatically take a reference if it's required
+    - mandate by-reference parameters for interfaces
 - structs:
     - struct associated functions support "self"
         - self can be declared as a typeless parameter syntactically
@@ -27,7 +38,8 @@ interfaces:
     - union associated functions support "self"
     - union associated functions work
     - unions have associated functions
-- modules can be converted to interfaces
+- modules can be converted to interfaces:
+    - produce and consume a nullpointer for the vtable call? (might mean we need to generate shim functions)
 - interfaces can be converted between each other:
     - in typechecking
     - in the IR
@@ -82,10 +94,7 @@ errors:
 - functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
 - allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
 
-borrow checker:
-- enforce uniqueness of unique borrows
-- can't use original binding when borrowed
-- can't store borrows in types, or return them
+borrow checker
 
 coroutines:
 - decide on some coroutine facility

@@ -1,8 +1,8 @@
-use brick::compile_file;
+use brick::typecheck_module;
 
 #[tokio::test]
 async fn arrays() {
-    compile_file(
+    typecheck_module(
         "test",
         "test",
         r#"
@@ -13,19 +13,23 @@ while index < 4 {
     total += array[index];
 }
 total
-"#.to_string(),
-    ).unwrap();
+"#
+        .to_string(),
+    )
+    .unwrap();
 }
 
 #[tokio::test]
 #[should_panic]
 async fn bad_arrays() {
-    compile_file(
+    typecheck_module(
         "test",
         "test",
         r#"
 let array = [1, 2, 3, 4];
 array[2] = "test";
-"#.to_string(),
-    ).unwrap();
+"#
+        .to_string(),
+    )
+    .unwrap();
 }

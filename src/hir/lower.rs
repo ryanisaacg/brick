@@ -1,30 +1,32 @@
 use std::collections::HashMap;
 
-use super::{IrBinOp, IrFunction, IrModule, IrNode, IrNodeValue};
+use super::{HirBinOp, HirFunction, HirModule, HirNode, HirNodeValue};
 
 use crate::{
     id::ID,
     parser::{AstNode, AstNodeValue, BinOp, IfDeclaration},
-    typecheck::{ExpressionType, StaticDeclaration, TypecheckedFile, TypecheckedFunction},
+    typecheck::{
+        fully_dereference, ExpressionType, StaticDeclaration, TypecheckedFile, TypecheckedFunction,
+    },
 };
 
 pub fn lower_module<'ast>(
     module: TypecheckedFile<'ast>,
     declarations: &HashMap<ID, &'ast StaticDeclaration>,
-) -> IrModule {
+) -> HirModule {
     let TypecheckedFile {
         associated_functions: _, // TODO
         functions,
         top_level_statements,
     } = module;
-    IrModule {
+    HirModule {
         functions: functions
             .into_iter()
             .map(|func| lower_function(declarations, func))
             .collect(),
         top_level_statements: top_level_statements
             .into_iter()
-            .map(|stmt| lower_node(declarations, &stmt))
+            .map(|stmt| lower_node(declarations, stmt))
             .collect(),
     }
 }
@@ -32,7 +34,7 @@ pub fn lower_module<'ast>(
 fn lower_function<'ast>(
     decls: &HashMap<ID, &'ast StaticDeclaration>,
     func: TypecheckedFunction<'ast>,
-) -> IrFunction {
+) -> HirFunction {
     let Some(StaticDeclaration::Func(func_ty)) = decls.get(&func.id) else {
         panic!();
     };
@@ -42,9 +44,9 @@ fn lower_function<'ast>(
         .iter()
         .enumerate()
         .map(|(i, param)| {
-            IrNode::generated_with_id(
+            HirNode::generated_with_id(
                 param.id,
-                IrNodeValue::Parameter(i, param.id),
+                HirNodeValue::Parameter(i, param.id),
                 func_ty.params[i].clone(),
             )
         })
@@ -52,30 +54,30 @@ fn lower_function<'ast>(
     let body = lower_node(decls, func.func.body);
     let ty = body.ty.clone();
     instructions.push(body);
-    IrFunction {
+    HirFunction {
         id: func.id,
         name: func.name,
-        body: IrNode::generated_with_id(func.id, IrNodeValue::Sequence(instructions), ty),
+        body: HirNode::generated_with_id(func.id, HirNodeValue::Sequence(instructions), ty),
     }
 }
 
 fn lower_node<'ast>(
     decls: &HashMap<ID, &'ast StaticDeclaration>,
     node: &'ast AstNode<'ast>,
-) -> IrNode {
+) -> HirNode {
     let value = match &node.value {
-        AstNodeValue::Int(x) => IrNodeValue::Int(*x),
-        AstNodeValue::Float(x) => IrNodeValue::Float(*x),
-        AstNodeValue::Bool(x) => IrNodeValue::Bool(*x),
-        AstNodeValue::Null => IrNodeValue::Null,
-        AstNodeValue::CharLiteral(x) => IrNodeValue::CharLiteral(*x),
-        AstNodeValue::StringLiteral(x) => IrNodeValue::StringLiteral(x.clone()),
+        AstNodeValue::Int(x) => HirNodeValue::Int(*x),
+        AstNodeValue::Float(x) => HirNodeValue::Float(*x),
+        AstNodeValue::Bool(x) => HirNodeValue::Bool(*x),
+        AstNodeValue::Null => HirNodeValue::Null,
+        AstNodeValue::CharLiteral(x) => HirNodeValue::CharLiteral(*x),
+        AstNodeValue::StringLiteral(x) => HirNodeValue::StringLiteral(x.clone()),
 
         AstNodeValue::While(cond, body) => {
             // TODO: can you assign out of a while?
             let cond = lower_node_alloc(decls, cond);
             let body = lower_node_alloc(decls, body);
-            IrNodeValue::While(cond, body)
+            HirNodeValue::While(cond, body)
         }
         AstNodeValue::Block(contents) => {
             let contents = contents
@@ -83,7 +85,7 @@ fn lower_node<'ast>(
                 .map(|node| lower_node(decls, node))
                 .collect();
 
-            IrNodeValue::Sequence(contents)
+            HirNodeValue::Sequence(contents)
         }
         // TODO
         AstNodeValue::If(IfDeclaration {
@@ -97,43 +99,45 @@ fn lower_node<'ast>(
                 .as_ref()
                 .map(|else_branch| lower_node_alloc(decls, else_branch));
 
-            IrNodeValue::If(condition, if_branch, else_branch)
+            HirNodeValue::If(condition, if_branch, else_branch)
         }
 
-        AstNodeValue::TakeUnique(inner) => IrNodeValue::TakeUnique(lower_node_alloc(decls, inner)),
-        AstNodeValue::TakeShared(inner) => IrNodeValue::Return(lower_node_alloc(decls, inner)),
+        AstNodeValue::TakeUnique(inner) => HirNodeValue::TakeUnique(lower_node_alloc(decls, inner)),
+        AstNodeValue::TakeRef(inner) => HirNodeValue::TakeShared(lower_node_alloc(decls, inner)),
+        AstNodeValue::Deref(inner) => HirNodeValue::Dereference(lower_node_alloc(decls, inner)),
 
         // Statement doesn't actually add a node - the inner expression
         // has what really counts
         AstNodeValue::Statement(inner) => return lower_node(decls, inner),
 
         AstNodeValue::Declaration(_lvalue, rvalue) => {
-            let lvalue = Box::new(IrNode::from_ast(
+            let lvalue = Box::new(HirNode::from_ast(
                 node,
-                IrNodeValue::VariableReference(node.id),
+                HirNodeValue::VariableReference(node.id),
                 rvalue.ty.get().expect("type filled in").clone(),
             ));
             let rvalue = lower_node_alloc(decls, rvalue);
             let statements = vec![
-                IrNode::from_ast_void(node, IrNodeValue::Declaration(node.id)),
-                IrNode::from_ast_void(node, IrNodeValue::Assignment(lvalue, rvalue)),
+                HirNode::from_ast(node, HirNodeValue::Declaration(node.id), rvalue.ty.clone()),
+                HirNode::from_ast_void(node, HirNodeValue::Assignment(lvalue, rvalue)),
             ];
-            IrNodeValue::Sequence(statements)
+            HirNodeValue::Sequence(statements)
         }
-        AstNodeValue::Name { referenced_id, .. } => IrNodeValue::VariableReference(
+        AstNodeValue::Name { referenced_id, .. } => HirNodeValue::VariableReference(
             *referenced_id.get().expect("referenced ID to be filled in"),
         ),
 
-        AstNodeValue::Return(inner) => IrNodeValue::Return(lower_node_alloc(decls, inner)),
+        AstNodeValue::Return(inner) => HirNodeValue::Return(lower_node_alloc(decls, inner)),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
-            let Some(ExpressionType::DeclaredType(expr_ty)) = left.ty.get() else {
+            let ExpressionType::DeclaredType(expr_ty) = fully_dereference(left.ty.get().unwrap())
+            else {
                 panic!("expected left side of dot to be declared type");
             };
             let AstNodeValue::Name { value: name, .. } = &right.value else {
                 unreachable!()
             };
             if let Some(StaticDeclaration::Module(module)) = decls.get(expr_ty) {
-                IrNodeValue::VariableReference(
+                HirNodeValue::VariableReference(
                     module
                         .exports
                         .get(name)
@@ -142,7 +146,7 @@ fn lower_node<'ast>(
                 )
             } else {
                 let left = lower_node_alloc(decls, left);
-                IrNodeValue::Access(left, name.clone())
+                HirNodeValue::Access(left, name.clone())
             }
         }
         AstNodeValue::BinExpr(op, left, right) => {
@@ -150,49 +154,49 @@ fn lower_node<'ast>(
             let right = lower_node_alloc(decls, right);
 
             match op {
-                BinOp::AddAssign => IrNodeValue::Assignment(
+                BinOp::AddAssign => HirNodeValue::Assignment(
                     left.clone(),
-                    Box::new(IrNode::from_ast_void(
-                        &node,
-                        IrNodeValue::BinOp(IrBinOp::Add, left, right),
+                    Box::new(HirNode::from_ast_void(
+                        node,
+                        HirNodeValue::BinOp(HirBinOp::Add, left, right),
                     )),
                 ),
-                BinOp::SubtractAssign => IrNodeValue::Assignment(
+                BinOp::SubtractAssign => HirNodeValue::Assignment(
                     left.clone(),
-                    Box::new(IrNode::from_ast_void(
-                        &node,
-                        IrNodeValue::BinOp(IrBinOp::Subtract, left, right),
+                    Box::new(HirNode::from_ast_void(
+                        node,
+                        HirNodeValue::BinOp(HirBinOp::Subtract, left, right),
                     )),
                 ),
-                BinOp::MultiplyAssign => IrNodeValue::Assignment(
+                BinOp::MultiplyAssign => HirNodeValue::Assignment(
                     left.clone(),
-                    Box::new(IrNode::from_ast_void(
-                        &node,
-                        IrNodeValue::BinOp(IrBinOp::Multiply, left, right),
+                    Box::new(HirNode::from_ast_void(
+                        node,
+                        HirNodeValue::BinOp(HirBinOp::Multiply, left, right),
                     )),
                 ),
-                BinOp::DivideAssign => IrNodeValue::Assignment(
+                BinOp::DivideAssign => HirNodeValue::Assignment(
                     left.clone(),
-                    Box::new(IrNode::from_ast_void(
-                        &node,
-                        IrNodeValue::BinOp(IrBinOp::Divide, left, right),
+                    Box::new(HirNode::from_ast_void(
+                        node,
+                        HirNodeValue::BinOp(HirBinOp::Divide, left, right),
                     )),
                 ),
-                BinOp::Assignment => IrNodeValue::Assignment(left, right),
+                BinOp::Assignment => HirNodeValue::Assignment(left, right),
 
-                BinOp::Add => IrNodeValue::BinOp(IrBinOp::Add, left, right),
-                BinOp::Subtract => IrNodeValue::BinOp(IrBinOp::Subtract, left, right),
-                BinOp::Multiply => IrNodeValue::BinOp(IrBinOp::Multiply, left, right),
-                BinOp::Divide => IrNodeValue::BinOp(IrBinOp::Divide, left, right),
-                BinOp::LessThan => IrNodeValue::BinOp(IrBinOp::LessThan, left, right),
-                BinOp::GreaterThan => IrNodeValue::BinOp(IrBinOp::GreaterThan, left, right),
-                BinOp::LessEqualThan => IrNodeValue::BinOp(IrBinOp::LessEqualThan, left, right),
+                BinOp::Add => HirNodeValue::BinOp(HirBinOp::Add, left, right),
+                BinOp::Subtract => HirNodeValue::BinOp(HirBinOp::Subtract, left, right),
+                BinOp::Multiply => HirNodeValue::BinOp(HirBinOp::Multiply, left, right),
+                BinOp::Divide => HirNodeValue::BinOp(HirBinOp::Divide, left, right),
+                BinOp::LessThan => HirNodeValue::BinOp(HirBinOp::LessThan, left, right),
+                BinOp::GreaterThan => HirNodeValue::BinOp(HirBinOp::GreaterThan, left, right),
+                BinOp::LessEqualThan => HirNodeValue::BinOp(HirBinOp::LessEqualThan, left, right),
                 BinOp::GreaterEqualThan => {
-                    IrNodeValue::BinOp(IrBinOp::GreaterEqualThan, left, right)
+                    HirNodeValue::BinOp(HirBinOp::GreaterEqualThan, left, right)
                 }
-                BinOp::EqualTo => IrNodeValue::BinOp(IrBinOp::EqualTo, left, right),
-                BinOp::NotEquals => IrNodeValue::BinOp(IrBinOp::NotEquals, left, right),
-                BinOp::Index => IrNodeValue::Index(left, right),
+                BinOp::EqualTo => HirNodeValue::BinOp(HirBinOp::EqualTo, left, right),
+                BinOp::NotEquals => HirNodeValue::BinOp(HirBinOp::NotEquals, left, right),
+                BinOp::Index => HirNodeValue::Index(left, right),
                 BinOp::Dot => unreachable!(),
             }
         }
@@ -202,7 +206,7 @@ fn lower_node<'ast>(
                 .iter()
                 .map(|param| lower_node(decls, param))
                 .collect();
-            IrNodeValue::Call(func, params)
+            HirNodeValue::Call(func, params)
         }
         AstNodeValue::StructLiteral { name, fields } => {
             let AstNodeValue::Name { referenced_id, .. } = &name.value else {
@@ -215,17 +219,17 @@ fn lower_node<'ast>(
                 .iter()
                 .map(|(name, field)| (name.clone(), lower_node(decls, field)))
                 .collect();
-            IrNodeValue::StructLiteral(*id, fields)
+            HirNodeValue::StructLiteral(*id, fields)
         }
         AstNodeValue::DictLiteral(_) => todo!(),
         AstNodeValue::ArrayLiteral(arr) => {
             let arr = arr.iter().map(|elem| lower_node(decls, elem)).collect();
-            IrNodeValue::ArrayLiteral(arr)
+            HirNodeValue::ArrayLiteral(arr)
         }
         AstNodeValue::ArrayLiteralLength(elem, count) => {
             let elem = lower_node_alloc(decls, elem);
             let count = lower_node_alloc(decls, count);
-            IrNodeValue::ArrayLiteralLength(elem, count)
+            HirNodeValue::ArrayLiteralLength(elem, count)
         }
 
         AstNodeValue::FunctionDeclaration(_)
@@ -241,12 +245,12 @@ fn lower_node<'ast>(
         | AstNodeValue::ArrayType(_) => unreachable!("Can't have these in a function body"),
     };
 
-    IrNode::from_ast(node, value, node.ty.get().expect("type filled").clone())
+    HirNode::from_ast(node, value, node.ty.get().expect("type filled").clone())
 }
 
-fn lower_node_alloc<'ast, 'ir>(
+fn lower_node_alloc<'ast>(
     decls: &HashMap<ID, &'ast StaticDeclaration>,
     node: &'ast AstNode<'ast>,
-) -> Box<IrNode> {
+) -> Box<HirNode> {
     Box::new(lower_node(decls, node))
 }
