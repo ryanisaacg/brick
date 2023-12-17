@@ -43,7 +43,6 @@ x.length2()
     assert_matches!(&result[..], [Value::Int32(10)]);
 }
 
-
 #[tokio::test]
 async fn nested_structs() {
     let result = eval_both(
@@ -86,7 +85,8 @@ rect.area()
 
 #[tokio::test]
 async fn order_matters() {
-    let result = eval_both(r#"
+    let result = eval_both(
+        r#"
 struct Triplet {
     a: Point,
     b: Point,
@@ -103,7 +103,10 @@ let c = Point { x: 3, y: 0 };
 let n = Triplet { a, b, c};
 
 n.a.x + n.b.y * n.c.x
-"#).await.unwrap();
+"#,
+    )
+    .await
+    .unwrap();
     assert_matches!(&result[..], [Value::Int32(7)]);
 }
 

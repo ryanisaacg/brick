@@ -11,7 +11,7 @@ use crate::{
         TypeMemoryLayout,
     },
     typecheck::{ExpressionType, PrimitiveType},
-    Value, ExternBinding,
+    ExternBinding, Value,
 };
 
 /*#[derive(Clone, Debug)]
@@ -105,8 +105,7 @@ pub async fn evaluate_function(
         Function::Ir(function) => {
             // Write the current base ptr at the stack ptr location
             let base_ptr = vm.base_ptr.to_le_bytes();
-            vm.memory[(vm.stack_ptr - base_ptr.len())..vm.stack_ptr]
-                .copy_from_slice(&base_ptr);
+            vm.memory[(vm.stack_ptr - base_ptr.len())..vm.stack_ptr].copy_from_slice(&base_ptr);
             vm.base_ptr = vm.stack_ptr;
             vm.stack_ptr -= base_ptr.len();
 
@@ -185,7 +184,9 @@ pub async fn evaluate_block(
         LinearNodeValue::Call(lhs, parameters) => {
             evaluate_block(fns, params, vm, lhs).await?;
             // TODO: should I figure out
-            let Some(Value::ID(fn_id)) = vm.op_stack.pop() else { unreachable!() };
+            let Some(Value::ID(fn_id)) = vm.op_stack.pop() else {
+                unreachable!()
+            };
             for param in parameters.iter().rev() {
                 evaluate_block(fns, params, vm, param).await?;
             }
@@ -344,7 +345,13 @@ fn write(
                         TypeLayoutField::Primitive(_) => {
                             write_primitive(op_stack, memory, location);
                         }
-                        TypeLayoutField::Referenced(id) => write(op_stack, layouts, memory, location, &ExpressionType::DeclaredType(*id)),
+                        TypeLayoutField::Referenced(id) => write(
+                            op_stack,
+                            layouts,
+                            memory,
+                            location,
+                            &ExpressionType::DeclaredType(*id),
+                        ),
                         TypeLayoutField::Nullable(_) => todo!(),
                         TypeLayoutField::Pointer => todo!(),
                     }
@@ -358,7 +365,7 @@ fn write(
                 }
             }
             TypeLayoutValue::FunctionPointer => todo!(),
-        }
+        },
         ExpressionType::Pointer(_, _) => {
             write_primitive(op_stack, memory, location);
         }
@@ -368,11 +375,7 @@ fn write(
     }
 }
 
-fn write_primitive(
-    op_stack: &mut Vec<Value>,
-    memory: &mut [u8],
-    location: usize,
-) -> usize {
+fn write_primitive(op_stack: &mut Vec<Value>, memory: &mut [u8], location: usize) -> usize {
     dbg!(location, op_stack.last().unwrap());
     let value = op_stack.pop().unwrap();
     let bytes = match &value {
@@ -391,10 +394,9 @@ fn write_primitive(
         Value::Bool(x) => bytemuck::bytes_of(x),
         Value::Char(x) => bytemuck::bytes_of(x),
         Value::String(_) => todo!(),
-        Value::Array(_) |
-        Value::Struct(_) |
-        Value::Function(_) |
-        Value::Interface(_, _) => unreachable!("only used in the non-linear interpreter"),
+        Value::Array(_) | Value::Struct(_) | Value::Function(_) | Value::Interface(_, _) => {
+            unreachable!("only used in the non-linear interpreter")
+        }
     };
     memory[location..(location + bytes.len())].copy_from_slice(bytes);
     bytes.len()
@@ -416,41 +418,41 @@ fn read(
         ExpressionType::DeclaredType(id) => {
             let layout = layouts.get(id).unwrap();
             match &layout.value {
-            TypeLayoutValue::Structure(fields) => {
-                println!("I'm a struct");
-                for (_, offset, ty) in fields.iter().rev() {
-                    let location = location + offset;
-                    match ty {
-                        TypeLayoutField::Primitive(p) => {
-                            read_primitive(op_stack, memory, location, *p)
+                TypeLayoutValue::Structure(fields) => {
+                    println!("I'm a struct");
+                    for (_, offset, ty) in fields.iter().rev() {
+                        let location = location + offset;
+                        match ty {
+                            TypeLayoutField::Primitive(p) => {
+                                read_primitive(op_stack, memory, location, *p)
+                            }
+                            TypeLayoutField::Referenced(id) => read(
+                                op_stack,
+                                layouts,
+                                memory,
+                                location,
+                                &ExpressionType::DeclaredType(*id),
+                            ),
+                            TypeLayoutField::Nullable(_) => todo!(),
+                            TypeLayoutField::Pointer => todo!(),
                         }
-                        TypeLayoutField::Referenced(id) => read(
-                            op_stack,
-                            layouts,
-                            memory,
-                            location,
-                            &ExpressionType::DeclaredType(*id),
-                        ),
-                        TypeLayoutField::Nullable(_) => todo!(),
-                        TypeLayoutField::Pointer => todo!(),
                     }
                 }
-            }
-            TypeLayoutValue::Interface(fields) => {
-                println!("I'm an interface");
-                let mut location = location + dbg!(layout.size);
-                for _ in fields.iter().rev() {
-                    read_primitive(op_stack, memory, location, PrimitiveType::FunctionID);
-                    location -= 4;
+                TypeLayoutValue::Interface(fields) => {
+                    println!("I'm an interface");
+                    let mut location = location + dbg!(layout.size);
+                    for _ in fields.iter().rev() {
+                        read_primitive(op_stack, memory, location, PrimitiveType::FunctionID);
+                        location -= 4;
+                    }
+                    read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
                 }
-                read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
-            }
-            TypeLayoutValue::FunctionPointer => {
-                let fn_id: ID = *bytemuck::from_bytes(&memory[location..(location + 4)]);
-                op_stack.push(Value::ID(fn_id));
+                TypeLayoutValue::FunctionPointer => {
+                    let fn_id: ID = *bytemuck::from_bytes(&memory[location..(location + 4)]);
+                    op_stack.push(Value::ID(fn_id));
+                }
             }
         }
-        },
         ExpressionType::Pointer(_, _) => {
             read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
         }
@@ -482,11 +484,13 @@ fn read_primitive(
         }
         PrimitiveType::Bool => todo!(), //Value::Bool(*bytemuck::from_bytes(memory)),
         PrimitiveType::PointerSize => {
-            let base_ptr = &memory[location..(location+8)];
+            let base_ptr = &memory[location..(location + 8)];
             let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
             Value::Size(base_ptr)
         }
-        PrimitiveType::FunctionID => Value::ID(*bytemuck::from_bytes(&memory[location..(location + 4)]))
+        PrimitiveType::FunctionID => {
+            Value::ID(*bytemuck::from_bytes(&memory[location..(location + 4)]))
+        }
     });
     dbg!(location, op_stack.last().unwrap());
 }

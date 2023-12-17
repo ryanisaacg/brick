@@ -2,12 +2,15 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs, io, sync::Arc, future::Future,
+    fs,
+    future::Future,
+    io,
+    sync::Arc,
 };
 
 use hir::HirModule;
 pub use interpreter::Value;
-use interpreter::{evaluate_node, Context, Function, ExternBinding};
+use interpreter::{evaluate_node, Context, ExternBinding, Function};
 use linear_interpreter::{evaluate_block, VM};
 use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;

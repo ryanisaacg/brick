@@ -80,4 +80,3 @@ a1 + a2
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(17)]);
 }
-

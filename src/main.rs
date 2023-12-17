@@ -1,4 +1,4 @@
-use brick::{Value, bind_fn, linear_interpret_code};
+use brick::{bind_fn, linear_interpret_code, Value};
 use std::{collections::HashMap, fs::read_to_string, io::stdin};
 
 #[tokio::main(flavor = "current_thread")]
@@ -62,4 +62,3 @@ async fn main() {
         .unwrap()
     );
 }
-

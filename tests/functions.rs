@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use brick::{eval_both, Value, bind_fn, linear_interpret_code};
+use brick::{bind_fn, eval_both, linear_interpret_code, Value};
 
 #[tokio::test]
 async fn add() {
@@ -66,18 +66,26 @@ async fn extern_binding() {
         "next".to_string(),
         bind_fn(|_| async move {
             let x = unsafe { INCR_VALUE };
-            unsafe { INCR_VALUE += 1; }
+            unsafe {
+                INCR_VALUE += 1;
+            }
             Some(Value::Int32(x))
         }),
     );
 
-    let result = linear_interpret_code("", r#"
+    let result = linear_interpret_code(
+        "",
+        r#"
 extern fn next(): i32;
 let x = next();
 x = next();
 x = next();
 x
-"#.to_string(), bindings).await.unwrap();
+"#
+        .to_string(),
+        bindings,
+    )
+    .await
+    .unwrap();
     assert_matches!(&result[..], [Value::Int32(2)]);
 }
-
