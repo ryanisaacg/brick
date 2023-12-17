@@ -108,7 +108,7 @@ pub async fn evaluate_function(
         Function::Ir(function) => {
             // Write the current base ptr at the stack ptr location
             let base_ptr = vm.base_ptr.to_le_bytes();
-            (&mut vm.memory[(vm.stack_ptr - base_ptr.len())..vm.stack_ptr])
+            vm.memory[(vm.stack_ptr - base_ptr.len())..vm.stack_ptr]
                 .copy_from_slice(&base_ptr);
             vm.base_ptr = vm.stack_ptr;
             vm.stack_ptr -= base_ptr.len();
@@ -164,7 +164,7 @@ pub async fn evaluate_block(
                 unreachable!()
             };
             location += offset;
-            read(&mut vm.op_stack, &vm.layouts, &vm.memory, location, &ty);
+            read(&mut vm.op_stack, &vm.layouts, &vm.memory, location, ty);
         }
         LinearNodeValue::WriteMemory {
             location,
@@ -379,7 +379,7 @@ fn write_primitive(
         Value::Size(x) => {
             // lifetime issues
             let bytes = x.to_le_bytes();
-            (&mut memory[location..(location + bytes.len())]).copy_from_slice(&bytes);
+            memory[location..(location + bytes.len())].copy_from_slice(&bytes);
             return bytes.len();
         }
         Value::Int32(x) => bytemuck::bytes_of(x),
@@ -394,7 +394,7 @@ fn write_primitive(
         Value::Function(_) |
         Value::Interface(_, _) => unreachable!("only used in the non-linear interpreter"),
     };
-    (&mut memory[location..(location + bytes.len())]).copy_from_slice(bytes);
+    memory[location..(location + bytes.len())].copy_from_slice(bytes);
     bytes.len()
 }
 

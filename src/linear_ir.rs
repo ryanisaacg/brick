@@ -143,7 +143,6 @@ pub fn linearize_nodes(
                 });
             }
             HirNodeValue::Assignment(lhs, rhs) => {
-                let size = expression_type_size(declarations, &lhs.ty);
                 let ty = lhs.ty.clone();
                 let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
                 let rhs = lower_expression(declarations, stack_entries, *rhs);
@@ -191,14 +190,12 @@ pub fn linearize_nodes(
                 let mut vec_deque = VecDeque::new();
                 vec_deque.push_back(*block);
                 let block = linearize_nodes(declarations, stack_entries, stack_offset, vec_deque);
-                let mut inner = Vec::new();
-                inner.push(LinearNode::new(LinearNodeValue::If(
-                    Box::new(cond),
-                    block,
-                    Some(vec![LinearNode::new(LinearNodeValue::Break)]),
-                )));
                 values.push(LinearNode {
-                    value: LinearNodeValue::Loop(inner),
+                    value: LinearNodeValue::Loop(vec![LinearNode::new(LinearNodeValue::If(
+                        Box::new(cond),
+                        block,
+                        Some(vec![LinearNode::new(LinearNodeValue::Break)]),
+                    ))]),
                     provenance: node.provenance,
                 })
             }
@@ -222,7 +219,7 @@ fn lower_expression(
     expression: HirNode,
 ) -> LinearNode {
     let HirNode {
-        id,
+        id: _,
         value,
         ty,
         provenance,
@@ -478,7 +475,7 @@ fn access_location(
     let ExpressionType::DeclaredType(ty_id) = lhs.ty else {
         unreachable!()
     };
-    let TypeMemoryLayout { value, size } = declarations.get(&ty_id).unwrap();
+    let TypeMemoryLayout { value, .. } = declarations.get(&ty_id).unwrap();
     let (lhs, mut offset) = lower_lvalue(declarations, stack_entries, lhs);
     offset += match value {
         TypeLayoutValue::Structure(fields) => fields
@@ -606,8 +603,8 @@ fn layout_static_decl(
             let mut size = POINTER_SIZE;
             let fields = interface_ty
                 .associated_functions
-                .iter()
-                .map(|(_, decl)| {
+                .values()
+                .map(|decl| {
                     // TODO: don't hardcode function ID
                     size += 4;
                     decl.id()
