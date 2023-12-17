@@ -440,9 +440,8 @@ fn interface_declaration<'a>(
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let (name, provenance) = word(source, cursor, "expected name after 'interface'")?;
-    let (end, _fields, associated_functions) =
+    let (end, _, associated_functions) =
         interface_or_struct_body(source, context, provenance.end(), true)?;
-    // TODO: error when fields are present
 
     Ok(AstNode::new(
         AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
@@ -532,6 +531,13 @@ fn interface_or_struct_body<'a>(
                 ));
             }
         } else {
+            if is_interface {
+                let next = already_peeked_token(source)?;
+                return Err(ParseError::UnexpectedToken(
+                    Box::new(next),
+                    "expected associated function in interface",
+                ));
+            }
             let (name, range, type_hint) =
                 name_and_type_hint(source, context, cursor, "expected parameter")?;
             cursor = range.end();

@@ -1,3 +1,8 @@
+error reporting:
+- typecheck errors
+- error presentation
+- ability to continue in face of errors
+
 linear IR:
 - separate PrimitiveType abstraction and Value abstraction for linear IR
 - (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
@@ -46,7 +51,6 @@ references:
 - allow calls to associated functions through references (checking correct reference type)
 
 interfaces:
-- remove fields from interfaces? vtables just make more sense...
 - self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
     - when making the method -> function conversion, automatically take a reference if it's required
     - mandate by-reference parameters for interfaces
