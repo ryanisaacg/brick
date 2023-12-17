@@ -2,12 +2,12 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs, io,
+    fs, io, sync::Arc, future::Future,
 };
 
 use hir::HirModule;
 pub use interpreter::Value;
-use interpreter::{evaluate_node, Context, Function};
+use interpreter::{evaluate_node, Context, Function, ExternBinding};
 use linear_interpreter::{evaluate_block, VM};
 use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;
@@ -37,6 +37,13 @@ pub enum CompileError {
     FilesystemError(io::Error, String),
 }
 
+pub fn bind_fn<F>(closure: impl Fn(Vec<Value>) -> F + Send + Sync + 'static) -> Arc<ExternBinding>
+where
+    F: Future<Output = Option<Value>> + Send + Sync + 'static,
+{
+    Arc::new(move |x| Box::pin(closure(x)))
+}
+
 pub async fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
     let val = linear_interpret_code("eval", source.to_string(), HashMap::new()).await?;
 
@@ -53,8 +60,6 @@ pub async fn eval_both(source: &str) -> Result<Vec<Value>, CompileError> {
 
     Ok(val1)
 }
-
-pub use interpreter::ExternBinding;
 
 // TODO: move this to a separate crate
 pub async fn interpret_code(
@@ -106,7 +111,7 @@ pub async fn interpret_code(
 pub async fn linear_interpret_code(
     source_name: &'static str,
     contents: String,
-    mut bindings: HashMap<String, std::sync::Arc<linear_interpreter::ExternBinding>>,
+    mut bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
 ) -> Result<Vec<Value>, CompileError> {
     // TODO: "main"?
     let CompilationResults {

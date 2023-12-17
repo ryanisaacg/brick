@@ -1,12 +1,12 @@
-use brick::{interpret_code, ExternBinding, Value};
-use std::{collections::HashMap, fs::read_to_string, future::Future, io::stdin, sync::Arc};
+use brick::{Value, bind_fn, linear_interpret_code};
+use std::{collections::HashMap, fs::read_to_string, io::stdin};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let mut bindings = HashMap::new();
     bindings.insert(
         "read".to_string(),
-        ext_fn(|_| async {
+        bind_fn(|_| async {
             let mut input = String::new();
             stdin()
                 .read_line(&mut input)
@@ -18,7 +18,7 @@ async fn main() {
     );
     bindings.insert(
         "write".to_string(),
-        ext_fn(|values| async move {
+        bind_fn(|values| async move {
             let Value::Int32(input) = values[0] else {
                 panic!("expected int");
             };
@@ -28,7 +28,7 @@ async fn main() {
     );
     bindings.insert(
         "prompt".to_string(),
-        ext_fn(|values| async move {
+        bind_fn(|values| async move {
             let Value::String(input) = &values[0] else {
                 panic!("expected string");
             };
@@ -42,7 +42,7 @@ async fn main() {
     );
     bindings.insert(
         "print".to_string(),
-        ext_fn(|values| async move {
+        bind_fn(|values| async move {
             let Value::String(input) = &values[0] else {
                 panic!("expected string");
             };
@@ -53,7 +53,7 @@ async fn main() {
 
     println!(
         "{:?}",
-        interpret_code(
+        linear_interpret_code(
             "example.brick",
             read_to_string("example.brick").expect("file should be readable"),
             bindings
@@ -63,9 +63,3 @@ async fn main() {
     );
 }
 
-fn ext_fn<F>(closure: impl Fn(Vec<Value>) -> F + Send + Sync + 'static) -> Arc<ExternBinding>
-where
-    F: Future<Output = Option<Value>> + Send + Sync + 'static,
-{
-    Arc::new(move |x| Box::pin(closure(x)))
-}

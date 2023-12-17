@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, pin::Pin, future::Future};
+use std::{collections::HashMap, sync::Arc};
 
 use async_recursion::async_recursion;
 
@@ -11,7 +11,7 @@ use crate::{
         TypeMemoryLayout,
     },
     typecheck::{ExpressionType, PrimitiveType},
-    Value,
+    Value, ExternBinding,
 };
 
 /*#[derive(Clone, Debug)]
@@ -35,9 +35,6 @@ impl Value {
         }
     }
 }*/
-
-pub type ExternBinding =
-    dyn Fn(&mut [Value]) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>> + Send + Sync;
 
 pub enum Function {
     Ir(LinearFunction),
@@ -127,7 +124,7 @@ pub async fn evaluate_function(
             vm.base_ptr = base_ptr;
         }
         Function::Extern(ext) => {
-            if let Some(returned) = ext(params).await {
+            if let Some(returned) = ext(params.to_vec()).await {
                 vm.op_stack.push(returned);
             }
         }
