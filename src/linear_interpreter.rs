@@ -1,18 +1,55 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use async_recursion::async_recursion;
 
 use crate::{
     hir::HirBinOp,
     id::ID,
-    interpreter::Numeric,
     linear_ir::{
         LinearFunction, LinearNode, LinearNodeValue, TypeLayoutField, TypeLayoutValue,
         TypeMemoryLayout,
     },
     typecheck::{ExpressionType, PrimitiveType},
-    ExternBinding, Value,
 };
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    Null,
+    ID(ID),
+    Size(usize),
+    Int32(i32),
+    Int64(i64),
+    Float32(f32),
+    Float64(f64),
+    Bool(bool),
+    Char(char),
+    String(String),
+}
+
+impl Value {
+    pub fn to_numeric(&self) -> Option<Numeric> {
+        match self {
+            Value::Int32(x) => Some(Numeric::Int32(*x)),
+            Value::Float32(x) => Some(Numeric::Float32(*x)),
+            Value::Int64(x) => Some(Numeric::Int64(*x)),
+            Value::Float64(x) => Some(Numeric::Float64(*x)),
+            Value::Size(x) => Some(Numeric::Size(*x)),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Numeric {
+    Int32(i32),
+    Float32(f32),
+    Int64(i64),
+    Float64(f64),
+    Size(usize),
+}
+
+pub type ExternBinding =
+    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>> + Send + Sync;
 
 /*#[derive(Clone, Debug)]
 pub enum Value {
@@ -394,9 +431,6 @@ fn write_primitive(op_stack: &mut Vec<Value>, memory: &mut [u8], location: usize
         Value::Bool(x) => bytemuck::bytes_of(x),
         Value::Char(x) => bytemuck::bytes_of(x),
         Value::String(_) => todo!(),
-        Value::Array(_) | Value::Struct(_) | Value::Function(_) | Value::Interface(_, _) => {
-            unreachable!("only used in the non-linear interpreter")
-        }
     };
     memory[location..(location + bytes.len())].copy_from_slice(bytes);
     bytes.len()

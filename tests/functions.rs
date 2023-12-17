@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use brick::{bind_fn, eval_both, linear_interpret_code, Value};
+use brick::{bind_fn, eval, interpret_code, Value};
 
 #[tokio::test]
 async fn add() {
-    let result = eval_both(
+    let result = eval(
         r#"
 fn add(a: i32, b: i32): i32 {
     a + b
@@ -21,7 +21,7 @@ add(1, 2)
 
 #[tokio::test]
 async fn recursion() {
-    let result = eval_both(
+    let result = eval(
         r#"
 fn fib(input: i32): i32 {
     if input < 1 {
@@ -45,7 +45,7 @@ fib(5)
 #[tokio::test]
 #[should_panic]
 async fn return_mismatch() {
-    eval_both(
+    eval(
         r#"
 fn function(): i32 {
     "not an i32"
@@ -73,7 +73,7 @@ async fn extern_binding() {
         }),
     );
 
-    let result = linear_interpret_code(
+    let result = interpret_code(
         "",
         r#"
 extern fn next(): i32;

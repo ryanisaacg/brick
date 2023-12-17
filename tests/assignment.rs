@@ -1,9 +1,9 @@
 use assert_matches::assert_matches;
-use brick::{eval_both, Value};
+use brick::{eval, Value};
 
 #[tokio::test]
 async fn assignment() {
-    let result = eval_both(
+    let result = eval(
         r#"
         let x = 1;
         x = x + 2;
@@ -18,7 +18,7 @@ async fn assignment() {
 #[tokio::test]
 #[should_panic]
 async fn declaration_not_assignment() {
-    eval_both(
+    eval(
         r#"
         let x += 1;
     "#,
@@ -29,7 +29,7 @@ async fn declaration_not_assignment() {
 
 #[tokio::test]
 async fn numeric_assignment() {
-    let result = eval_both(
+    let result = eval(
         r#"
     let x = 1;
     x += 2;
@@ -46,7 +46,7 @@ async fn numeric_assignment() {
 
 #[tokio::test]
 async fn multiple_variables() {
-    let result = eval_both(
+    let result = eval(
         r#"
 let a = 5;
 let b = 3 + a;

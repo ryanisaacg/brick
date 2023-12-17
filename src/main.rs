@@ -1,4 +1,4 @@
-use brick::{bind_fn, linear_interpret_code, Value};
+use brick::{bind_fn, interpret_code, Value};
 use std::{collections::HashMap, fs::read_to_string, io::stdin};
 
 #[tokio::main(flavor = "current_thread")]
@@ -53,7 +53,7 @@ async fn main() {
 
     println!(
         "{:?}",
-        linear_interpret_code(
+        interpret_code(
             "example.brick",
             read_to_string("example.brick").expect("file should be readable"),
             bindings

@@ -1,9 +1,9 @@
 use assert_matches::assert_matches;
-use brick::{eval, eval_both, Value};
+use brick::{eval, Value};
 
 #[tokio::test]
 async fn associated_functions() {
-    eval_both(
+    eval(
         r#"
 interface HasArea {
     fn area(area: HasArea): f32,

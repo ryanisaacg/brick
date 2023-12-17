@@ -9,9 +9,8 @@ use std::{
 };
 
 use hir::HirModule;
-pub use interpreter::Value;
-use interpreter::{evaluate_node, Context, ExternBinding, Function};
-use linear_interpreter::{evaluate_block, VM};
+pub use linear_interpreter::Value;
+use linear_interpreter::{evaluate_block, ExternBinding, VM};
 use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
@@ -19,7 +18,6 @@ use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
 mod arena;
 mod hir;
 mod id;
-mod interpreter;
 mod linear_interpreter;
 mod linear_ir;
 mod parser;
@@ -48,70 +46,12 @@ where
 }
 
 pub async fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
-    let val = linear_interpret_code("eval", source.to_string(), HashMap::new()).await?;
+    let val = interpret_code("eval", source.to_string(), HashMap::new()).await?;
 
     Ok(val)
 }
 
-pub async fn eval_both(source: &str) -> Result<Vec<Value>, CompileError> {
-    let val1 = interpret_code("eval", source.to_string(), HashMap::new()).await?;
-    let val2 = linear_interpret_code("eval", source.to_string(), HashMap::new()).await?;
-
-    if val1 != val2 {
-        assert_eq!(val1, val2);
-    }
-
-    Ok(val1)
-}
-
-// TODO: move this to a separate crate
 pub async fn interpret_code(
-    source_name: &'static str,
-    contents: String,
-    mut bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
-) -> Result<Vec<Value>, CompileError> {
-    // TODO: "main"?
-    let CompilationResults {
-        modules,
-        declarations,
-    } = typecheck_module("main", source_name, contents)?;
-    let mut statements = Vec::new();
-    let mut functions = HashMap::new();
-
-    for (name, module) in modules {
-        // TODO: execute imported statements?
-        if name == "main" {
-            statements.extend(module.top_level_statements);
-        }
-        for function in module.functions {
-            functions.insert(function.id, Function::Ir(function));
-        }
-    }
-    let module = StaticDeclaration::Module(ModuleType {
-        id: ID::new(),
-        exports: declarations,
-    });
-    module.visit(&mut |decl| {
-        if let StaticDeclaration::Module(ModuleType { exports, .. }) = decl {
-            for (name, decl) in exports.iter() {
-                if let Some(implementation) = bindings.remove(name) {
-                    let id = decl.id();
-                    functions.insert(id, Function::Extern(implementation));
-                }
-            }
-        }
-    });
-
-    let mut context = Context::new(vec![]);
-    context.add_fns(&functions);
-    for statement in statements {
-        let _ = evaluate_node(&functions, &mut context, &statement).await;
-    }
-
-    Ok(context.values())
-}
-
-pub async fn linear_interpret_code(
     source_name: &'static str,
     contents: String,
     mut bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
