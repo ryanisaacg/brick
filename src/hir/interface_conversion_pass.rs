@@ -20,7 +20,7 @@ pub fn rewrite(module: &mut HirModule, declarations: &HashMap<ID, &StaticDeclara
         | HirNodeValue::Parameter(_, _)
         | HirNodeValue::VariableReference(_)
         | HirNodeValue::Access(_, _)
-        | HirNodeValue::Index(_, _)
+        | HirNodeValue::ArrayIndex(_, _)
         | HirNodeValue::CharLiteral(_)
         | HirNodeValue::StringLiteral(_)
         | HirNodeValue::TakeUnique(_)

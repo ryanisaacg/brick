@@ -112,10 +112,12 @@ pub enum Unwind {
 
 pub struct VM {
     pub memory: [u8; 1024],
+    pub temporaries: [usize; 16],
     pub layouts: HashMap<ID, TypeMemoryLayout>,
     pub op_stack: Vec<Value>,
     pub base_ptr: usize,
     pub stack_ptr: usize,
+    pub heap_ptr: usize,
 }
 
 impl VM {
@@ -123,10 +125,12 @@ impl VM {
         let memory = [0; 1024];
         VM {
             memory,
+            temporaries: [0; 16],
             layouts,
             op_stack: Vec::new(),
             base_ptr: memory.len(),
             stack_ptr: memory.len(),
+            heap_ptr: std::mem::size_of::<usize>(),
         }
     }
 }
@@ -177,15 +181,22 @@ pub async fn evaluate_block(
 ) -> Result<(), Unwind> {
     match &node.value {
         LinearNodeValue::Sequence(seq) => {
+            let mut temp = [0; 16];
+            std::mem::swap(&mut vm.temporaries, &mut temp);
             for node in seq.iter() {
                 evaluate_block(fns, params, vm, node).await?;
             }
+            std::mem::swap(&mut vm.temporaries, &mut temp);
         }
         LinearNodeValue::StackFrame => {
             vm.op_stack.push(Value::Size(dbg!(vm.base_ptr)));
         }
         LinearNodeValue::StackAlloc(amount) => {
             vm.stack_ptr -= amount;
+        }
+        LinearNodeValue::HeapAlloc(amount) => {
+            vm.op_stack.push(Value::Size(vm.heap_ptr));
+            vm.heap_ptr += amount;
         }
         LinearNodeValue::Parameter(idx) => {
             let mut temp = Value::Null;
@@ -268,6 +279,7 @@ pub async fn evaluate_block(
             evaluate_block(fns, params, vm, lhs).await?;
             let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
+            dbg!(op, _ty, lhs, rhs);
             let val = match (left, right) {
                 (Numeric::Int32(left), Numeric::Int32(right)) => match op {
                     HirBinOp::Add => Value::Int32(left + right),
@@ -329,6 +341,10 @@ pub async fn evaluate_block(
                     HirBinOp::EqualTo => Value::Bool(left == right),
                     HirBinOp::NotEquals => Value::Bool(left != right),
                 },
+                (Numeric::Size(left), Numeric::Int32(right)) => match op {
+                    HirBinOp::Multiply => Value::Size(left * (right as usize)),
+                    _ => todo!(),
+                },
                 (_, _) => unreachable!(),
             };
             vm.op_stack.push(val);
@@ -356,6 +372,16 @@ pub async fn evaluate_block(
         }
         LinearNodeValue::FunctionID(x) => {
             vm.op_stack.push(Value::ID(*x));
+        }
+        LinearNodeValue::WriteTemporary(tmp, val) => {
+            evaluate_block(fns, params, vm, val).await?;
+            let Value::Size(val) = vm.op_stack.pop().unwrap() else {
+                unreachable!()
+            };
+            vm.temporaries[*tmp as usize] = val;
+        }
+        LinearNodeValue::ReadTemporary(tmp) => {
+            vm.op_stack.push(Value::Size(vm.temporaries[*tmp as usize]));
         }
     }
 
@@ -403,17 +429,15 @@ fn write(
             }
             TypeLayoutValue::FunctionPointer => todo!(),
         },
-        ExpressionType::Pointer(_, _) => {
+        ExpressionType::Array(_) | ExpressionType::Pointer(_, _) => {
             write_primitive(op_stack, memory, location);
         }
-        ExpressionType::Array(_) => todo!(),
         ExpressionType::Null => todo!(),
         ExpressionType::Nullable(_) => todo!(),
     }
 }
 
 fn write_primitive(op_stack: &mut Vec<Value>, memory: &mut [u8], location: usize) -> usize {
-    dbg!(location, op_stack.last().unwrap());
     let value = op_stack.pop().unwrap();
     let bytes = match &value {
         Value::Null => todo!(),
@@ -443,7 +467,6 @@ fn read(
     location: usize,
     ty: &ExpressionType,
 ) {
-    dbg!(ty);
     match ty {
         ExpressionType::Void | ExpressionType::Null => unreachable!("{:?}", ty),
         ExpressionType::Primitive(p) => {
@@ -487,10 +510,9 @@ fn read(
                 }
             }
         }
-        ExpressionType::Pointer(_, _) => {
+        ExpressionType::Array(_) | ExpressionType::Pointer(_, _) => {
             read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
         }
-        ExpressionType::Array(_) => todo!(),
         ExpressionType::Nullable(_) => todo!(),
     }
 }
@@ -526,5 +548,4 @@ fn read_primitive(
             Value::ID(*bytemuck::from_bytes(&memory[location..(location + 4)]))
         }
     });
-    dbg!(location, op_stack.last().unwrap());
 }

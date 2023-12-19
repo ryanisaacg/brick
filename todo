@@ -9,11 +9,14 @@ linear IR:
 - (maybe) AST rewrite the HIR to disambiguate between variable references and function references
 
 collections:
-- arrays in linear IR:
-    - heapalloc
-    - array support
-- index operator
-- array literals typechecking
+- arrays:
+    - array length literals
+    - array length
+    - array bounds checking
+    - array push to end
+    - automatically promote i32 and i64 to usize
+    - assign to array indices
+- differentiate index operator
 - dicts:
     - dict type syntax
     - typechecking
@@ -50,19 +53,23 @@ returns:
 references:
 - allow calls to associated functions through references (checking correct reference type)
 
-interfaces:
-- self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
-    - when making the method -> function conversion, automatically take a reference if it's required
-    - mandate by-reference parameters for interfaces
-- structs:
+static function vs method:
     - struct associated functions support "self"
         - self can be declared as a typeless parameter syntactically
         - self typechecks correctly
         - IR transforms code properly to pass self into the function
+    - union associated functions support "self"
+    - static associated functions:
+        - structs
+        - unions
+        - interfaces?
+
+interfaces:
+- self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
+    - when making the method -> function conversion, automatically take a reference if it's required
+    - mandate by-reference parameters for interfaces
 - unions:
     - unions can be converted to interfaces
-    - union associated functions support "self"
-    - union associated functions work
     - unions have associated functions
 - modules can be converted to interfaces:
     - produce and consume a nullpointer for the vtable call? (might mean we need to generate shim functions)
@@ -80,10 +87,6 @@ interfaces:
 interface adapters:
 - allow an interface to define an impl for itself on foreign types, limited version of Rust's traits
 
-static associated functions:
-- structs
-- unions
-- interfaces?
 
 arithmetic:
 - automatically promote integers to equivalent floats

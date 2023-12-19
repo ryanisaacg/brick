@@ -51,6 +51,37 @@ impl LinearNode {
             provenance: None,
         }
     }
+
+    fn if_node(
+        cond: LinearNode,
+        if_block: Vec<LinearNode>,
+        else_block: Option<Vec<LinearNode>>,
+        provenance: Option<SourceRange>,
+    ) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::If(Box::new(cond), if_block, else_block),
+            provenance,
+        }
+    }
+
+    fn ptr_op(op: HirBinOp, lhs: LinearNode, rhs: LinearNode) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::BinOp(
+                op,
+                PrimitiveType::PointerSize,
+                Box::new(lhs),
+                Box::new(rhs),
+            ),
+            provenance: None,
+        }
+    }
+
+    fn size(size: usize) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::Size(size),
+            provenance: None,
+        }
+    }
 }
 
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
@@ -61,6 +92,8 @@ pub enum LinearNodeValue {
     // Memory
     StackFrame,
     StackAlloc(usize),
+    /// Returns the new heap size
+    HeapAlloc(usize),
     /// Each parameter may only appear once in a given method body
     Parameter(usize),
     ReadMemory {
@@ -84,6 +117,11 @@ pub enum LinearNodeValue {
     Loop(Vec<LinearNode>),
 
     Sequence(Vec<LinearNode>),
+    /*
+     * Temporaries are bound to specific sequences
+     */
+    WriteTemporary(u8, Box<LinearNode>),
+    ReadTemporary(u8),
 
     BinOp(HirBinOp, PrimitiveType, Box<LinearNode>, Box<LinearNode>),
     Size(usize),
@@ -180,10 +218,12 @@ pub fn linearize_nodes(
                     };
                     linearize_nodes(declarations, stack_entries, stack_offset, else_block.into())
                 });
-                values.push(LinearNode {
-                    value: LinearNodeValue::If(Box::new(cond), if_block, else_block),
-                    provenance: node.provenance,
-                });
+                values.push(LinearNode::if_node(
+                    cond,
+                    if_block,
+                    else_block,
+                    node.provenance,
+                ));
             }
             HirNodeValue::While(cond, block) => {
                 let cond = lower_expression(declarations, stack_entries, *cond);
@@ -191,11 +231,12 @@ pub fn linearize_nodes(
                 vec_deque.push_back(*block);
                 let block = linearize_nodes(declarations, stack_entries, stack_offset, vec_deque);
                 values.push(LinearNode {
-                    value: LinearNodeValue::Loop(vec![LinearNode::new(LinearNodeValue::If(
-                        Box::new(cond),
+                    value: LinearNodeValue::Loop(vec![LinearNode::if_node(
+                        cond,
                         block,
                         Some(vec![LinearNode::new(LinearNodeValue::Break)]),
-                    ))]),
+                        None,
+                    )]),
                     provenance: node.provenance,
                 })
             }
@@ -272,7 +313,20 @@ fn lower_expression(
                 ty,
             }
         }
-        HirNodeValue::Index(_, _) => todo!(),
+        HirNodeValue::ArrayIndex(arr, idx) => {
+            let size = expression_type_size(declarations, &ty);
+            let arr = lower_expression(declarations, stack_entries, *arr);
+            let idx = lower_expression(declarations, stack_entries, *idx);
+            LinearNodeValue::ReadMemory {
+                location: Box::new(LinearNode::ptr_op(
+                    HirBinOp::Add,
+                    arr,
+                    LinearNode::ptr_op(HirBinOp::Multiply, LinearNode::size(size), idx),
+                )),
+                offset: 0,
+                ty,
+            }
+        }
 
         HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Return(_) => {
             unreachable!("all control flow must be removed from expressions in HIR")
@@ -314,7 +368,30 @@ fn lower_expression(
                     .collect(),
             )
         }
-        HirNodeValue::ArrayLiteral(_) => todo!(),
+        HirNodeValue::ArrayLiteral(values) => {
+            let ExpressionType::Array(inner_ty) = &ty else {
+                unreachable!()
+            };
+            let size = expression_type_size(declarations, inner_ty);
+
+            let mut instrs = vec![LinearNode::new(LinearNodeValue::WriteTemporary(
+                0,
+                Box::new(LinearNode::new(LinearNodeValue::HeapAlloc(
+                    size * values.len(),
+                ))),
+            ))];
+            instrs.extend(values.into_iter().enumerate().map(|(idx, value)| {
+                LinearNode::new(LinearNodeValue::WriteMemory {
+                    location: Box::new(LinearNode::new(LinearNodeValue::ReadTemporary(0))),
+                    offset: size * idx,
+                    ty: ty.clone(),
+                    value: Box::new(lower_expression(declarations, stack_entries, value)),
+                })
+            }));
+            instrs.push(LinearNode::new(LinearNodeValue::ReadTemporary(0)));
+
+            LinearNodeValue::Sequence(instrs)
+        }
         HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
         HirNodeValue::InterfaceAddress(table) => {
             let (table, offset) = lower_lvalue(declarations, stack_entries, *table);
@@ -383,13 +460,7 @@ fn lower_expression(
             }
 
             let (pointer, offset) = lower_lvalue(declarations, stack_entries, *value);
-            let offset = LinearNode::new(LinearNodeValue::Size(offset));
-            let pointer = LinearNode::new(LinearNodeValue::BinOp(
-                HirBinOp::Add,
-                PrimitiveType::PointerSize,
-                Box::new(pointer),
-                Box::new(offset),
-            ));
+            let pointer = LinearNode::ptr_op(HirBinOp::Add, pointer, LinearNode::size(offset));
             values.push(pointer);
 
             LinearNodeValue::Sequence(values)
@@ -415,7 +486,7 @@ fn lower_lvalue(
         HirNodeValue::Declaration(_) => todo!(),
         HirNodeValue::Call(_, _) => todo!(),
         HirNodeValue::Assignment(_, _) => todo!(),
-        HirNodeValue::Index(_, _) => todo!(),
+        HirNodeValue::ArrayIndex(_, _) => todo!(),
         HirNodeValue::BinOp(_, _, _) => todo!(),
         HirNodeValue::Return(_) => todo!(),
         HirNodeValue::Int(_) => todo!(),

@@ -142,7 +142,7 @@ impl HirNode {
                 child.visit_mut_recursive(callback);
             }
             HirNodeValue::Assignment(lhs, rhs)
-            | HirNodeValue::Index(lhs, rhs)
+            | HirNodeValue::ArrayIndex(lhs, rhs)
             | HirNodeValue::While(lhs, rhs)
             | HirNodeValue::BinOp(_, lhs, rhs) => {
                 lhs.visit_mut_recursive(callback);
@@ -205,7 +205,7 @@ impl HirNode {
                 child.visit_recursive(Some(self), callback);
             }
             HirNodeValue::Assignment(lhs, rhs)
-            | HirNodeValue::Index(lhs, rhs)
+            | HirNodeValue::ArrayIndex(lhs, rhs)
             | HirNodeValue::While(lhs, rhs)
             | HirNodeValue::BinOp(_, lhs, rhs) => {
                 lhs.visit_recursive(Some(self), callback);
@@ -244,7 +244,7 @@ pub enum HirNodeValue {
     Call(Box<HirNode>, Vec<HirNode>),
     Access(Box<HirNode>, String),
     Assignment(Box<HirNode>, Box<HirNode>),
-    Index(Box<HirNode>, Box<HirNode>),
+    ArrayIndex(Box<HirNode>, Box<HirNode>),
     BinOp(HirBinOp, Box<HirNode>, Box<HirNode>),
 
     Return(Box<HirNode>),

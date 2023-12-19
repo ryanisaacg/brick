@@ -1,22 +1,23 @@
-use brick::typecheck_module;
+use assert_matches::assert_matches;
+use brick::{eval, typecheck_module, Value};
 
 #[tokio::test]
 async fn arrays() {
-    typecheck_module(
-        "test",
-        "test",
+    let result = eval(
         r#"
 let array = [1, 2, 3, 4];
 let index = 0;
 let total = 0;
 while index < 4 {
     total += array[index];
+    index += 1;
 }
 total
-"#
-        .to_string(),
+"#,
     )
+    .await
     .unwrap();
+    assert_matches!(&result[..], [Value::Int32(10)]);
 }
 
 #[tokio::test]

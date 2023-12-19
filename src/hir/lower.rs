@@ -196,7 +196,7 @@ fn lower_node<'ast>(
                 }
                 BinOp::EqualTo => HirNodeValue::BinOp(HirBinOp::EqualTo, left, right),
                 BinOp::NotEquals => HirNodeValue::BinOp(HirBinOp::NotEquals, left, right),
-                BinOp::Index => HirNodeValue::Index(left, right),
+                BinOp::Index => HirNodeValue::ArrayIndex(left, right),
                 BinOp::Dot => unreachable!(),
             }
         }
