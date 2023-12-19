@@ -21,6 +21,24 @@ total
 }
 
 #[tokio::test]
+async fn array_assignments() {
+    let result = eval(
+        r#"
+let array = [0, 0, 0, 0];
+let index = 0;
+while index < 4 {
+    array[index] = index;
+    index += 1;
+}
+array[2]
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(2)]);
+}
+
+#[tokio::test]
 #[should_panic]
 async fn bad_arrays() {
     typecheck_module(

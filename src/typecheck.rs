@@ -539,7 +539,8 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::BinExpr(BinOp::Assignment, left, right) => {
             let left_ty = typecheck_expression(left, outer_scopes, current_scope, context)?;
-            validate_lvalue(left);
+            // TODO: actual type errors
+            assert!(validate_lvalue(left));
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
 
             if !is_assignable_to(&context.id_to_decl, left_ty, right) {
@@ -557,7 +558,7 @@ fn typecheck_expression<'a>(
             right,
         ) => {
             let left_ty = typecheck_expression(left, outer_scopes, current_scope, context)?;
-            validate_lvalue(left);
+            assert!(validate_lvalue(left));
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
 
             if !matches!(fully_dereference(left_ty), ExpressionType::Primitive(_))
@@ -762,19 +763,20 @@ fn typecheck_expression<'a>(
     Ok(node.ty.get().expect("just set"))
 }
 
-fn validate_lvalue(lvalue: &AstNode<'_>) {
-    let is_valid = match &lvalue.value {
+fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
+    match &lvalue.value {
         // TODO: remove this if I add auto-deref later
         AstNodeValue::Name { .. } => true,
         AstNodeValue::Deref(inner) => {
             let Some(ExpressionType::Pointer(kind, _)) = inner.ty.get() else {
                 unreachable!()
             };
-            *kind == PointerKind::Unique
+            *kind == PointerKind::Unique && validate_lvalue(inner)
         }
-        AstNodeValue::BinExpr(_, _, _) => todo!("support lhs dot operator"),
+        AstNodeValue::BinExpr(BinOp::Dot | BinOp::Index, lhs, _) => validate_lvalue(lhs),
 
-        AstNodeValue::FunctionDeclaration(_)
+        AstNodeValue::BinExpr(_, _, _)
+        | AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
         | AstNodeValue::StructDeclaration(_)
         | AstNodeValue::UnionDeclaration(_)
@@ -804,8 +806,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) {
         | AstNodeValue::SharedType(_)
         | AstNodeValue::ArrayType(_)
         | AstNodeValue::NullableType(_) => false,
-    };
-    assert!(is_valid);
+    }
 }
 
 fn resolve_name(

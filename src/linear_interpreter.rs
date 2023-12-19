@@ -189,7 +189,7 @@ pub async fn evaluate_block(
             std::mem::swap(&mut vm.temporaries, &mut temp);
         }
         LinearNodeValue::StackFrame => {
-            vm.op_stack.push(Value::Size(dbg!(vm.base_ptr)));
+            vm.op_stack.push(Value::Size(vm.base_ptr));
         }
         LinearNodeValue::StackAlloc(amount) => {
             vm.stack_ptr -= amount;
@@ -279,7 +279,6 @@ pub async fn evaluate_block(
             evaluate_block(fns, params, vm, lhs).await?;
             let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
-            dbg!(op, _ty, lhs, rhs);
             let val = match (left, right) {
                 (Numeric::Int32(left), Numeric::Int32(right)) => match op {
                     HirBinOp::Add => Value::Int32(left + right),
@@ -497,7 +496,7 @@ fn read(
                 }
                 TypeLayoutValue::Interface(fields) => {
                     println!("I'm an interface");
-                    let mut location = location + dbg!(layout.size);
+                    let mut location = location + layout.size;
                     for _ in fields.iter().rev() {
                         read_primitive(op_stack, memory, location, PrimitiveType::FunctionID);
                         location -= 4;

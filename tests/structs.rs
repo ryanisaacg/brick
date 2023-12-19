@@ -111,6 +111,30 @@ n.a.x + n.b.y * n.c.x
 }
 
 #[tokio::test]
+async fn assignment() {
+    let result = eval(
+        r#"
+struct Container {
+    padding: Point,
+    inner: Point,
+}
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+let val = Container { padding: Point { x: 0, y: 0 }, inner: Point { x: 0, y: 0 } };
+val.inner.x = 5;
+
+val.inner.x
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(5)]);
+}
+
+#[tokio::test]
 #[should_panic]
 async fn bad_associated_functions() {
     eval(

@@ -314,16 +314,11 @@ fn lower_expression(
             }
         }
         HirNodeValue::ArrayIndex(arr, idx) => {
-            let size = expression_type_size(declarations, &ty);
-            let arr = lower_expression(declarations, stack_entries, *arr);
-            let idx = lower_expression(declarations, stack_entries, *idx);
+            let (location, offset) =
+                array_index_location(declarations, stack_entries, *arr, *idx, &ty);
             LinearNodeValue::ReadMemory {
-                location: Box::new(LinearNode::ptr_op(
-                    HirBinOp::Add,
-                    arr,
-                    LinearNode::ptr_op(HirBinOp::Multiply, LinearNode::size(size), idx),
-                )),
-                offset: 0,
+                location: Box::new(location),
+                offset,
                 ty,
             }
         }
@@ -481,12 +476,14 @@ fn lower_lvalue(
         HirNodeValue::Dereference(inner) => {
             (lower_expression(declarations, stack_entries, *inner), 0)
         }
+        HirNodeValue::ArrayIndex(arr, idx) => {
+            array_index_location(declarations, stack_entries, *arr, *idx, &lvalue.ty)
+        }
 
         HirNodeValue::Parameter(_, _) => todo!(),
         HirNodeValue::Declaration(_) => todo!(),
         HirNodeValue::Call(_, _) => todo!(),
         HirNodeValue::Assignment(_, _) => todo!(),
-        HirNodeValue::ArrayIndex(_, _) => todo!(),
         HirNodeValue::BinOp(_, _, _) => todo!(),
         HirNodeValue::Return(_) => todo!(),
         HirNodeValue::Int(_) => todo!(),
@@ -558,6 +555,26 @@ fn access_location(
     };
 
     (lhs, offset)
+}
+
+fn array_index_location(
+    declarations: &HashMap<ID, TypeMemoryLayout>,
+    stack_entries: &HashMap<ID, usize>,
+    arr: HirNode,
+    idx: HirNode,
+    ty: &ExpressionType,
+) -> (LinearNode, usize) {
+    let size = expression_type_size(declarations, &ty);
+    let arr = lower_expression(declarations, stack_entries, arr);
+    let idx = lower_expression(declarations, stack_entries, idx);
+    (
+        LinearNode::ptr_op(
+            HirBinOp::Add,
+            arr,
+            LinearNode::ptr_op(HirBinOp::Multiply, LinearNode::size(size), idx),
+        ),
+        0,
+    )
 }
 
 // TODO: this should probably be determined by the backend...

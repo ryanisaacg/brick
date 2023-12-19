@@ -15,7 +15,6 @@ collections:
     - array bounds checking
     - array push to end
     - automatically promote i32 and i64 to usize
-    - assign to array indices
 - differentiate index operator
 - dicts:
     - dict type syntax

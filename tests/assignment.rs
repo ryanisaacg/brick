@@ -85,3 +85,16 @@ x
     .await
     .unwrap();
 }
+
+#[tokio::test]
+#[should_panic]
+async fn illegal_lvalue() {
+    eval(
+        r#"
+let x = 1;
+if true { x } else { x } = 5;
+"#,
+    )
+    .await
+    .unwrap();
+}
