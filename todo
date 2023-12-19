@@ -10,13 +10,13 @@ linear IR:
 
 collections:
 - arrays:
-    - array length literals
-    - array length
+    - automatically promote i32 and i64 to usize
+    - store array length
     - array bounds checking
     - array push to end
-    - automatically promote i32 and i64 to usize
-- differentiate index operator
+    - type syntax
 - dicts:
+    - differentiate index operator
     - dict type syntax
     - typechecking
     - interpreter
@@ -26,7 +26,6 @@ collections:
 - cells
 
 allocator:
-- support alloc
 - support dealloc
 
 interpreter:

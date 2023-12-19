@@ -195,6 +195,10 @@ pub async fn evaluate_block(
             vm.stack_ptr -= amount;
         }
         LinearNodeValue::HeapAlloc(amount) => {
+            evaluate_block(fns, params, vm, amount).await?;
+            let Some(Value::Size(amount)) = vm.op_stack.pop() else {
+                unreachable!()
+            };
             vm.op_stack.push(Value::Size(vm.heap_ptr));
             vm.heap_ptr += amount;
         }
@@ -374,8 +378,11 @@ pub async fn evaluate_block(
         }
         LinearNodeValue::WriteTemporary(tmp, val) => {
             evaluate_block(fns, params, vm, val).await?;
-            let Value::Size(val) = vm.op_stack.pop().unwrap() else {
-                unreachable!()
+            // TODO: get rid of this when we have integer promotion
+            let val = match vm.op_stack.pop().unwrap() {
+                Value::Int32(val) => val as usize,
+                Value::Size(val) => val,
+                _ => unreachable!(),
             };
             vm.temporaries[*tmp as usize] = val;
         }

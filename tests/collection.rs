@@ -39,6 +39,25 @@ array[2]
 }
 
 #[tokio::test]
+async fn array_assignments_length() {
+    let result = eval(
+        r#"
+let length = 30;
+let array = [0; length];
+let index = 0;
+while index < length {
+    array[index] = index;
+    index += 1;
+}
+array[length - 3]
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(27)]);
+}
+
+#[tokio::test]
 #[should_panic]
 async fn bad_arrays() {
     typecheck_module(

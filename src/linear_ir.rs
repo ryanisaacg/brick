@@ -82,6 +82,44 @@ impl LinearNode {
             provenance: None,
         }
     }
+
+    fn heap_alloc(size: usize) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::HeapAlloc(Box::new(LinearNode::size(size))),
+            provenance: None,
+        }
+    }
+
+    fn write_temp(tmp: u8, value: LinearNode) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::WriteTemporary(tmp, Box::new(value)),
+            provenance: None,
+        }
+    }
+
+    fn read_temp(tmp: u8) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::ReadTemporary(tmp),
+            provenance: None,
+        }
+    }
+
+    fn write_memory(
+        location: LinearNode,
+        offset: usize,
+        ty: ExpressionType,
+        value: LinearNode,
+    ) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::WriteMemory {
+                location: Box::new(location),
+                offset,
+                ty,
+                value: Box::new(value),
+            },
+            provenance: None,
+        }
+    }
 }
 
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
@@ -92,8 +130,8 @@ pub enum LinearNodeValue {
     // Memory
     StackFrame,
     StackAlloc(usize),
-    /// Returns the new heap size
-    HeapAlloc(usize),
+    /// Returns the heap pointer
+    HeapAlloc(Box<LinearNode>),
     /// Each parameter may only appear once in a given method body
     Parameter(usize),
     ReadMemory {
@@ -241,9 +279,6 @@ pub fn linearize_nodes(
                 })
             }
 
-            HirNodeValue::ArrayLiteral(_) => todo!(),
-            HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
-
             // TODO: auto-returns?
             _ => {
                 values.push(lower_expression(declarations, stack_entries, node));
@@ -369,15 +404,13 @@ fn lower_expression(
             };
             let size = expression_type_size(declarations, inner_ty);
 
-            let mut instrs = vec![LinearNode::new(LinearNodeValue::WriteTemporary(
+            let mut instrs = vec![LinearNode::write_temp(
                 0,
-                Box::new(LinearNode::new(LinearNodeValue::HeapAlloc(
-                    size * values.len(),
-                ))),
-            ))];
+                LinearNode::heap_alloc(size * values.len()),
+            )];
             instrs.extend(values.into_iter().enumerate().map(|(idx, value)| {
                 LinearNode::new(LinearNodeValue::WriteMemory {
-                    location: Box::new(LinearNode::new(LinearNodeValue::ReadTemporary(0))),
+                    location: Box::new(LinearNode::read_temp(0)),
                     offset: size * idx,
                     ty: ty.clone(),
                     value: Box::new(lower_expression(declarations, stack_entries, value)),
@@ -387,7 +420,66 @@ fn lower_expression(
 
             LinearNodeValue::Sequence(instrs)
         }
-        HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
+        HirNodeValue::ArrayLiteralLength(value, length) => {
+            let ExpressionType::Array(inner_ty) = &ty else {
+                unreachable!()
+            };
+            let size = expression_type_size(declarations, inner_ty);
+            let length = lower_expression(declarations, stack_entries, *length);
+
+            LinearNodeValue::Sequence(vec![
+                // Store the length of the array in a temporary
+                LinearNode::write_temp(0, length),
+                // Allocate memory and store the pointer in another temporary
+                LinearNode::write_temp(
+                    1,
+                    LinearNode::new(LinearNodeValue::HeapAlloc(Box::new(LinearNode::ptr_op(
+                        HirBinOp::Multiply,
+                        LinearNode::size(size),
+                        LinearNode::read_temp(0),
+                    )))),
+                ),
+                // Create a temporary for indexing the array as we fill it in
+                LinearNode::write_temp(2, LinearNode::size(0)),
+                LinearNode::new(LinearNodeValue::Loop(vec![LinearNode::if_node(
+                    // idx = length?
+                    LinearNode::ptr_op(
+                        HirBinOp::EqualTo,
+                        LinearNode::read_temp(2),
+                        LinearNode::read_temp(0),
+                    ),
+                    vec![LinearNode::new(LinearNodeValue::Break)],
+                    Some(vec![
+                        // *(ptr + idx * size) = value
+                        LinearNode::write_memory(
+                            LinearNode::ptr_op(
+                                HirBinOp::Add,
+                                LinearNode::read_temp(1),
+                                LinearNode::ptr_op(
+                                    HirBinOp::Multiply,
+                                    LinearNode::size(size),
+                                    LinearNode::read_temp(2),
+                                ),
+                            ),
+                            0,
+                            ty.clone(),
+                            lower_expression(declarations, stack_entries, *value),
+                        ),
+                        // idx += 1
+                        LinearNode::write_temp(
+                            2,
+                            LinearNode::ptr_op(
+                                HirBinOp::Add,
+                                LinearNode::read_temp(2),
+                                LinearNode::size(1),
+                            ),
+                        ),
+                    ]),
+                    None,
+                )])),
+                LinearNode::read_temp(1),
+            ])
+        }
         HirNodeValue::InterfaceAddress(table) => {
             let (table, offset) = lower_lvalue(declarations, stack_entries, *table);
             LinearNodeValue::ReadMemory {
@@ -498,11 +590,11 @@ fn lower_lvalue(
         HirNodeValue::If(_, _, _) => todo!(),
         HirNodeValue::While(_, _) => todo!(),
         HirNodeValue::StructLiteral(_, _) => todo!(),
-        HirNodeValue::ArrayLiteral(_) => todo!(),
-        HirNodeValue::ArrayLiteralLength(_, _) => todo!(),
         HirNodeValue::VtableCall(_, _, _) => todo!(),
         HirNodeValue::StructToInterface { .. } => todo!(),
         HirNodeValue::InterfaceAddress(_) => todo!(),
+
+        HirNodeValue::ArrayLiteral(_) | HirNodeValue::ArrayLiteralLength(_, _) => unreachable!(),
     }
 }
 
