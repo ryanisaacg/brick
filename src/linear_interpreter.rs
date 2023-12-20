@@ -389,6 +389,9 @@ pub async fn evaluate_block(
         LinearNodeValue::ReadTemporary(tmp) => {
             vm.op_stack.push(Value::Size(vm.temporaries[*tmp as usize]));
         }
+        LinearNodeValue::Discard => {
+            vm.op_stack.pop().unwrap();
+        }
     }
 
     Ok(())
@@ -435,7 +438,12 @@ fn write(
             }
             TypeLayoutValue::FunctionPointer => todo!(),
         },
-        ExpressionType::Array(_) | ExpressionType::Pointer(_, _) => {
+        ExpressionType::Array(_) => {
+            write_primitive(op_stack, memory, location);
+            write_primitive(op_stack, memory, location + 8);
+            write_primitive(op_stack, memory, location + 16);
+        }
+        ExpressionType::Pointer(_, _) => {
             write_primitive(op_stack, memory, location);
         }
         ExpressionType::Null => todo!(),
@@ -516,7 +524,12 @@ fn read(
                 }
             }
         }
-        ExpressionType::Array(_) | ExpressionType::Pointer(_, _) => {
+        ExpressionType::Array(_) => {
+            read_primitive(op_stack, memory, location + 16, PrimitiveType::PointerSize);
+            read_primitive(op_stack, memory, location + 8, PrimitiveType::PointerSize);
+            read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
+        }
+        ExpressionType::Pointer(_, _) => {
             read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
         }
         ExpressionType::Nullable(_) => todo!(),

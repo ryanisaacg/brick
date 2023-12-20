@@ -2,6 +2,19 @@ use assert_matches::assert_matches;
 use brick::{eval, typecheck_module, Value};
 
 #[tokio::test]
+async fn basic_index() {
+    let result = eval(
+        r#"
+let array = [30, 31, 32, 33, 34, 35, 36];
+array[5]
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(35)]);
+}
+
+#[tokio::test]
 async fn arrays() {
     let result = eval(
         r#"

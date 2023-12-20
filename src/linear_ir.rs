@@ -146,6 +146,8 @@ pub enum LinearNodeValue {
         value: Box<LinearNode>,
     },
 
+    Discard,
+
     // Control flow
     Call(Box<LinearNode>, Vec<LinearNode>),
     Return(Box<LinearNode>),
@@ -399,11 +401,14 @@ fn lower_expression(
             )
         }
         HirNodeValue::ArrayLiteral(values) => {
-            let ExpressionType::Array(inner_ty) = &ty else {
+            let ExpressionType::Array(inner_ty) = ty else {
                 unreachable!()
             };
-            let size = expression_type_size(declarations, inner_ty);
+            let size = expression_type_size(declarations, &inner_ty);
 
+            let length = values.len();
+
+            let inner_ty = *inner_ty;
             let mut instrs = vec![LinearNode::write_temp(
                 0,
                 LinearNode::heap_alloc(size * values.len()),
@@ -412,20 +417,25 @@ fn lower_expression(
                 LinearNode::new(LinearNodeValue::WriteMemory {
                     location: Box::new(LinearNode::read_temp(0)),
                     offset: size * idx,
-                    ty: ty.clone(),
+                    ty: inner_ty.clone(),
                     value: Box::new(lower_expression(declarations, stack_entries, value)),
                 })
             }));
+            // capacity
+            instrs.push(LinearNode::size(length));
+            // length
+            instrs.push(LinearNode::size(length));
             instrs.push(LinearNode::new(LinearNodeValue::ReadTemporary(0)));
 
             LinearNodeValue::Sequence(instrs)
         }
         HirNodeValue::ArrayLiteralLength(value, length) => {
-            let ExpressionType::Array(inner_ty) = &ty else {
+            let ExpressionType::Array(inner_ty) = ty else {
                 unreachable!()
             };
-            let size = expression_type_size(declarations, inner_ty);
+            let size = expression_type_size(declarations, &inner_ty);
             let length = lower_expression(declarations, stack_entries, *length);
+            let inner_ty = *inner_ty;
 
             LinearNodeValue::Sequence(vec![
                 // Store the length of the array in a temporary
@@ -462,7 +472,7 @@ fn lower_expression(
                                 ),
                             ),
                             0,
-                            ty.clone(),
+                            inner_ty.clone(),
                             lower_expression(declarations, stack_entries, *value),
                         ),
                         // idx += 1
@@ -477,6 +487,8 @@ fn lower_expression(
                     ]),
                     None,
                 )])),
+                LinearNode::read_temp(0),
+                LinearNode::read_temp(0),
                 LinearNode::read_temp(1),
             ])
         }
@@ -656,15 +668,24 @@ fn array_index_location(
     idx: HirNode,
     ty: &ExpressionType,
 ) -> (LinearNode, usize) {
-    let size = expression_type_size(declarations, &ty);
-    let arr = lower_expression(declarations, stack_entries, arr);
+    let size = expression_type_size(declarations, ty);
     let idx = lower_expression(declarations, stack_entries, idx);
+    let arr = lower_expression(declarations, stack_entries, arr);
     (
-        LinearNode::ptr_op(
-            HirBinOp::Add,
-            arr,
-            LinearNode::ptr_op(HirBinOp::Multiply, LinearNode::size(size), idx),
-        ),
+        LinearNode::new(LinearNodeValue::Sequence(vec![
+            LinearNode::write_temp(
+                0,
+                LinearNode::ptr_op(HirBinOp::Multiply, LinearNode::size(size), idx),
+            ),
+            LinearNode::write_temp(1, arr),
+            LinearNode::new(LinearNodeValue::Discard),
+            LinearNode::new(LinearNodeValue::Discard),
+            LinearNode::ptr_op(
+                HirBinOp::Add,
+                LinearNode::read_temp(0),
+                LinearNode::read_temp(1),
+            ),
+        ])),
         0,
     )
 }
@@ -676,12 +697,13 @@ fn expression_type_size(
     declarations: &HashMap<ID, TypeMemoryLayout>,
     expr: &ExpressionType,
 ) -> usize {
+    // TODO: alignment
     match expr {
         ExpressionType::Void => 0,
         ExpressionType::Primitive(prim) => primitive_type_size(*prim),
         ExpressionType::DeclaredType(id) => declarations.get(id).unwrap().size(),
         ExpressionType::Pointer(_, _) => POINTER_SIZE,
-        ExpressionType::Array(_) => POINTER_SIZE,
+        ExpressionType::Array(_) => POINTER_SIZE * 3,
         ExpressionType::Null => 1,
         ExpressionType::Nullable(inner) => {
             // TODO: would this be an alignment issue?
