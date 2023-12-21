@@ -12,6 +12,7 @@ collections:
 - arrays:
     - array push to end
     - type syntax
+    - allow empty arrays to typecheck
 - dicts:
     - differentiate index operator
     - dict type syntax
@@ -22,6 +23,17 @@ collections:
 - rc's
 - cells
 
+borrow checker and lifetimes:
+- decide where in the stack borrowck happens (probably HIR?)
+- detect moves for objects:
+    - any use is a move
+    - borrows are not moves
+- shared borrow
+- unique borrow
+- copy vs clone vs affine vs linear?
+- drop (hard-coded)
+- drop (custom)
+
 allocator:
 - support dealloc
 
@@ -31,7 +43,7 @@ interpreter:
 syntax:
 - remove ; and , requirements?
 - keyword arguments
-- maybe separate syntax for i64 / f64
+- maybe separate syntax for i64 / f64 literals
 
 import support:
 - allow imports to have nested paths (sugar for recursively expanding?)
@@ -117,8 +129,6 @@ errors:
 - try operator returns an error if one exists
 - functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
 - allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
-
-borrow checker
 
 coroutines:
 - decide on some coroutine facility
