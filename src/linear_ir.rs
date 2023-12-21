@@ -168,6 +168,11 @@ pub enum LinearNodeValue {
     ReadTemporary(u8),
 
     BinOp(HirBinOp, PrimitiveType, Box<LinearNode>, Box<LinearNode>),
+    Cast {
+        value: Box<LinearNode>,
+        from: PrimitiveType,
+        to: PrimitiveType,
+    },
     Size(usize),
     Int(i64),
     Float(f64),
@@ -568,6 +573,11 @@ fn lower_expression(
 
             LinearNodeValue::Sequence(values)
         }
+        HirNodeValue::NumericCast { value, from, to } => LinearNodeValue::Cast {
+            value: Box::new(lower_expression(declarations, stack_entries, *value)),
+            from,
+            to,
+        },
     };
 
     LinearNode { value, provenance }
@@ -611,6 +621,7 @@ fn lower_lvalue(
         HirNodeValue::InterfaceAddress(_) => todo!(),
 
         HirNodeValue::ArrayLiteral(_) | HirNodeValue::ArrayLiteralLength(_, _) => unreachable!(),
+        HirNodeValue::NumericCast { .. } => todo!(),
     }
 }
 

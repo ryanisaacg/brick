@@ -118,7 +118,7 @@ pub struct InterfaceType {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
     Char,
-    String,
+    String, // TODO: should this be a non-primitive type?
     Int32,
     Float32,
     Int64,
@@ -482,7 +482,7 @@ fn typecheck_expression<'a>(
                         typecheck_expression(index, outer_scopes, current_scope, context)?;
                     if !is_assignable_to(
                         &context.id_to_decl,
-                        &ExpressionType::Primitive(PrimitiveType::Int32),
+                        &ExpressionType::Primitive(PrimitiveType::PointerSize),
                         index_ty,
                     ) {
                         return Err(TypecheckError::TypeMismatch {
@@ -502,15 +502,17 @@ fn typecheck_expression<'a>(
             right,
         ) => {
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
-            let ExpressionType::Primitive(left) = fully_dereference(left) else {
+            let ExpressionType::Primitive(_) = fully_dereference(left) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
-            let ExpressionType::Primitive(right) = fully_dereference(right) else {
+            let ExpressionType::Primitive(_) = fully_dereference(right) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
-            if left == right {
-                ExpressionType::Primitive(*left)
+            if is_assignable_to(&context.id_to_decl, left, right) {
+                left.clone()
+            } else if is_assignable_to(&context.id_to_decl, right, left) {
+                right.clone()
             } else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
@@ -820,13 +822,13 @@ fn resolve_name(
         .cloned()
 }
 
-// TODO
-fn is_assignable_to(
+pub fn is_assignable_to(
     id_to_decl: &HashMap<ID, &StaticDeclaration>,
     left: &ExpressionType,
     right: &ExpressionType,
 ) -> bool {
     use ExpressionType::*;
+    use PrimitiveType::*;
 
     match (left, right) {
         // Kinda a special case, but a function that returns void should accept a void block
@@ -853,7 +855,12 @@ fn is_assignable_to(
         (Nullable(left), right) => is_assignable_to(id_to_decl, left, right),
         (_, Nullable(_)) => false,
 
-        // TODO: support auto-widening of primitive types
+        (Primitive(Float32), Primitive(Int32))
+        | (Primitive(Float64), Primitive(Int32))
+        | (Primitive(Float64), Primitive(Int64))
+        | (Primitive(Int64), Primitive(Int32))
+        | (Primitive(Float64), Primitive(Float32))
+        | (Primitive(PointerSize), Primitive(Int32)) => true,
         (Primitive(left), Primitive(right)) => left == right,
         (Primitive(_), _) => false,
 

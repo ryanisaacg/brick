@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use brick::{eval, typecheck_module, Value};
+use brick::{eval, Value};
 
 #[tokio::test]
 async fn basic_index() {

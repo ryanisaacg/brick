@@ -4,10 +4,13 @@ use crate::{
     id::ID,
     parser::AstNode,
     provenance::SourceRange,
-    typecheck::{ExpressionType, StaticDeclaration, TypecheckedFile},
+    typecheck::{
+        is_assignable_to, ExpressionType, PrimitiveType, StaticDeclaration, TypecheckedFile,
+    },
 };
 
 mod auto_deref_dot;
+mod auto_numeric_cast;
 mod interface_conversion_pass;
 mod lower;
 mod rewrite_associated_functions;
@@ -21,6 +24,7 @@ pub fn lower_module<'ast>(
     module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
     interface_conversion_pass::rewrite(&mut module, declarations);
     auto_deref_dot::auto_deref_dot(&mut module);
+    auto_numeric_cast::auto_numeric_cast(&mut module, declarations);
 
     module
 }
@@ -138,6 +142,7 @@ impl HirNode {
             | HirNodeValue::Dereference(child)
             | HirNodeValue::ArrayLiteralLength(child, _)
             | HirNodeValue::Return(child)
+            | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::StructToInterface { value: child, .. } => {
                 child.visit_mut_recursive(callback);
             }
@@ -190,16 +195,25 @@ impl HirNode {
             | HirNodeValue::Parameter(_, _)
             | HirNodeValue::VariableReference(_)
             | HirNodeValue::Access(_, _)
-            | HirNodeValue::ArrayIndex(_, _)
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
             | HirNodeValue::TakeUnique(_)
             | HirNodeValue::TakeShared(_)
             | HirNodeValue::Dereference(_)
-            | HirNodeValue::BinOp(_, _, _)
             | HirNodeValue::InterfaceAddress(_)
+            | HirNodeValue::NumericCast { .. }
             | HirNodeValue::StructToInterface { .. }
             | HirNodeValue::Declaration(_) => {}
+            HirNodeValue::ArrayIndex(_, idx) => {
+                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), idx);
+            }
+            HirNodeValue::BinOp(_, lhs, rhs) => {
+                if is_assignable_to(declarations, &lhs.ty, &rhs.ty) {
+                    callback(&lhs.ty, rhs);
+                } else {
+                    callback(&rhs.ty, lhs);
+                }
+            }
             HirNodeValue::VtableCall(_, fn_id, params) => {
                 let Some(StaticDeclaration::Func(func)) = declarations.get(fn_id) else {
                     unreachable!();
@@ -237,7 +251,10 @@ impl HirNode {
                 }
             }
             // TODO: heterogenous collections
-            HirNodeValue::ArrayLiteral(_) | HirNodeValue::ArrayLiteralLength(_, _) => {}
+            HirNodeValue::ArrayLiteral(_) => {}
+            HirNodeValue::ArrayLiteralLength(_, len) => {
+                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), len);
+            }
         }
     }
 
@@ -274,6 +291,7 @@ impl HirNode {
             | HirNodeValue::Dereference(child)
             | HirNodeValue::ArrayLiteralLength(child, _)
             | HirNodeValue::Return(child)
+            | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::StructToInterface { value: child, .. } => {
                 child.visit_recursive(Some(self), callback);
             }
@@ -328,6 +346,11 @@ pub enum HirNodeValue {
     Null,
     CharLiteral(char),
     StringLiteral(String),
+    NumericCast {
+        value: Box<HirNode>,
+        from: PrimitiveType,
+        to: PrimitiveType,
+    },
 
     TakeUnique(Box<HirNode>),
     TakeShared(Box<HirNode>),

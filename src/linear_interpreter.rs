@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, future::Future, pin::Pin, sync::Arc};
 
 use async_recursion::async_recursion;
 
@@ -78,7 +78,7 @@ pub enum Function {
     Extern(Arc<ExternBinding>),
 }
 
-impl std::fmt::Debug for Function {
+impl Debug for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Function::Ir(inner) => write!(f, "Function::Ir({:?})", inner),
@@ -109,7 +109,7 @@ impl std::fmt::Debug for Function {
 pub enum Unwind {
     Return(Value),
     Break,
-    Aborted
+    Aborted,
 }
 
 pub struct VM {
@@ -351,10 +351,6 @@ pub async fn evaluate_block(
                     HirBinOp::EqualTo => Value::Bool(left == right),
                     HirBinOp::NotEquals => Value::Bool(left != right),
                 },
-                (Numeric::Size(left), Numeric::Int32(right)) => match op {
-                    HirBinOp::Multiply => Value::Size(left * (right as usize)),
-                    _ => todo!(),
-                },
                 (_, _) => unreachable!(),
             };
             vm.op_stack.push(val);
@@ -385,11 +381,8 @@ pub async fn evaluate_block(
         }
         LinearNodeValue::WriteTemporary(tmp, val) => {
             evaluate_block(fns, params, vm, val).await?;
-            // TODO: get rid of this when we have integer promotion
-            let val = match vm.op_stack.pop().unwrap() {
-                Value::Int32(val) => val as usize,
-                Value::Size(val) => val,
-                _ => unreachable!(),
+            let Value::Size(val) = vm.op_stack.pop().unwrap() else {
+                unreachable!()
             };
             vm.temporaries[*tmp as usize] = val;
         }
@@ -402,6 +395,68 @@ pub async fn evaluate_block(
         LinearNodeValue::TopOfStack => {}
         LinearNodeValue::Abort => {
             return Err(Unwind::Aborted);
+        }
+        LinearNodeValue::Cast { value, from: _, to } => {
+            evaluate_block(fns, params, vm, value).await?;
+            let val = vm.op_stack.pop().unwrap();
+            vm.op_stack.push(match val {
+                Value::Null | Value::String(_) | Value::ID(_) | Value::Bool(_) | Value::Char(_) => {
+                    unreachable!()
+                }
+                Value::Size(_) => todo!(),
+                Value::Int32(val) => match to {
+                    PrimitiveType::Int32 => Value::Int32(val),
+                    PrimitiveType::Int64 => Value::Int64(val as i64),
+                    PrimitiveType::Float32 => Value::Float32(val as f32),
+                    PrimitiveType::Float64 => Value::Float64(val as f64),
+                    PrimitiveType::PointerSize => Value::Size(val as usize),
+                    PrimitiveType::String
+                    | PrimitiveType::Bool
+                    | PrimitiveType::FunctionID
+                    | PrimitiveType::Char => {
+                        unreachable!()
+                    }
+                },
+                Value::Int64(val) => match to {
+                    PrimitiveType::Int32 => Value::Int32(val as i32),
+                    PrimitiveType::Int64 => Value::Int64(val),
+                    PrimitiveType::Float32 => Value::Float32(val as f32),
+                    PrimitiveType::Float64 => Value::Float64(val as f64),
+                    PrimitiveType::PointerSize => Value::Size(val as usize),
+                    PrimitiveType::String
+                    | PrimitiveType::Bool
+                    | PrimitiveType::FunctionID
+                    | PrimitiveType::Char => {
+                        unreachable!()
+                    }
+                },
+                Value::Float32(val) => match to {
+                    PrimitiveType::Int32 => Value::Int32(val as i32),
+                    PrimitiveType::Int64 => Value::Int64(val as i64),
+                    PrimitiveType::Float32 => Value::Float32(val),
+                    PrimitiveType::Float64 => Value::Float64(val as f64),
+                    PrimitiveType::PointerSize => Value::Size(val as usize),
+                    PrimitiveType::String
+                    | PrimitiveType::Bool
+                    | PrimitiveType::FunctionID
+                    | PrimitiveType::Char => {
+                        unreachable!()
+                    }
+                },
+                Value::Float64(val) => match to {
+                    PrimitiveType::Int32 => Value::Int32(val as i32),
+                    PrimitiveType::Int64 => Value::Int64(val as i64),
+                    PrimitiveType::Float32 => Value::Float32(val as f32),
+                    PrimitiveType::Float64 => Value::Float64(val),
+                    PrimitiveType::PointerSize => Value::Size(val as usize),
+                    PrimitiveType::String
+                    | PrimitiveType::Bool
+                    | PrimitiveType::FunctionID
+                    | PrimitiveType::Char => {
+                        unreachable!()
+                    }
+                },
+            });
         }
     }
 
