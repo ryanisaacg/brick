@@ -168,6 +168,79 @@ impl HirNode {
         }
     }
 
+    // TODO: could use a better name
+    pub fn walk_expected_types_for_children_mut(
+        &mut self,
+        declarations: &HashMap<ID, &StaticDeclaration>,
+        mut callback: impl FnMut(&ExpressionType, &mut HirNode),
+    ) {
+        self.walk_expected_types_for_children_mut_recursive(declarations, &mut callback);
+    }
+
+    fn walk_expected_types_for_children_mut_recursive(
+        &mut self,
+        declarations: &HashMap<ID, &StaticDeclaration>,
+        callback: &mut impl FnMut(&ExpressionType, &mut HirNode),
+    ) {
+        match &mut self.value {
+            HirNodeValue::Int(_)
+            | HirNodeValue::Float(_)
+            | HirNodeValue::Bool(_)
+            | HirNodeValue::Null
+            | HirNodeValue::Parameter(_, _)
+            | HirNodeValue::VariableReference(_)
+            | HirNodeValue::Access(_, _)
+            | HirNodeValue::ArrayIndex(_, _)
+            | HirNodeValue::CharLiteral(_)
+            | HirNodeValue::StringLiteral(_)
+            | HirNodeValue::TakeUnique(_)
+            | HirNodeValue::TakeShared(_)
+            | HirNodeValue::Dereference(_)
+            | HirNodeValue::BinOp(_, _, _)
+            | HirNodeValue::InterfaceAddress(_)
+            | HirNodeValue::StructToInterface { .. }
+            | HirNodeValue::Declaration(_) => {}
+            HirNodeValue::VtableCall(_, fn_id, params) => {
+                let Some(StaticDeclaration::Func(func)) = declarations.get(fn_id) else {
+                    unreachable!();
+                };
+                for (i, ty) in func.params.iter().enumerate() {
+                    callback(ty, &mut params[i]);
+                }
+            }
+            HirNodeValue::Call(lhs, params) => {
+                let ExpressionType::DeclaredType(id) = &lhs.ty else {
+                    unreachable!()
+                };
+                let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
+                    unreachable!()
+                };
+                for (i, ty) in func.params.iter().enumerate() {
+                    callback(ty, &mut params[i]);
+                }
+            }
+            HirNodeValue::Assignment(lhs, rhs) => {
+                callback(&lhs.ty, rhs);
+            }
+            HirNodeValue::Return(_) => {
+                // TODO: check return types
+            }
+            HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Sequence(_) => {
+                // TODO: check return types
+            }
+            HirNodeValue::StructLiteral(ty_id, fields) => {
+                let Some(StaticDeclaration::Struct(ty)) = declarations.get(ty_id) else {
+                    unreachable!();
+                };
+                for (name, field) in fields.iter_mut() {
+                    callback(ty.fields.get(name).expect("field present"), field);
+                }
+            }
+            // TODO: heterogenous collections
+            HirNodeValue::ArrayLiteral(_) | HirNodeValue::ArrayLiteralLength(_, _) => {}
+        }
+    }
+
     pub fn visit(&self, mut callback: impl FnMut(Option<&HirNode>, &HirNode)) {
         self.visit_recursive(None, &mut callback);
     }
