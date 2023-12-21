@@ -103,7 +103,8 @@ pub async fn interpret_code(
 
     let mut vm = VM::new(ty_declarations);
     for statement in statements {
-        let _ = evaluate_block(&functions, &mut [], &mut vm, &statement).await;
+        // TODO
+        evaluate_block(&functions, &mut [], &mut vm, &statement).await.unwrap();
     }
 
     Ok(vm.op_stack)

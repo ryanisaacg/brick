@@ -105,9 +105,11 @@ impl std::fmt::Debug for Function {
     }
 }*/
 
+#[derive(Debug)]
 pub enum Unwind {
     Return(Value),
     Break,
+    Aborted
 }
 
 pub struct VM {
@@ -140,7 +142,7 @@ pub async fn evaluate_function(
     params: &mut [Value],
     vm: &mut VM,
     fn_id: ID,
-) {
+) -> Result<(), Unwind> {
     let function = fns.get(&fn_id).unwrap();
     match function {
         Function::Ir(function) => {
@@ -155,6 +157,8 @@ pub async fn evaluate_function(
                 if let Err(Unwind::Return(val)) = result {
                     vm.op_stack.push(val);
                     break;
+                } else {
+                    result?;
                 }
             }
 
@@ -162,11 +166,14 @@ pub async fn evaluate_function(
             let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
             vm.stack_ptr = vm.base_ptr;
             vm.base_ptr = base_ptr;
+
+            Ok(())
         }
         Function::Extern(ext) => {
             if let Some(returned) = ext(params.to_vec()).await {
                 vm.op_stack.push(returned);
             }
+            Ok(())
         }
     }
 }
@@ -246,7 +253,7 @@ pub async fn evaluate_block(
                 .map(|_| vm.op_stack.pop().unwrap())
                 .collect();
 
-            evaluate_function(fns, &mut parameters[..], vm, fn_id).await;
+            evaluate_function(fns, &mut parameters[..], vm, fn_id).await?;
         }
         LinearNodeValue::Return(expr) => {
             evaluate_block(fns, params, vm, expr).await?;
@@ -391,6 +398,10 @@ pub async fn evaluate_block(
         }
         LinearNodeValue::Discard => {
             vm.op_stack.pop().unwrap();
+        }
+        LinearNodeValue::TopOfStack => {}
+        LinearNodeValue::Abort => {
+            return Err(Unwind::Aborted);
         }
     }
 

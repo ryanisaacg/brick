@@ -72,15 +72,26 @@ array[length - 3]
 
 #[tokio::test]
 #[should_panic]
-async fn bad_arrays() {
-    typecheck_module(
-        "test",
-        "test",
+async fn bad_array_assignment() {
+    eval(
         r#"
 let array = [1, 2, 3, 4];
 array[2] = "test";
-"#
-        .to_string(),
+"#,
     )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+#[should_panic]
+async fn array_index_overflow() {
+    eval(
+        r#"
+let array = [1, 2, 3, 4];
+array[5]
+"#,
+    )
+    .await
     .unwrap();
 }

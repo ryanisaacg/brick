@@ -146,6 +146,8 @@ pub enum LinearNodeValue {
         value: Box<LinearNode>,
     },
 
+    // TODO: just full stack machine?
+    TopOfStack,
     Discard,
 
     // Control flow
@@ -155,6 +157,8 @@ pub enum LinearNodeValue {
     // TODO: labelled breaks?
     Break,
     Loop(Vec<LinearNode>),
+    // TODO: stack unwind?
+    Abort,
 
     Sequence(Vec<LinearNode>),
     /*
@@ -673,12 +677,31 @@ fn array_index_location(
     let arr = lower_expression(declarations, stack_entries, arr);
     (
         LinearNode::new(LinearNodeValue::Sequence(vec![
+            LinearNode::write_temp(3, idx),
             LinearNode::write_temp(
                 0,
-                LinearNode::ptr_op(HirBinOp::Multiply, LinearNode::size(size), idx),
+                LinearNode::ptr_op(
+                    HirBinOp::Multiply,
+                    LinearNode::size(size),
+                    LinearNode::read_temp(3),
+                ),
             ),
+            // pointer
             LinearNode::write_temp(1, arr),
-            LinearNode::new(LinearNodeValue::Discard),
+            // length
+            LinearNode::write_temp(2, LinearNode::new(LinearNodeValue::TopOfStack)),
+            LinearNode::if_node(
+                LinearNode::ptr_op(
+                    HirBinOp::GreaterEqualThan,
+                    // index
+                    LinearNode::read_temp(3),
+                    // length
+                    LinearNode::read_temp(2),
+                ),
+                vec![LinearNode::new(LinearNodeValue::Abort)],
+                None,
+                None,
+            ),
             LinearNode::new(LinearNodeValue::Discard),
             LinearNode::ptr_op(
                 HirBinOp::Add,
