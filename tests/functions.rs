@@ -89,3 +89,26 @@ x
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(2)]);
 }
+
+#[tokio::test]
+async fn complex_call() {
+    let result = eval(
+        r#"
+fn add(a: i32, b: i32): i32 {
+    a + b
+}
+
+add({
+    let x = 5;
+    x
+}, if 3 > 2 {
+    10
+} else {
+    -10
+})
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(15)]);
+}

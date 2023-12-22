@@ -98,3 +98,21 @@ if true { x } else { x } = 5;
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn conditional() {
+    let result = eval(
+        r#"
+let x = 1;
+if 1 + 1 == 2 {
+    x = 1000;
+} else {
+    x = -1000;
+}
+x
+    "#,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result[0], Value::Int32(1000));
+}

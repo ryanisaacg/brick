@@ -1,3 +1,5 @@
+- replace .get().unwrap() with []
+
 error reporting:
 - typecheck errors
 - error presentation

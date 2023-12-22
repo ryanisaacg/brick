@@ -14,6 +14,7 @@ mod auto_numeric_cast;
 mod interface_conversion_pass;
 mod lower;
 mod rewrite_associated_functions;
+mod simplify_sequence_expressions;
 
 pub fn lower_module<'ast>(
     module: TypecheckedFile<'ast>,
@@ -25,6 +26,8 @@ pub fn lower_module<'ast>(
     interface_conversion_pass::rewrite(&mut module, declarations);
     auto_deref_dot::auto_deref_dot(&mut module);
     auto_numeric_cast::auto_numeric_cast(&mut module, declarations);
+    simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
+    simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
 
     // TODO: control flow graph for top-level statements
 
@@ -120,10 +123,10 @@ impl HirNode {
     }
 
     fn visit_mut_recursive(&mut self, callback: &mut impl FnMut(&mut HirNode)) {
-        callback(self);
         self.children_mut(|child| {
             child.visit_mut_recursive(callback);
         });
+        callback(self);
     }
 
     pub fn children_mut<'a>(&'a mut self, mut callback: impl FnMut(&'a mut HirNode)) {
@@ -260,6 +263,83 @@ impl HirNode {
     }
 
     // TODO: could use a better name
+    pub fn walk_expected_types_for_children(
+        &self,
+        declarations: &HashMap<ID, &StaticDeclaration>,
+        mut callback: impl FnMut(&ExpressionType, &HirNode),
+    ) {
+        let callback = &mut callback;
+        match &self.value {
+            HirNodeValue::Int(_)
+            | HirNodeValue::Float(_)
+            | HirNodeValue::Bool(_)
+            | HirNodeValue::Null
+            | HirNodeValue::Parameter(_, _)
+            | HirNodeValue::VariableReference(_)
+            | HirNodeValue::Access(_, _)
+            | HirNodeValue::CharLiteral(_)
+            | HirNodeValue::StringLiteral(_)
+            | HirNodeValue::TakeUnique(_)
+            | HirNodeValue::TakeShared(_)
+            | HirNodeValue::Dereference(_)
+            | HirNodeValue::InterfaceAddress(_)
+            | HirNodeValue::NumericCast { .. }
+            | HirNodeValue::StructToInterface { .. }
+            | HirNodeValue::Declaration(_) => {}
+            HirNodeValue::ArrayIndex(_, idx) => {
+                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), idx);
+            }
+            HirNodeValue::BinOp(_, lhs, rhs) => {
+                if is_assignable_to(declarations, &lhs.ty, &rhs.ty) {
+                    callback(&lhs.ty, rhs);
+                } else {
+                    callback(&rhs.ty, lhs);
+                }
+            }
+            HirNodeValue::VtableCall(_, fn_id, params) => {
+                let Some(StaticDeclaration::Func(func)) = declarations.get(fn_id) else {
+                    unreachable!();
+                };
+                for (i, ty) in func.params.iter().enumerate() {
+                    callback(ty, &params[i]);
+                }
+            }
+            HirNodeValue::Call(lhs, params) => {
+                let ExpressionType::DeclaredType(id) = &lhs.ty else {
+                    unreachable!()
+                };
+                let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
+                    unreachable!()
+                };
+                for (i, ty) in func.params.iter().enumerate() {
+                    callback(ty, &params[i]);
+                }
+            }
+            HirNodeValue::Assignment(lhs, rhs) => {
+                callback(&lhs.ty, rhs);
+            }
+            HirNodeValue::Return(_) => {
+                // TODO: check return types
+            }
+            HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Sequence(_) => {
+                // TODO: check return types
+            }
+            HirNodeValue::StructLiteral(ty_id, fields) => {
+                let Some(StaticDeclaration::Struct(ty)) = declarations.get(ty_id) else {
+                    unreachable!();
+                };
+                for (name, field) in fields.iter() {
+                    callback(ty.fields.get(name).expect("field present"), field);
+                }
+            }
+            // TODO: heterogenous collections
+            HirNodeValue::ArrayLiteral(_) => {}
+            HirNodeValue::ArrayLiteralLength(_, len) => {
+                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), len);
+            }
+        }
+    }
+
     pub fn walk_expected_types_for_children_mut(
         &mut self,
         declarations: &HashMap<ID, &StaticDeclaration>,
