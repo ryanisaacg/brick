@@ -26,6 +26,8 @@ pub fn lower_module<'ast>(
     auto_deref_dot::auto_deref_dot(&mut module);
     auto_numeric_cast::auto_numeric_cast(&mut module, declarations);
 
+    // TODO: control flow graph for top-level statements
+
     module
 }
 
@@ -119,6 +121,16 @@ impl HirNode {
 
     fn visit_mut_recursive(&mut self, callback: &mut impl FnMut(&mut HirNode)) {
         callback(self);
+        self.children_mut(|child| {
+            child.visit_mut_recursive(callback);
+        });
+    }
+
+    pub fn children_mut<'a>(&'a mut self, mut callback: impl FnMut(&'a mut HirNode)) {
+        self.children_recursive_mut(&mut callback);
+    }
+
+    fn children_recursive_mut<'a>(&'a mut self, callback: &mut impl FnMut(&'a mut HirNode)) {
         match &mut self.value {
             HirNodeValue::Parameter(_, _)
             | HirNodeValue::VariableReference(_)
@@ -130,9 +142,9 @@ impl HirNode {
             | HirNodeValue::StringLiteral(_)
             | HirNodeValue::Null => {}
             HirNodeValue::Call(lhs, params) | HirNodeValue::VtableCall(lhs, _, params) => {
-                lhs.visit_mut_recursive(callback);
+                callback(lhs);
                 for param in params.iter_mut() {
-                    param.visit_mut_recursive(callback);
+                    callback(param);
                 }
             }
             HirNodeValue::Access(child, _)
@@ -144,30 +156,104 @@ impl HirNode {
             | HirNodeValue::Return(child)
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::StructToInterface { value: child, .. } => {
-                child.visit_mut_recursive(callback);
+                callback(child);
             }
             HirNodeValue::Assignment(lhs, rhs)
             | HirNodeValue::ArrayIndex(lhs, rhs)
             | HirNodeValue::While(lhs, rhs)
             | HirNodeValue::BinOp(_, lhs, rhs) => {
-                lhs.visit_mut_recursive(callback);
-                rhs.visit_mut_recursive(callback);
+                callback(lhs);
+                callback(rhs);
             }
             HirNodeValue::Sequence(children) | HirNodeValue::ArrayLiteral(children) => {
                 for child in children.iter_mut() {
-                    child.visit_mut_recursive(callback);
+                    callback(child);
                 }
             }
             HirNodeValue::If(cond, if_branch, else_branch) => {
-                cond.visit_mut_recursive(callback);
-                if_branch.visit_mut_recursive(callback);
+                callback(cond);
+                callback(if_branch);
                 if let Some(else_branch) = else_branch {
-                    else_branch.visit_mut_recursive(callback);
+                    callback(else_branch);
                 }
             }
             HirNodeValue::StructLiteral(_, fields) => {
                 for field in fields.values_mut() {
-                    field.visit_mut_recursive(callback);
+                    callback(field);
+                }
+            }
+        }
+    }
+
+    pub fn visit(&self, mut callback: impl FnMut(Option<&HirNode>, &HirNode)) {
+        self.visit_recursive(None, &mut callback);
+    }
+
+    fn visit_recursive(
+        &self,
+        parent: Option<&HirNode>,
+        callback: &mut impl FnMut(Option<&HirNode>, &HirNode),
+    ) {
+        callback(parent, self);
+        self.children(|child| {
+            child.visit_recursive(Some(self), callback);
+        });
+    }
+
+    pub fn children<'a>(&'a self, mut callback: impl FnMut(&'a HirNode)) {
+        self.children_recursive(&mut callback);
+    }
+
+    fn children_recursive<'a>(&'a self, callback: &mut impl FnMut(&'a HirNode)) {
+        match &self.value {
+            HirNodeValue::Parameter(_, _)
+            | HirNodeValue::VariableReference(_)
+            | HirNodeValue::Declaration(_)
+            | HirNodeValue::Int(_)
+            | HirNodeValue::Float(_)
+            | HirNodeValue::Bool(_)
+            | HirNodeValue::CharLiteral(_)
+            | HirNodeValue::StringLiteral(_)
+            | HirNodeValue::Null => {}
+            HirNodeValue::Call(lhs, params) | HirNodeValue::VtableCall(lhs, _, params) => {
+                callback(lhs);
+                for param in params.iter() {
+                    callback(param);
+                }
+            }
+            HirNodeValue::Access(child, _)
+            | HirNodeValue::InterfaceAddress(child)
+            | HirNodeValue::TakeUnique(child)
+            | HirNodeValue::TakeShared(child)
+            | HirNodeValue::Dereference(child)
+            | HirNodeValue::ArrayLiteralLength(child, _)
+            | HirNodeValue::Return(child)
+            | HirNodeValue::NumericCast { value: child, .. }
+            | HirNodeValue::StructToInterface { value: child, .. } => {
+                callback(child);
+            }
+            HirNodeValue::Assignment(lhs, rhs)
+            | HirNodeValue::ArrayIndex(lhs, rhs)
+            | HirNodeValue::While(lhs, rhs)
+            | HirNodeValue::BinOp(_, lhs, rhs) => {
+                callback(lhs);
+                callback(rhs);
+            }
+            HirNodeValue::Sequence(children) | HirNodeValue::ArrayLiteral(children) => {
+                for child in children.iter() {
+                    callback(child);
+                }
+            }
+            HirNodeValue::If(cond, if_branch, else_branch) => {
+                callback(cond);
+                callback(if_branch);
+                if let Some(else_branch) = else_branch {
+                    callback(else_branch);
+                }
+            }
+            HirNodeValue::StructLiteral(_, fields) => {
+                for field in fields.values() {
+                    callback(field);
                 }
             }
         }
@@ -179,14 +265,7 @@ impl HirNode {
         declarations: &HashMap<ID, &StaticDeclaration>,
         mut callback: impl FnMut(&ExpressionType, &mut HirNode),
     ) {
-        self.walk_expected_types_for_children_mut_recursive(declarations, &mut callback);
-    }
-
-    fn walk_expected_types_for_children_mut_recursive(
-        &mut self,
-        declarations: &HashMap<ID, &StaticDeclaration>,
-        callback: &mut impl FnMut(&ExpressionType, &mut HirNode),
-    ) {
+        let callback = &mut callback;
         match &mut self.value {
             HirNodeValue::Int(_)
             | HirNodeValue::Float(_)
@@ -254,70 +333,6 @@ impl HirNode {
             HirNodeValue::ArrayLiteral(_) => {}
             HirNodeValue::ArrayLiteralLength(_, len) => {
                 callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), len);
-            }
-        }
-    }
-
-    pub fn visit(&self, mut callback: impl FnMut(Option<&HirNode>, &HirNode)) {
-        self.visit_recursive(None, &mut callback);
-    }
-
-    fn visit_recursive(
-        &self,
-        parent: Option<&HirNode>,
-        callback: &mut impl FnMut(Option<&HirNode>, &HirNode),
-    ) {
-        callback(parent, self);
-        match &self.value {
-            HirNodeValue::Parameter(_, _)
-            | HirNodeValue::VariableReference(_)
-            | HirNodeValue::Declaration(_)
-            | HirNodeValue::Int(_)
-            | HirNodeValue::Float(_)
-            | HirNodeValue::Bool(_)
-            | HirNodeValue::CharLiteral(_)
-            | HirNodeValue::StringLiteral(_)
-            | HirNodeValue::Null => {}
-            HirNodeValue::Call(lhs, params) | HirNodeValue::VtableCall(lhs, _, params) => {
-                lhs.visit_recursive(Some(self), callback);
-                for param in params.iter() {
-                    param.visit_recursive(Some(self), callback);
-                }
-            }
-            HirNodeValue::Access(child, _)
-            | HirNodeValue::InterfaceAddress(child)
-            | HirNodeValue::TakeUnique(child)
-            | HirNodeValue::TakeShared(child)
-            | HirNodeValue::Dereference(child)
-            | HirNodeValue::ArrayLiteralLength(child, _)
-            | HirNodeValue::Return(child)
-            | HirNodeValue::NumericCast { value: child, .. }
-            | HirNodeValue::StructToInterface { value: child, .. } => {
-                child.visit_recursive(Some(self), callback);
-            }
-            HirNodeValue::Assignment(lhs, rhs)
-            | HirNodeValue::ArrayIndex(lhs, rhs)
-            | HirNodeValue::While(lhs, rhs)
-            | HirNodeValue::BinOp(_, lhs, rhs) => {
-                lhs.visit_recursive(Some(self), callback);
-                rhs.visit_recursive(Some(self), callback);
-            }
-            HirNodeValue::Sequence(children) | HirNodeValue::ArrayLiteral(children) => {
-                for child in children.iter() {
-                    child.visit_recursive(Some(self), callback);
-                }
-            }
-            HirNodeValue::If(cond, if_branch, else_branch) => {
-                cond.visit_recursive(Some(self), callback);
-                if_branch.visit_recursive(Some(self), callback);
-                if let Some(else_branch) = else_branch {
-                    else_branch.visit_recursive(Some(self), callback);
-                }
-            }
-            HirNodeValue::StructLiteral(_, fields) => {
-                for field in fields.values() {
-                    field.visit_recursive(Some(self), callback);
-                }
             }
         }
     }
