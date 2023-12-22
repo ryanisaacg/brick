@@ -556,7 +556,6 @@ fn read(
             let layout = layouts.get(id).unwrap();
             match &layout.value {
                 TypeLayoutValue::Structure(fields) => {
-                    println!("I'm a struct");
                     for (_, offset, ty) in fields.iter().rev() {
                         let location = location + offset;
                         match ty {

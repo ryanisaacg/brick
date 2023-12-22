@@ -1,11 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{
-    arena::ArenaNode,
-    hir::HirNodeValue,
-    id::ID,
-    parser::{AstNode, AstNodeValue, IfDeclaration},
-};
+use crate::{hir::HirNodeValue, id::ID};
 
 // Based on https://ics.uci.edu/~lopes/teaching/inf212W12/readings/rep-analysis-soft.pdf
 
@@ -204,27 +199,29 @@ fn create_graph_for_node<'a>(
         | Parameter(_, _)
         | Access(_, _)
         | ArrayIndex(_, _)
-        | InterfaceAddress(_)
-        | Sequence(_) => {
+        | InterfaceAddress(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));
+
+            (start, start)
+        }
+        Sequence(children) => {
+            let start = graph.add_node(IntermediateNode::Empty);
             let mut current_node = start;
 
-            current.children(|child| {
+            for child in children.iter() {
                 let (start_child, end_child) = create_graph_for_node(child, graph, exit);
                 graph.add_edge(current_node, start_child, CfgEdge::Flow);
                 current_node = end_child;
-            });
+            }
 
             (start, current_node)
         }
-        Return(expr) => {
+        Return(_) => {
             let node = graph.add_node(IntermediateNode::Expression(current));
-            let (start_inner, end_inner) = create_graph_for_node(expr, graph, exit);
-            graph.add_edge(node, start_inner, CfgEdge::Flow);
-            graph.add_edge(end_inner, exit, CfgEdge::Goto);
+            graph.add_edge(node, exit, CfgEdge::Goto);
 
             // TODO: what should the exit be?
-            (start_inner, end_inner)
+            (node, node)
         }
         If(condition, if_branch, _else_branch) => {
             // TODO: else branch

@@ -182,6 +182,7 @@ impl<'a> Declarations<'a> {
 pub struct TypecheckedFile<'a> {
     pub functions: Vec<TypecheckedFunction<'a>>,
     pub associated_functions: HashMap<ID, Vec<TypecheckedFunction<'a>>>,
+    // TODO: convert this into a Sequence?
     pub top_level_statements: Vec<&'a AstNode<'a>>,
 }
 

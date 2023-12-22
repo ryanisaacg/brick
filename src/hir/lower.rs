@@ -111,15 +111,21 @@ fn lower_node<'ast>(
         AstNodeValue::Statement(inner) => return lower_node(decls, inner),
 
         AstNodeValue::Declaration(_lvalue, _type_hint, rvalue) => {
-            let lvalue = Box::new(HirNode::from_ast(
-                node,
-                HirNodeValue::VariableReference(node.id),
-                rvalue.ty.get().expect("type filled in").clone(),
-            ));
+            let lvalue = Box::new(HirNode {
+                id: ID::new(),
+                value: HirNodeValue::VariableReference(node.id),
+                ty: rvalue.ty.get().expect("type filled in").clone(),
+                provenance: Some(node.provenance.clone()),
+            });
             let rvalue = lower_node_alloc(decls, rvalue);
             let statements = vec![
                 HirNode::from_ast(node, HirNodeValue::Declaration(node.id), rvalue.ty.clone()),
-                HirNode::from_ast_void(node, HirNodeValue::Assignment(lvalue, rvalue)),
+                HirNode {
+                    id: ID::new(),
+                    value: HirNodeValue::Assignment(lvalue, rvalue),
+                    ty: ExpressionType::Void,
+                    provenance: Some(node.provenance.clone()),
+                },
             ];
             HirNodeValue::Sequence(statements)
         }

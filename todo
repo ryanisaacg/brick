@@ -26,12 +26,9 @@ collections:
 - cells
 
 borrow checker and lifetimes:
-- decide where in the stack borrowck happens (probably HIR?)
-- detect moves for objects:
-    - any use is a move
-    - borrows are not moves
 - shared borrow
 - unique borrow
+- mark custom types as copy
 - copy vs clone vs affine vs linear?
 - drop (hard-coded)
 - drop (custom)

@@ -44,6 +44,7 @@ x.length2()
 }
 
 #[tokio::test]
+#[should_panic] // TODO: allow marking structs as copy
 async fn nested_structs() {
     let result = eval(
         r#"

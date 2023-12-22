@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 
+use borrowck::BorrowError;
 use hir::HirModule;
 pub use linear_interpreter::Value;
 use linear_interpreter::{evaluate_block, ExternBinding, VM};
@@ -16,6 +17,7 @@ use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
 
 mod arena;
+mod borrowck;
 mod hir;
 mod id;
 mod linear_interpreter;
@@ -28,7 +30,7 @@ mod typecheck;
 use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
-use crate::{hir::lower_module, id::ID, typecheck::ModuleType};
+use crate::{borrowck::borrow_check, hir::lower_module, id::ID, typecheck::ModuleType};
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -36,6 +38,8 @@ pub enum CompileError {
     ParseError(#[from] ParseError),
     #[error("filesystem error: {0} {1}")]
     FilesystemError(io::Error, String),
+    #[error("borrow check errors: {0:?}")]
+    BorrowcheckError(Vec<BorrowError>),
 }
 
 pub fn bind_fn<F>(closure: impl Fn(Vec<Value>) -> F + Send + Sync + 'static) -> Arc<ExternBinding>
@@ -145,7 +149,7 @@ pub fn typecheck_module(
         });
     }
 
-    let modules = modules
+    let mut modules: HashMap<_, _> = modules
         .par_iter()
         .map(|(name, contents)| {
             let types = typecheck(contents.iter(), name, &declarations).unwrap();
@@ -153,6 +157,12 @@ pub fn typecheck_module(
             (name.clone(), ir)
         })
         .collect();
+    for module in modules.values_mut() {
+        let errors = borrow_check(module, &id_decls);
+        if !errors.is_empty() {
+            return Err(CompileError::BorrowcheckError(errors));
+        }
+    }
 
     Ok(CompilationResults {
         modules,
