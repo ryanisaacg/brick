@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
-use crate::{hir::HirNodeValue, id::ID};
+use crate::{
+    hir::{HirNode, HirNodeValue},
+    id::ID,
+};
 
 // Based on https://ics.uci.edu/~lopes/teaching/inf212W12/readings/rep-analysis-soft.pdf
 
 use petgraph::stable_graph::{NodeIndex, StableGraph};
-
-use super::HirNode;
 
 pub type ControlFlowGraph<'a> = StableGraph<CfgNode<'a>, CfgEdge>;
 
@@ -35,7 +36,7 @@ pub fn build_control_flow_graph(body: &HirNode) -> FunctionCFG {
         intermediate_entrance,
         cfg.add_node(CfgNode::Block {
             expressions: Vec::new(),
-            moves: HashMap::new(),
+            liveness: HashMap::new(),
         }),
     );
     // Calculate leaders
@@ -56,7 +57,7 @@ pub fn build_control_flow_graph(body: &HirNode) -> FunctionCFG {
             end,
             cfg.add_node(CfgNode::Block {
                 expressions: Vec::new(),
-                moves: HashMap::new(),
+                liveness: HashMap::new(),
             }),
         );
         // All nodes following a goto are also leaders
@@ -73,12 +74,14 @@ pub fn build_control_flow_graph(body: &HirNode) -> FunctionCFG {
                 endpoint,
                 cfg.add_node(CfgNode::Block {
                     expressions: Vec::new(),
-                    moves: HashMap::new(),
+                    liveness: HashMap::new(),
                 }),
             );
         }
     }
-    let cfg_end = cfg.add_node(CfgNode::Exit);
+    let cfg_end = cfg.add_node(CfgNode::Exit {
+        liveness: HashMap::new(),
+    });
     // Create blocks
     for (node_idx, leader_idx) in leaders.iter() {
         collect_blocks_to_add(
@@ -132,15 +135,20 @@ fn collect_blocks_to_add<'a>(
 pub enum CfgNode<'a> {
     Block {
         expressions: Vec<&'a HirNode>,
-        moves: HashMap<ID, Move>,
+        liveness: HashMap<ID, Liveness>,
     },
-    Exit,
+    Exit {
+        liveness: HashMap<ID, Liveness>,
+    },
 }
 
 #[derive(Debug)]
-pub enum Move {
+pub enum Liveness {
     Moved,
-    MaybeMoved(u32),
+    ParentConditionalMoved(u32),
+
+    Referenced(ID),
+    ParentReferenced,
 }
 
 #[derive(Debug)]
