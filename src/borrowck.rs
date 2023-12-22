@@ -57,7 +57,7 @@ fn detect_moves_node(
         }
     }
 
-    let mut moves = HashMap::new();
+    let mut parent_moves = HashMap::new();
     let mut incoming_connections = cfg.neighbors_directed(node, Direction::Incoming).detach();
     let mut edge_count = 0;
     while let Some((_edge, connector)) = incoming_connections.next(cfg) {
@@ -70,20 +70,20 @@ fn detect_moves_node(
             unreachable!()
         };
         for var_id in incoming_moves.keys() {
-            match moves.get_mut(var_id) {
+            match parent_moves.get_mut(var_id) {
                 Some(Move::MaybeMoved(count)) => {
                     *count += 1;
                 }
                 Some(Move::Moved) => unreachable!(),
                 None => {
-                    moves.insert(*var_id, Move::MaybeMoved(1));
+                    parent_moves.insert(*var_id, Move::MaybeMoved(1));
                 }
             }
         }
         edge_count += 1;
     }
 
-    for mv in moves.values_mut() {
+    for mv in parent_moves.values_mut() {
         match mv {
             Move::MaybeMoved(count) if *count == edge_count => {
                 *mv = Move::Moved;
@@ -96,6 +96,7 @@ fn detect_moves_node(
     let CfgNode::Block { expressions, moves } = cfg.node_weight_mut(node).unwrap() else {
         return;
     };
+    *moves = parent_moves;
     for expr in expressions.iter() {
         if matches!(
             &expr.value,

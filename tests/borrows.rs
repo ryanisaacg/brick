@@ -20,3 +20,26 @@ fn test(): Data {
         panic!("{:?}", result);
     }
 }
+
+#[tokio::test]
+async fn conditional_move() {
+    let result = eval(
+        r#"
+struct Data {}
+
+fn test(): Data {
+    let x = Data{};
+    if 1 > 5 {
+        let y = x;
+    }
+    x
+}
+    "#,
+    )
+    .await;
+    if let Err(CompileError::BorrowcheckError(error)) = result {
+        assert_eq!(error.len(), 1);
+    } else {
+        panic!("{:?}", result);
+    }
+}
