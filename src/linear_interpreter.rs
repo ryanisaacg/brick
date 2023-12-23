@@ -48,30 +48,9 @@ pub enum Numeric {
     Size(usize),
 }
 
-pub type ExternBinding =
-    dyn Fn(Vec<Value>) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>> + Send + Sync;
-
-/*#[derive(Clone, Debug)]
-pub enum Value {
-    Null,
-    Int(i64),
-    Float(f64),
-    Bool(bool),
-    Char(char),
-    String(String),
-    Array(Vec<Value>),
-    Struct(HashMap<String, Value>),
-}
-
-impl Value {
-    fn to_numeric(&self) -> Option<Numeric> {
-        match self {
-            Value::Int(x) => Some(Numeric::Int(*x)),
-            Value::Float(x) => Some(Numeric::Float(*x)),
-            _ => None,
-        }
-    }
-}*/
+pub type ExternBinding = dyn Fn(&mut [u8], Vec<Value>) -> Pin<Box<dyn Future<Output = Option<Value>> + Send>>
+    + Send
+    + Sync;
 
 pub enum Function {
     Ir(LinearFunction),
@@ -86,24 +65,6 @@ impl Debug for Function {
         }
     }
 }
-
-/*pub async fn evaluate_function(
-    fns: &HashMap<ID, Function>,
-    function: &Function,
-    params: Vec<Value>,
-) -> Option<Value> {
-    match function {
-        Function::Ir(func) => {
-            let mut ctx = Context::new(params);
-            ctx.add_fns(fns);
-            match evaluate_node(fns, &mut ctx, &func.body).await {
-                Ok(_) => ctx.value_stack.pop(),
-                Err(Unwind::Returned(val)) => Some(val),
-            }
-        }
-        Function::Extern(ext) => ext(params).await,
-    }
-}*/
 
 #[derive(Debug)]
 pub enum Unwind {
@@ -170,7 +131,7 @@ pub async fn evaluate_function(
             Ok(())
         }
         Function::Extern(ext) => {
-            if let Some(returned) = ext(params.to_vec()).await {
+            if let Some(returned) = ext(&mut vm.memory[..], params.to_vec()).await {
                 vm.op_stack.push(returned);
             }
             Ok(())

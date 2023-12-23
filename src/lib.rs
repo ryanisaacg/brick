@@ -42,15 +42,26 @@ pub enum CompileError {
     BorrowcheckError(Vec<BorrowError>),
 }
 
-pub fn bind_fn<F>(closure: impl Fn(Vec<Value>) -> F + Send + Sync + 'static) -> Arc<ExternBinding>
+pub fn bind_fn<F>(
+    closure: impl Fn(&mut [u8], Vec<Value>) -> F + Send + Sync + 'static,
+) -> Arc<ExternBinding>
 where
     F: Future<Output = Option<Value>> + Send + Sync + 'static,
 {
-    Arc::new(move |x| Box::pin(closure(x)))
+    Arc::new(move |memory, stack| Box::pin(closure(memory, stack)))
 }
 
 pub async fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
     let val = interpret_code("eval", source.to_string(), HashMap::new()).await?;
+
+    Ok(val)
+}
+
+pub async fn eval_with_bindings(
+    source: &str,
+    bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
+) -> Result<Vec<Value>, CompileError> {
+    let val = interpret_code("eval", source.to_string(), bindings).await?;
 
     Ok(val)
 }

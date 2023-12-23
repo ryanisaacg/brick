@@ -6,7 +6,7 @@ async fn main() {
     let mut bindings = HashMap::new();
     bindings.insert(
         "read".to_string(),
-        bind_fn(|_| async {
+        bind_fn(|_, _| async {
             let mut input = String::new();
             stdin()
                 .read_line(&mut input)
@@ -18,7 +18,7 @@ async fn main() {
     );
     bindings.insert(
         "write".to_string(),
-        bind_fn(|values| async move {
+        bind_fn(|_, values| async move {
             let Value::Int32(input) = values[0] else {
                 panic!("expected int");
             };
@@ -28,7 +28,7 @@ async fn main() {
     );
     bindings.insert(
         "prompt".to_string(),
-        bind_fn(|values| async move {
+        bind_fn(|_, values| async move {
             let Value::String(input) = &values[0] else {
                 panic!("expected string");
             };
@@ -42,7 +42,7 @@ async fn main() {
     );
     bindings.insert(
         "print".to_string(),
-        bind_fn(|values| async move {
+        bind_fn(|_, values| async move {
             let Value::String(input) = &values[0] else {
                 panic!("expected string");
             };

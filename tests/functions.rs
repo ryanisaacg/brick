@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use brick::{bind_fn, eval, interpret_code, Value};
+use brick::{bind_fn, eval, eval_with_bindings, interpret_code, Value};
 
 #[tokio::test]
 async fn add() {
@@ -64,7 +64,7 @@ async fn extern_binding() {
 
     bindings.insert(
         "next".to_string(),
-        bind_fn(|_| async move {
+        bind_fn(|_, _| async move {
             let x = unsafe { INCR_VALUE };
             unsafe {
                 INCR_VALUE += 1;
@@ -111,4 +111,37 @@ add({
     .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(15)]);
+}
+
+#[tokio::test]
+async fn extern_pointer() {
+    let mut funcs = HashMap::new();
+    funcs.insert(
+        "increment".to_string(),
+        bind_fn(|memory, mut stack| {
+            std::future::ready({
+                let Value::Size(pointer) = stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                let size = std::mem::size_of::<i32>();
+                let mut value: i32 = *bytemuck::from_bytes(&memory[pointer..(pointer + size)]);
+                value += 1;
+                memory[pointer..(pointer + size)].copy_from_slice(bytemuck::bytes_of(&value));
+
+                None
+            })
+        }),
+    );
+    let result = eval_with_bindings(
+        r#"
+extern fn increment(a: unique i32);
+let x = 10;
+increment(unique x);
+x
+"#,
+        funcs,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(11)]);
 }
