@@ -6,6 +6,7 @@ use crate::id::ID;
 
 use super::control_flow_graph::{CfgNode, ControlFlowGraph, FunctionCFG, Liveness};
 
+/// Node ID -> Vars to drop
 pub fn find_drop_points(cfg: &FunctionCFG) -> HashMap<ID, Vec<ID>> {
     let mut map = HashMap::new();
     let CfgNode::Exit { liveness } = cfg.cfg.node_weight(cfg.end).unwrap() else {
@@ -36,7 +37,7 @@ fn find_drop_points_node(
             }
             // The variable is referenced here. Drop after this
             Liveness::Referenced(id) => {
-                map.entry(*variable).or_default().push(id);
+                map.entry(id).or_default().push(*variable);
             }
         }
     }

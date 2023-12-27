@@ -111,3 +111,60 @@ incremented(ref x);
     .await
     .unwrap();
 }
+
+// TODO: borrow check non-main
+#[tokio::test]
+#[should_panic]
+async fn mutable_borrow_already_borrowed() {
+    eval(
+        r#"
+fn main(): i32 {
+    let x = 30;
+    let immutable_reference = ref x;
+    let mutable_reference = unique x;
+    *mutable_reference += 1;
+    *immutable_reference
+}
+"#,
+    )
+    .await
+    .unwrap();
+}
+
+// TODO: borrow check non-main
+#[tokio::test]
+#[should_panic]
+async fn double_mutable_borrow() {
+    eval(
+        r#"
+fn main(): i32 {
+    let x = 30;
+    let ref1 = unique x;
+    let ref2 = unique x;
+    *ref1 += 1;
+    *ref1
+}
+"#,
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn many_immutable_borrows() {
+    let result = eval(
+        r#"
+fn main(): i32 {
+    let x = 30;
+    let ref1 = ref x;
+    let ref2 = ref x;
+    *ref1
+}
+
+main()
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(30)]);
+}

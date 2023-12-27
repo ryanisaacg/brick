@@ -13,6 +13,7 @@ collections:
     - array push to end
     - type syntax
     - allow empty arrays to typecheck
+    - length() method on arrays
 - dicts:
     - differentiate index operator
     - dict type syntax
@@ -24,8 +25,9 @@ collections:
 - cells
 
 borrow checker and lifetimes:
-- shared borrow
-- unique borrow
+- check borrows for function calls
+- allow disjoint borrows of struct fields
+- correctly mark references through collection indices
 - mark custom types as copy
 - copy vs clone vs affine vs linear?
 - drop (hard-coded)
