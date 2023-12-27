@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use petgraph::{stable_graph::NodeIndex, Direction};
 
-use crate::id::ID;
+use crate::id::{NodeID, VariableID};
 
 use super::control_flow_graph::{CfgNode, ControlFlowGraph, FunctionCFG, Liveness};
 
 /// Node ID -> Vars to drop
-pub fn find_drop_points(cfg: &FunctionCFG) -> HashMap<ID, Vec<ID>> {
+pub fn find_drop_points(cfg: &FunctionCFG) -> HashMap<NodeID, Vec<VariableID>> {
     let mut map = HashMap::new();
     let CfgNode::Exit { liveness } = cfg.cfg.node_weight(cfg.end).unwrap() else {
         unreachable!()
@@ -20,8 +20,8 @@ pub fn find_drop_points(cfg: &FunctionCFG) -> HashMap<ID, Vec<ID>> {
 
 fn find_drop_points_node(
     cfg: &ControlFlowGraph,
-    map: &mut HashMap<ID, Vec<ID>>,
-    variable: &ID,
+    map: &mut HashMap<NodeID, Vec<VariableID>>,
+    variable: &VariableID,
     node: NodeIndex,
 ) {
     for parent in cfg.neighbors_directed(node, Direction::Incoming) {

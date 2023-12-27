@@ -3,22 +3,24 @@ use std::collections::HashMap;
 use super::{HirBinOp, HirFunction, HirModule, HirNode, HirNodeValue};
 
 use crate::{
-    id::ID,
+    id::{NodeID, TypeID},
     parser::{AstNode, AstNodeValue, BinOp, IfDeclaration},
     typecheck::{
-        fully_dereference, ExpressionType, StaticDeclaration, TypecheckedFile, TypecheckedFunction,
+        find_func, fully_dereference, ExpressionType, StaticDeclaration, TypecheckedFile,
+        TypecheckedFunction,
     },
 };
 
 pub fn lower_module<'ast>(
     module: TypecheckedFile<'ast>,
-    declarations: &HashMap<ID, &'ast StaticDeclaration>,
+    declarations: &HashMap<TypeID, &'ast StaticDeclaration>,
 ) -> HirModule {
     let TypecheckedFile {
-        associated_functions: _, // TODO
+        associated_functions: _,
         functions,
         top_level_statements,
     } = module;
+    dbg!(&declarations);
     HirModule {
         functions: functions
             .into_iter()
@@ -32,37 +34,38 @@ pub fn lower_module<'ast>(
 }
 
 fn lower_function<'ast>(
-    decls: &HashMap<ID, &'ast StaticDeclaration>,
+    decls: &HashMap<TypeID, &'ast StaticDeclaration>,
     func: TypecheckedFunction<'ast>,
 ) -> HirFunction {
-    let Some(StaticDeclaration::Func(func_ty)) = decls.get(&func.id) else {
-        panic!();
-    };
+    let func_ty = find_func(decls, func.id).unwrap();
     let mut instructions: Vec<_> = func
         .func
         .params
         .iter()
         .enumerate()
-        .map(|(i, param)| {
+        .map(|(i, (id, param))| {
             HirNode::generated_with_id(
                 param.id,
-                HirNodeValue::Parameter(i, param.id),
+                HirNodeValue::Parameter(i, *id),
                 func_ty.params[i].clone(),
             )
         })
         .collect();
-    let body = lower_node(decls, func.func.body);
-    let ty = body.ty.clone();
-    instructions.push(body);
+    let mut body = lower_node(decls, func.func.body);
+    let HirNodeValue::Sequence(instrs) = &mut body.value else {
+        unreachable!()
+    };
+    instructions.append(instrs);
+    std::mem::swap(&mut instructions, instrs);
     HirFunction {
         id: func.id,
         name: func.name,
-        body: HirNode::generated_with_id(func.id, HirNodeValue::Sequence(instructions), ty),
+        body,
     }
 }
 
 fn lower_node<'ast>(
-    decls: &HashMap<ID, &'ast StaticDeclaration>,
+    decls: &HashMap<TypeID, &'ast StaticDeclaration>,
     node: &'ast AstNode<'ast>,
 ) -> HirNode {
     let value = match &node.value {
@@ -112,16 +115,20 @@ fn lower_node<'ast>(
 
         AstNodeValue::Declaration(_lvalue, _type_hint, rvalue) => {
             let lvalue = Box::new(HirNode {
-                id: ID::new(),
-                value: HirNodeValue::VariableReference(node.id),
+                id: NodeID::new(),
+                value: HirNodeValue::VariableReference(node.id.into()),
                 ty: rvalue.ty.get().expect("type filled in").clone(),
                 provenance: Some(node.provenance.clone()),
             });
             let rvalue = lower_node_alloc(decls, rvalue);
             let statements = vec![
-                HirNode::from_ast(node, HirNodeValue::Declaration(node.id), rvalue.ty.clone()),
+                HirNode::from_ast(
+                    node,
+                    HirNodeValue::Declaration(node.id.as_variable()),
+                    rvalue.ty.clone(),
+                ),
                 HirNode {
-                    id: ID::new(),
+                    id: NodeID::new(),
                     value: HirNodeValue::Assignment(lvalue, rvalue),
                     ty: ExpressionType::Void,
                     provenance: Some(node.provenance.clone()),
@@ -148,7 +155,8 @@ fn lower_node<'ast>(
                         .exports
                         .get(name)
                         .expect("module export to exist")
-                        .id(),
+                        .id()
+                        .into(),
                 )
             } else {
                 let left = lower_node_alloc(decls, left);
@@ -225,7 +233,7 @@ fn lower_node<'ast>(
                 .iter()
                 .map(|(name, field)| (name.clone(), lower_node(decls, field)))
                 .collect();
-            HirNodeValue::StructLiteral(*id, fields)
+            HirNodeValue::StructLiteral(id.as_type(), fields)
         }
         AstNodeValue::DictLiteral(_) => todo!(),
         AstNodeValue::ArrayLiteral(arr) => {
@@ -255,7 +263,7 @@ fn lower_node<'ast>(
 }
 
 fn lower_node_alloc<'ast>(
-    decls: &HashMap<ID, &'ast StaticDeclaration>,
+    decls: &HashMap<TypeID, &'ast StaticDeclaration>,
     node: &'ast AstNode<'ast>,
 ) -> Box<HirNode> {
     Box::new(lower_node(decls, node))

@@ -1,13 +1,16 @@
 use std::collections::HashMap;
 
 use crate::{
-    id::ID,
+    id::TypeID,
     typecheck::{ExpressionType, StaticDeclaration},
 };
 
 use super::{HirModule, HirNode, HirNodeValue};
 
-pub fn auto_numeric_cast(module: &mut HirModule, declarations: &HashMap<ID, &StaticDeclaration>) {
+pub fn auto_numeric_cast(
+    module: &mut HirModule,
+    declarations: &HashMap<TypeID, &StaticDeclaration>,
+) {
     module.visit_mut(|node| {
         node.walk_expected_types_for_children_mut(declarations, |ty, child| {
             let ExpressionType::Primitive(expected_ty) = ty else {

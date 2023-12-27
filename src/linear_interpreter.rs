@@ -4,7 +4,7 @@ use async_recursion::async_recursion;
 
 use crate::{
     hir::HirBinOp,
-    id::ID,
+    id::{FunctionID, TypeID},
     linear_ir::{
         LinearFunction, LinearNode, LinearNodeValue, TypeLayoutField, TypeLayoutValue,
         TypeMemoryLayout,
@@ -15,7 +15,7 @@ use crate::{
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Null,
-    ID(ID),
+    FunctionID(FunctionID),
     Size(usize),
     Int32(i32),
     Int64(i64),
@@ -76,7 +76,7 @@ pub enum Unwind {
 pub struct VM {
     pub memory: [u8; 1024],
     pub temporaries: [usize; 16],
-    pub layouts: HashMap<ID, TypeMemoryLayout>,
+    pub layouts: HashMap<TypeID, TypeMemoryLayout>,
     pub op_stack: Vec<Value>,
     pub base_ptr: usize,
     pub stack_ptr: usize,
@@ -84,7 +84,7 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(layouts: HashMap<ID, TypeMemoryLayout>) -> VM {
+    pub fn new(layouts: HashMap<TypeID, TypeMemoryLayout>) -> VM {
         let memory = [0; 1024];
         VM {
             memory,
@@ -99,11 +99,12 @@ impl VM {
 }
 
 pub async fn evaluate_function(
-    fns: &HashMap<ID, Function>,
+    fns: &HashMap<FunctionID, Function>,
     params: &mut [Value],
     vm: &mut VM,
-    fn_id: ID,
+    fn_id: FunctionID,
 ) -> Result<(), Unwind> {
+    dbg!(fn_id);
     let function = &fns[&fn_id];
     match function {
         Function::Ir(function) => {
@@ -142,7 +143,7 @@ pub async fn evaluate_function(
 // Kinda a hack: when we return, unwind the stack via Result
 #[async_recursion]
 pub async fn evaluate_block(
-    fns: &HashMap<ID, Function>,
+    fns: &HashMap<FunctionID, Function>,
     params: &mut [Value],
     vm: &mut VM,
     node: &LinearNode,
@@ -204,7 +205,7 @@ pub async fn evaluate_block(
         LinearNodeValue::Call(lhs, parameters) => {
             evaluate_block(fns, params, vm, lhs).await?;
             // TODO: should I figure out
-            let Some(Value::ID(fn_id)) = vm.op_stack.pop() else {
+            let Some(Value::FunctionID(fn_id)) = vm.op_stack.pop() else {
                 unreachable!()
             };
             for param in parameters.iter().rev() {
@@ -338,7 +339,7 @@ pub async fn evaluate_block(
             vm.op_stack.push(Value::String(x.clone()));
         }
         LinearNodeValue::FunctionID(x) => {
-            vm.op_stack.push(Value::ID(*x));
+            vm.op_stack.push(Value::FunctionID(*x));
         }
         LinearNodeValue::WriteTemporary(tmp, val) => {
             evaluate_block(fns, params, vm, val).await?;
@@ -361,7 +362,11 @@ pub async fn evaluate_block(
             evaluate_block(fns, params, vm, value).await?;
             let val = vm.op_stack.pop().unwrap();
             vm.op_stack.push(match val {
-                Value::Null | Value::String(_) | Value::ID(_) | Value::Bool(_) | Value::Char(_) => {
+                Value::Null
+                | Value::String(_)
+                | Value::Bool(_)
+                | Value::Char(_)
+                | Value::FunctionID(_) => {
                     unreachable!()
                 }
                 Value::Size(_) => todo!(),
@@ -426,7 +431,7 @@ pub async fn evaluate_block(
 
 fn write(
     op_stack: &mut Vec<Value>,
-    layouts: &HashMap<ID, TypeMemoryLayout>,
+    layouts: &HashMap<TypeID, TypeMemoryLayout>,
     memory: &mut [u8],
     location: usize,
     ty: &ExpressionType,
@@ -482,7 +487,7 @@ fn write_primitive(op_stack: &mut Vec<Value>, memory: &mut [u8], location: usize
     let value = op_stack.pop().unwrap();
     let bytes = match &value {
         Value::Null => todo!(),
-        Value::ID(id) => bytemuck::bytes_of(id),
+        Value::FunctionID(id) => bytemuck::bytes_of(id),
         Value::Size(x) => {
             // lifetime issues
             let bytes = x.to_le_bytes();
@@ -503,7 +508,7 @@ fn write_primitive(op_stack: &mut Vec<Value>, memory: &mut [u8], location: usize
 
 fn read(
     op_stack: &mut Vec<Value>,
-    layouts: &HashMap<ID, TypeMemoryLayout>,
+    layouts: &HashMap<TypeID, TypeMemoryLayout>,
     memory: &[u8],
     location: usize,
     ty: &ExpressionType,
@@ -545,8 +550,9 @@ fn read(
                     read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
                 }
                 TypeLayoutValue::FunctionPointer => {
-                    let fn_id: ID = *bytemuck::from_bytes(&memory[location..(location + 4)]);
-                    op_stack.push(Value::ID(fn_id));
+                    let fn_id: FunctionID =
+                        *bytemuck::from_bytes(&memory[location..(location + 4)]);
+                    op_stack.push(Value::FunctionID(fn_id));
                 }
             }
         }
@@ -590,7 +596,7 @@ fn read_primitive(
             Value::Size(base_ptr)
         }
         PrimitiveType::FunctionID => {
-            Value::ID(*bytemuck::from_bytes(&memory[location..(location + 4)]))
+            Value::FunctionID(*bytemuck::from_bytes(&memory[location..(location + 4)]))
         }
     });
 }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    id::ID,
+    id::TypeID,
     parser::{
         AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
         InterfaceDeclarationValue, NameAndType, StructDeclarationValue, UnionDeclarationValue,
@@ -37,7 +37,7 @@ pub fn resolve_top_level_declarations(
 ) -> Result<HashMap<String, StaticDeclaration>, TypecheckError> {
     let name_to_type_id = names_to_declarations
         .iter()
-        .map(|(name, node)| (name.as_str(), node.id))
+        .map(|(name, _)| (name.as_str(), TypeID::new()))
         .collect();
     names_to_declarations
         .iter()
@@ -51,7 +51,7 @@ pub fn resolve_top_level_declarations(
 }
 
 fn resolve_declaration(
-    names_to_type_id: &HashMap<&str, ID>,
+    names_to_type_id: &HashMap<&str, TypeID>,
     node: &AstNode<'_>,
     is_associated: bool,
 ) -> Result<StaticDeclaration, TypecheckError> {
@@ -59,10 +59,10 @@ fn resolve_declaration(
         AstNodeValue::StructDeclaration(StructDeclarationValue {
             fields,
             associated_functions,
-            ..
+            name,
         }) => {
-            let fields = fields.iter().map(|NameAndType { id: _, name, type_ }| {
-                Ok((name.clone(), resolve_type_expr(names_to_type_id, type_)?))
+            let fields = fields.iter().map(|NameAndType { id: _, name, ty }| {
+                Ok((name.clone(), resolve_type_expr(names_to_type_id, ty)?))
             });
             let associated_functions = associated_functions
                 .iter()
@@ -84,13 +84,14 @@ fn resolve_declaration(
             let fields = fields.collect::<Result<_, _>>()?;
 
             StaticDeclaration::Struct(StructType {
-                id: node.id,
+                id: names_to_type_id[name.as_str()],
                 fields,
                 associated_functions,
             })
         }
         AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
             associated_functions,
+            name,
             ..
         }) => {
             let associated_functions = associated_functions
@@ -116,35 +117,71 @@ fn resolve_declaration(
                 .collect::<Result<HashMap<_, _>, _>>()?;
 
             StaticDeclaration::Interface(InterfaceType {
-                id: node.id,
+                id: names_to_type_id[name.as_str()],
                 associated_functions,
             })
         }
-        AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, .. }) => {
+        AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, name, .. }) => {
             StaticDeclaration::Union(UnionType {
-                id: node.id,
+                id: names_to_type_id[name.as_str()],
                 variants: variants
                     .iter()
-                    .map(|NameAndType { id: _, name, type_ }| {
-                        Ok((name.clone(), resolve_type_expr(names_to_type_id, type_)?))
-                    })
+                    .map(
+                        |NameAndType {
+                             id: _,
+                             name,
+                             ty: type_,
+                         }| {
+                            Ok((name.clone(), resolve_type_expr(names_to_type_id, type_)?))
+                        },
+                    )
                     .collect::<Result<HashMap<_, _>, _>>()?,
             })
         }
-        // TODO: union
         AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-            params, returns, ..
-        })
-        | AstNodeValue::RequiredFunction(FunctionHeaderValue {
-            params, returns, ..
-        })
-        | AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
-            params, returns, ..
+            params,
+            returns,
+            id,
+            name,
+            ..
         }) => StaticDeclaration::Func(FuncType {
-            id: node.id,
+            id: names_to_type_id
+                .get(name.as_str())
+                .copied()
+                .unwrap_or_else(TypeID::new),
+            func_id: *id,
             params: params
                 .iter()
-                .map(|NameAndType { type_, .. }| resolve_type_expr(names_to_type_id, type_))
+                .map(|(_, NameAndType { ty: type_, .. })| {
+                    resolve_type_expr(names_to_type_id, type_)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            returns: returns
+                .as_ref()
+                .map(|returns| resolve_type_expr(names_to_type_id, returns))
+                .unwrap_or(Ok(ExpressionType::Void))?,
+            is_associated,
+        }),
+        AstNodeValue::RequiredFunction(FunctionHeaderValue {
+            params,
+            returns,
+            id,
+            name,
+        })
+        | AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
+            params,
+            returns,
+            id,
+            name,
+        }) => StaticDeclaration::Func(FuncType {
+            id: names_to_type_id
+                .get(name.as_str())
+                .copied()
+                .unwrap_or_else(TypeID::new),
+            func_id: *id,
+            params: params
+                .iter()
+                .map(|NameAndType { ty: type_, .. }| resolve_type_expr(names_to_type_id, type_))
                 .collect::<Result<Vec<_>, _>>()?,
             returns: returns
                 .as_ref()
@@ -157,7 +194,7 @@ fn resolve_declaration(
 }
 
 pub fn resolve_type_expr(
-    name_to_type_id: &HashMap<&str, ID>,
+    name_to_type_id: &HashMap<&str, TypeID>,
     node: &AstNode<'_>,
 ) -> Result<ExpressionType, TypecheckError> {
     Ok(match &node.value {

@@ -30,7 +30,7 @@ mod typecheck;
 use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
-use crate::{borrowck::borrow_check, hir::lower_module, id::ID, typecheck::ModuleType};
+use crate::{borrowck::borrow_check, hir::lower_module, id::TypeID, typecheck::ModuleType};
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -94,14 +94,14 @@ pub async fn interpret_code(
         }
     }
     let module = StaticDeclaration::Module(ModuleType {
-        id: ID::new(),
+        id: TypeID::new(),
         exports: declarations,
     });
     module.visit(&mut |decl| {
         if let StaticDeclaration::Module(ModuleType { exports, .. }) = decl {
             for (name, decl) in exports.iter() {
                 if let Some(implementation) = bindings.remove(name) {
-                    let id = decl.id();
+                    let id = decl.unwrap_fn_id();
                     functions.insert(id, linear_interpreter::Function::Extern(implementation));
                 }
             }
@@ -147,7 +147,7 @@ pub fn typecheck_module(
         .map(|(name, module)| {
             let name = name.clone();
             let module = StaticDeclaration::Module(ModuleType {
-                id: ID::new(),
+                id: TypeID::new(),
                 exports: resolve_module(&module[..]),
             });
             (name, module)

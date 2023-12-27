@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::{
-    id::ID,
+    id::{AnyID, FunctionID, NodeID, TypeID},
     parser::{
         AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
         InterfaceDeclarationValue, StructDeclarationValue,
@@ -20,7 +20,7 @@ pub mod resolve;
 pub enum ExpressionType {
     Void,
     Primitive(PrimitiveType),
-    DeclaredType(ID),
+    DeclaredType(TypeID),
     Pointer(PointerKind, Box<ExpressionType>),
     Array(Box<ExpressionType>),
     Null,
@@ -43,13 +43,30 @@ pub enum StaticDeclaration {
 }
 
 impl StaticDeclaration {
-    pub fn id(&self) -> ID {
+    pub fn id(&self) -> TypeID {
         match self {
             StaticDeclaration::Func(inner) => inner.id,
             StaticDeclaration::Struct(inner) => inner.id,
             StaticDeclaration::Interface(inner) => inner.id,
             StaticDeclaration::Union(inner) => inner.id,
             StaticDeclaration::Module(inner) => inner.id,
+        }
+    }
+
+    pub fn fn_id_or_type_id(&self) -> AnyID {
+        match self {
+            StaticDeclaration::Func(inner) => inner.func_id.into(),
+            StaticDeclaration::Struct(inner) => inner.id.into(),
+            StaticDeclaration::Interface(inner) => inner.id.into(),
+            StaticDeclaration::Union(inner) => inner.id.into(),
+            StaticDeclaration::Module(inner) => inner.id.into(),
+        }
+    }
+
+    pub fn unwrap_fn_id(&self) -> FunctionID {
+        match self {
+            StaticDeclaration::Func(inner) => inner.func_id,
+            _ => panic!("Not a function: {:?}", self),
         }
     }
 
@@ -84,20 +101,21 @@ impl StaticDeclaration {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ModuleType {
-    pub id: ID,
+    pub id: TypeID,
     pub exports: HashMap<String, StaticDeclaration>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct StructType {
-    pub id: ID,
+    pub id: TypeID,
     pub fields: HashMap<String, ExpressionType>,
     pub associated_functions: HashMap<String, StaticDeclaration>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FuncType {
-    pub id: ID,
+    pub id: TypeID,
+    pub func_id: FunctionID,
     pub params: Vec<ExpressionType>,
     pub returns: ExpressionType,
     pub is_associated: bool,
@@ -105,14 +123,24 @@ pub struct FuncType {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct UnionType {
-    pub id: ID,
+    pub id: TypeID,
     pub variants: HashMap<String, ExpressionType>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InterfaceType {
-    pub id: ID,
+    pub id: TypeID,
     pub associated_functions: HashMap<String, StaticDeclaration>,
+}
+
+pub fn find_func<'a>(
+    decls: &HashMap<TypeID, &'a StaticDeclaration>,
+    id: FunctionID,
+) -> Option<&'a FuncType> {
+    decls.values().find_map(|decl| match decl {
+        StaticDeclaration::Func(func) if func.func_id == id => Some(func),
+        _ => None,
+    })
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -152,17 +180,17 @@ pub enum TypecheckError {
 }
 
 struct Declarations<'a> {
-    name_to_type_id: HashMap<&'a str, ID>,
-    name_to_context_entry: HashMap<String, (ID, ExpressionType)>,
-    id_to_decl: HashMap<ID, &'a StaticDeclaration>,
+    name_to_type_id: HashMap<&'a str, TypeID>,
+    name_to_context_entry: HashMap<String, (AnyID, ExpressionType)>,
+    id_to_decl: HashMap<TypeID, &'a StaticDeclaration>,
 }
 
 impl<'a> Declarations<'a> {
-    fn decl(&self, id: &ID) -> Option<&StaticDeclaration> {
+    fn decl(&self, id: &TypeID) -> Option<&StaticDeclaration> {
         self.id_to_decl.get(id).copied()
     }
 
-    fn id_to_func(&self, id: &ID) -> &FuncType {
+    fn id_to_func(&self, id: &TypeID) -> &FuncType {
         let expr = self.decl(id).expect("function with ID should exist");
         match expr {
             StaticDeclaration::Func(inner) => inner,
@@ -170,7 +198,7 @@ impl<'a> Declarations<'a> {
         }
     }
 
-    fn id_to_struct(&self, id: &ID) -> &StructType {
+    fn id_to_struct(&self, id: &TypeID) -> &StructType {
         let expr = self.decl(id).expect("struct with ID should exist");
         match expr {
             StaticDeclaration::Struct(inner) => inner,
@@ -181,14 +209,14 @@ impl<'a> Declarations<'a> {
 
 pub struct TypecheckedFile<'a> {
     pub functions: Vec<TypecheckedFunction<'a>>,
-    pub associated_functions: HashMap<ID, Vec<TypecheckedFunction<'a>>>,
+    pub associated_functions: HashMap<NodeID, Vec<TypecheckedFunction<'a>>>,
     // TODO: convert this into a Sequence?
     pub top_level_statements: Vec<&'a AstNode<'a>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TypecheckedFunction<'a> {
-    pub id: ID,
+    pub id: FunctionID,
     pub name: String,
     pub func: &'a FunctionDeclarationValue<'a>,
 }
@@ -209,12 +237,14 @@ pub fn typecheck<'a>(
         match value {
             StaticDeclaration::Module(module) if current_module_name == name => {
                 for (name, value) in module.exports.iter() {
-                    name_to_context_entry.insert(name.clone(), (value.id(), value.expr()));
+                    name_to_context_entry
+                        .insert(name.clone(), (value.fn_id_or_type_id(), value.expr()));
                     name_to_type_id.insert(name.as_str(), value.id());
                 }
             }
             _ => {
-                name_to_context_entry.insert(name.clone(), (value.id(), value.expr()));
+                name_to_context_entry
+                    .insert(name.clone(), (value.fn_id_or_type_id(), value.expr()));
                 name_to_type_id.insert(name.as_str(), value.id());
             }
         }
@@ -257,17 +287,17 @@ pub fn typecheck<'a>(
 fn typecheck_node<'ast>(
     statement: &'ast AstNode<'ast>,
     context: &Declarations,
-    top_level_scope: &mut HashMap<String, (ID, ExpressionType)>,
+    top_level_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     functions: &mut Vec<TypecheckedFunction<'ast>>,
     top_level_statements: &mut Vec<&AstNode<'ast>>,
-    associated_functions_for_type: &mut HashMap<ID, Vec<TypecheckedFunction<'ast>>>,
+    associated_functions_for_type: &mut HashMap<NodeID, Vec<TypecheckedFunction<'ast>>>,
 ) -> Result<(), TypecheckError> {
     match &statement.value {
         AstNodeValue::FunctionDeclaration(func) => {
             // TODO: bubble errors
-            typecheck_function(&statement.id, func, context).unwrap();
+            typecheck_function(func, context).unwrap();
             functions.push(TypecheckedFunction {
-                id: statement.id,
+                id: func.id,
                 name: func.name.clone(),
                 func,
             });
@@ -286,9 +316,9 @@ fn typecheck_node<'ast>(
                     let AstNodeValue::FunctionDeclaration(func) = &function.value else {
                         return None;
                     };
-                    typecheck_function(&function.id, func, context).unwrap();
+                    typecheck_function(func, context).unwrap();
                     Some(TypecheckedFunction {
-                        id: function.id,
+                        id: func.id,
                         name: func.name.clone(),
                         func,
                     })
@@ -317,16 +347,16 @@ fn typecheck_node<'ast>(
 
 // TODO: some sort of data structure to store the results?
 fn typecheck_function<'a>(
-    id: &ID,
     function: &'a FunctionDeclarationValue<'a>,
     context: &Declarations,
 ) -> Result<(), TypecheckError> {
-    let function_type = context.id_to_func(id);
+    let function_type = find_func(&context.id_to_decl, function.id).unwrap();
     let parameters = function
         .params
         .iter()
         .zip(function_type.params.iter())
-        .map(|(name, param)| (name.name.clone(), (name.id, param.clone())))
+        // TODO
+        .map(|((id, name), param)| (name.name.clone(), ((*id).into(), param.clone())))
         .collect();
 
     let return_value = typecheck_expression(
@@ -353,8 +383,8 @@ fn typecheck_function<'a>(
 // TODO: if-else need to unify
 fn typecheck_expression<'a>(
     node: &'a AstNode<'a>,
-    outer_scopes: &[&HashMap<String, (ID, ExpressionType)>],
-    current_scope: &mut HashMap<String, (ID, ExpressionType)>,
+    outer_scopes: &[&HashMap<String, (AnyID, ExpressionType)>],
+    current_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     context: &Declarations,
 ) -> Result<&'a ExpressionType, TypecheckError> {
     let ty = match &node.value {
@@ -384,9 +414,9 @@ fn typecheck_expression<'a>(
                 let ty = resolve_type_expr(&context.name_to_type_id, type_hint)?;
                 // TODO: generate type error
                 assert!(is_assignable_to(&context.id_to_decl, &ty, value));
-                current_scope.insert(name.clone(), (node.id, ty));
+                current_scope.insert(name.clone(), (node.id.into(), ty));
             } else {
-                current_scope.insert(name.clone(), (node.id, value.clone()));
+                current_scope.insert(name.clone(), (node.id.into(), value.clone()));
             }
 
             ExpressionType::Void
@@ -814,9 +844,9 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
 
 fn resolve_name(
     name: &str,
-    current_scope: &HashMap<String, (ID, ExpressionType)>,
-    outer_scopes: &[&HashMap<String, (ID, ExpressionType)>],
-) -> Option<(ID, ExpressionType)> {
+    current_scope: &HashMap<String, (AnyID, ExpressionType)>,
+    outer_scopes: &[&HashMap<String, (AnyID, ExpressionType)>],
+) -> Option<(AnyID, ExpressionType)> {
     current_scope
         .get(name)
         .or(outer_scopes.iter().find_map(|scope| scope.get(name)))
@@ -824,7 +854,7 @@ fn resolve_name(
 }
 
 pub fn is_assignable_to(
-    id_to_decl: &HashMap<ID, &StaticDeclaration>,
+    id_to_decl: &HashMap<TypeID, &StaticDeclaration>,
     left: &ExpressionType,
     right: &ExpressionType,
 ) -> bool {

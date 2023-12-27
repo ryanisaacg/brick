@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     hir::{HirNode, HirNodeValue},
-    id::ID,
+    id::{NodeID, VariableID},
 };
 
 #[derive(Clone, Debug)]
@@ -19,7 +19,7 @@ enum Borrow {
 
 pub fn check_borrows(
     cfg: &FunctionCFG,
-    drops: &HashMap<ID, Vec<ID>>,
+    drops: &HashMap<NodeID, Vec<VariableID>>,
     errors: &mut Vec<BorrowError>,
 ) {
     check_borrow_cfg_node(
@@ -34,10 +34,10 @@ pub fn check_borrows(
 
 fn check_borrow_cfg_node(
     cfg: &ControlFlowGraph,
-    drops: &HashMap<ID, Vec<ID>>,
+    drops: &HashMap<NodeID, Vec<VariableID>>,
     node: NodeIndex,
-    mut existing_borrows: HashMap<ID, Borrow>,
-    mut borrow_to_variable: HashMap<ID, ID>,
+    mut existing_borrows: HashMap<VariableID, Borrow>,
+    mut borrow_to_variable: HashMap<VariableID, VariableID>,
     errors: &mut Vec<BorrowError>,
 ) {
     let Some(CfgNode::Block { expressions, .. }) = cfg.node_weight(node) else {
@@ -67,10 +67,10 @@ fn check_borrow_cfg_node(
 }
 
 fn check_borrow_expr(
-    drops: &HashMap<ID, Vec<ID>>,
+    drops: &HashMap<NodeID, Vec<VariableID>>,
     expr: &HirNode,
-    borrowed_variables: &mut HashMap<ID, Borrow>,
-    borrow_to_variable: &mut HashMap<ID, ID>,
+    borrowed_variables: &mut HashMap<VariableID, Borrow>,
+    borrow_to_variable: &mut HashMap<VariableID, VariableID>,
     errors: &mut Vec<BorrowError>,
 ) {
     // TODO: check function calls for disjoint borrows
@@ -84,7 +84,9 @@ fn check_borrow_expr(
                 let HirNodeValue::VariableReference(var_id) = &inner.value else {
                     todo!("references rvalue that aren't variables: {:?}", inner)
                 };
-                match borrowed_variables.get_mut(var_id) {
+                let borrow_var_id = borrow_var_id.as_var();
+                let var_id = var_id.as_var();
+                match borrowed_variables.get_mut(&var_id) {
                     Some(Borrow::Unique) => {
                         errors.push(BorrowError::AlreadyBorrowed);
                     }
@@ -92,10 +94,10 @@ fn check_borrow_expr(
                         *borrow_count += 1;
                     }
                     None => {
-                        borrowed_variables.insert(*var_id, Borrow::Shared(1));
+                        borrowed_variables.insert(var_id, Borrow::Shared(1));
                     }
                 }
-                borrow_to_variable.insert(*borrow_var_id, *var_id);
+                borrow_to_variable.insert(borrow_var_id, var_id);
             }
             HirNodeValue::TakeUnique(inner) => {
                 let HirNodeValue::VariableReference(borrow_var_id) = &lhs.value else {
@@ -104,11 +106,13 @@ fn check_borrow_expr(
                 let HirNodeValue::VariableReference(var_id) = &inner.value else {
                     todo!("references rvalue that aren't variables: {:?}", inner)
                 };
-                if borrowed_variables.contains_key(var_id) {
-                    errors.push(BorrowError::AlreadyBorrowed);
+                let borrow_var_id = borrow_var_id.as_var();
+                let var_id = var_id.as_var();
+                if let std::collections::hash_map::Entry::Vacant(e) = borrowed_variables.entry(var_id) {
+                    e.insert(Borrow::Unique);
+                    borrow_to_variable.insert(borrow_var_id, var_id);
                 } else {
-                    borrowed_variables.insert(*var_id, Borrow::Unique);
-                    borrow_to_variable.insert(*borrow_var_id, *var_id);
+                    errors.push(BorrowError::AlreadyBorrowed);
                 }
             }
             _ => {}

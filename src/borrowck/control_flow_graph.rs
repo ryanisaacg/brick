@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     hir::{HirNode, HirNodeValue},
-    id::ID,
+    id::{NodeID, VariableID},
 };
 
 // Based on https://ics.uci.edu/~lopes/teaching/inf212W12/readings/rep-analysis-soft.pdf
@@ -135,10 +135,10 @@ fn collect_blocks_to_add<'a>(
 pub enum CfgNode<'a> {
     Block {
         expressions: Vec<&'a HirNode>,
-        liveness: HashMap<ID, Liveness>,
+        liveness: HashMap<VariableID, Liveness>,
     },
     Exit {
-        liveness: HashMap<ID, Liveness>,
+        liveness: HashMap<VariableID, Liveness>,
     },
 }
 
@@ -147,7 +147,7 @@ pub enum Liveness {
     Moved,
     ParentConditionalMoved(u32),
 
-    Referenced(ID),
+    Referenced(NodeID),
     ParentReferenced,
 }
 

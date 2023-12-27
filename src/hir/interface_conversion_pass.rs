@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use crate::{
-    id::ID,
+    id::TypeID,
     typecheck::{ExpressionType, StaticDeclaration},
 };
 
 use super::{HirModule, HirNode, HirNodeValue};
 
-pub fn rewrite(module: &mut HirModule, declarations: &HashMap<ID, &StaticDeclaration>) {
+pub fn rewrite(module: &mut HirModule, declarations: &HashMap<TypeID, &StaticDeclaration>) {
     module.visit_mut(|node| {
         node.walk_expected_types_for_children_mut(declarations, |expected_ty, child| {
             let ExpressionType::DeclaredType(expected_ty_id) = expected_ty else {
@@ -28,12 +28,12 @@ pub fn rewrite(module: &mut HirModule, declarations: &HashMap<ID, &StaticDeclara
             let mut vtable = HashMap::new();
             for (name, func) in expected_ty.associated_functions.iter() {
                 vtable.insert(
-                    func.id(),
+                    func.unwrap_fn_id(),
                     child_ty
                         .associated_functions
                         .get(name)
                         .expect("associated function to exist")
-                        .id(),
+                        .unwrap_fn_id(),
                 );
             }
             let ty = ExpressionType::DeclaredType(expected_ty.id);

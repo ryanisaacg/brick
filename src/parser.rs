@@ -5,7 +5,7 @@ use typed_arena::Arena;
 
 use crate::{
     arena::ArenaNode,
-    id::ID,
+    id::{AnyID, FunctionID, NodeID, VariableID},
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
     typecheck::ExpressionType,
@@ -13,14 +13,14 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NameAndType<'a> {
-    pub id: ID,
+    pub id: NodeID,
     pub name: String,
-    pub type_: &'a AstNode<'a>,
+    pub ty: &'a AstNode<'a>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct AstNode<'parse> {
-    pub id: ID,
+    pub id: NodeID,
     pub value: AstNodeValue<'parse>,
     pub provenance: SourceRange,
     pub ty: OnceLock<ExpressionType>,
@@ -29,7 +29,7 @@ pub struct AstNode<'parse> {
 impl<'a> AstNode<'a> {
     pub fn new(value: AstNodeValue<'a>, provenance: SourceRange) -> AstNode<'a> {
         AstNode {
-            id: ID::new(),
+            id: NodeID::new(),
             value,
             provenance,
             ty: OnceLock::new(),
@@ -39,8 +39,9 @@ impl<'a> AstNode<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct FunctionDeclarationValue<'a> {
+    pub id: FunctionID,
     pub name: String,
-    pub params: Vec<NameAndType<'a>>,
+    pub params: Vec<(VariableID, NameAndType<'a>)>,
     pub returns: Option<&'a mut AstNode<'a>>,
     pub body: &'a mut AstNode<'a>,
     /**
@@ -52,6 +53,7 @@ pub struct FunctionDeclarationValue<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct FunctionHeaderValue<'a> {
+    pub id: FunctionID,
     pub name: String,
     pub params: Vec<NameAndType<'a>>,
     pub returns: Option<&'a mut AstNode<'a>>,
@@ -100,7 +102,7 @@ pub enum AstNodeValue<'a> {
 
     Name {
         value: String,
-        referenced_id: OnceLock<ID>,
+        referenced_id: OnceLock<AnyID>,
     },
 
     // Expressions
@@ -209,8 +211,8 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                 ..
             }) => {
                 children.push(*body);
-                for param in params.iter() {
-                    children.push(param.type_);
+                for (_, param) in params.iter() {
+                    children.push(param.ty);
                 }
                 if let Some(returns) = returns {
                     children.push(*returns);
@@ -223,7 +225,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                 params, returns, ..
             }) => {
                 for param in params.iter() {
-                    children.push(param.type_);
+                    children.push(param.ty);
                 }
                 if let Some(returns) = returns {
                     children.push(*returns);
@@ -235,7 +237,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                 ..
             }) => {
                 for field in fields.iter() {
-                    children.push(field.type_);
+                    children.push(field.ty);
                 }
                 for node in associated_functions.iter() {
                     children.push(node);
@@ -253,7 +255,7 @@ impl<'a> ArenaNode<'a> for AstNode<'a> {
                 variants: fields, ..
             }) => {
                 for field in fields.iter() {
-                    children.push(field.type_);
+                    children.push(field.ty);
                 }
             }
             Name { .. }
@@ -508,6 +510,7 @@ fn interface_or_struct_body<'a>(
                 }
                 associated_functions.push(AstNode::new(
                     AstNodeValue::RequiredFunction(FunctionHeaderValue {
+                        id: FunctionID::new(),
                         name,
                         params,
                         returns,
@@ -526,8 +529,9 @@ fn interface_or_struct_body<'a>(
                 cursor = body.provenance.end();
                 associated_functions.push(AstNode::new(
                     AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+                        id: FunctionID::new(),
                         name,
-                        params,
+                        params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
                         returns,
                         body: add_node(context, body),
                         is_extern: true,
@@ -549,9 +553,9 @@ fn interface_or_struct_body<'a>(
             let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
             let kind = add_node(context, kind);
             fields.push(NameAndType {
-                id: ID::new(),
+                id: NodeID::new(),
                 name,
-                type_: kind,
+                ty: kind,
             });
 
             let (should_end, range) = comma_or_end_list(
@@ -604,9 +608,9 @@ fn union_declaration<'a>(
             "expected ) after variant type",
         )?;
         variants.push(NameAndType {
-            id: ID::new(),
+            id: NodeID::new(),
             name,
-            type_: add_node(context, ty),
+            ty: add_node(context, ty),
         });
 
         let (should_end, range) = comma_or_end_list(
@@ -650,6 +654,7 @@ fn extern_function_declaration<'a>(
     let (value, end) = match &next.value {
         TokenValue::Semicolon => (
             AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
+                id: FunctionID::new(),
                 name,
                 params,
                 returns,
@@ -661,8 +666,9 @@ fn extern_function_declaration<'a>(
             let end = body.provenance.end();
             (
                 AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+                    id: FunctionID::new(),
                     name,
-                    params,
+                    params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
                     returns,
                     body: add_node(context, body),
                     is_extern: true,
@@ -705,8 +711,9 @@ fn function_declaration<'a>(
 
     Ok(AstNode::new(
         AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+            id: FunctionID::new(),
             name,
-            params,
+            params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
             returns,
             body: add_node(context, body),
             is_extern: false,
@@ -752,9 +759,9 @@ fn function_header<'a>(
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
                 let kind = add_node(context, kind);
                 params.push(NameAndType {
-                    id: ID::new(),
+                    id: NodeID::new(),
                     name,
-                    type_: kind,
+                    ty: kind,
                 });
             }
         }

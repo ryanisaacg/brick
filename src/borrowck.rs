@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::{hir::HirModule, id::ID, typecheck::StaticDeclaration};
+use crate::{hir::HirModule, id::TypeID, typecheck::StaticDeclaration};
 
 mod check_borrows;
 mod control_flow_graph;
@@ -24,7 +24,7 @@ pub enum BorrowError {
 
 pub fn borrow_check(
     module: &mut HirModule,
-    declarations: &HashMap<ID, &StaticDeclaration>,
+    declarations: &HashMap<TypeID, &StaticDeclaration>,
 ) -> Vec<BorrowError> {
     // TODO: borrow chekck top level statements
     let mut errors = Vec::new();

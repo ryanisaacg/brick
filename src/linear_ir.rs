@@ -2,14 +2,14 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::{
     hir::{HirBinOp, HirFunction, HirNode, HirNodeValue},
-    id::ID,
+    id::{FunctionID, TypeID, VariableID},
     provenance::SourceRange,
     typecheck::{ExpressionType, PrimitiveType, StaticDeclaration},
 };
 
 #[derive(Debug)]
 pub struct LinearFunction {
-    pub id: ID,
+    pub id: FunctionID,
     // TODO: memory layouts instead of expression types?
     pub params: Vec<ExpressionType>,
     pub returns: Option<ExpressionType>,
@@ -17,7 +17,7 @@ pub struct LinearFunction {
 }
 
 pub fn linearize_function(
-    declarations: &HashMap<ID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, TypeMemoryLayout>,
     function: HirFunction,
 ) -> LinearFunction {
     let HirNodeValue::Sequence(block) = function.body.value else {
@@ -180,14 +180,14 @@ pub enum LinearNodeValue {
     Null,
     CharLiteral(char),
     StringLiteral(String),
-    FunctionID(ID),
+    FunctionID(FunctionID),
 }
 
 // TODO: produce a more CFG shaped result?
 
 pub fn linearize_nodes(
-    declarations: &HashMap<ID, TypeMemoryLayout>,
-    stack_entries: &mut HashMap<ID, usize>,
+    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    stack_entries: &mut HashMap<VariableID, usize>,
     stack_offset: &mut usize,
     //blocks: &mut VecDeque<LinearBlock>,
     mut nodes: VecDeque<HirNode>,
@@ -216,7 +216,7 @@ pub fn linearize_nodes(
                 let alloc = LinearNode::new(LinearNodeValue::StackAlloc(alloc_size));
                 values.push(alloc);
 
-                let (location, offset) = variable_location(stack_entries, &id);
+                let (location, offset) = variable_location(stack_entries, id);
 
                 values.push(LinearNode {
                     value: LinearNodeValue::WriteMemory {
@@ -301,8 +301,8 @@ pub fn linearize_nodes(
 }
 
 fn lower_expression(
-    declarations: &HashMap<ID, TypeMemoryLayout>,
-    stack_entries: &HashMap<ID, usize>,
+    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    stack_entries: &HashMap<VariableID, usize>,
     expression: HirNode,
 ) -> LinearNode {
     let HirNode {
@@ -331,7 +331,7 @@ fn lower_expression(
             )
         }
         HirNodeValue::VariableReference(id) => {
-            let (location, offset) = variable_location(stack_entries, &id);
+            let (location, offset) = variable_location(stack_entries, id.as_var());
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
@@ -347,7 +347,7 @@ fn lower_expression(
                 .map(|param| lower_expression(declarations, stack_entries, param))
                 .collect();
             LinearNodeValue::Call(
-                Box::new(LinearNode::new(LinearNodeValue::FunctionID(fn_id))),
+                Box::new(LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))),
                 params,
             )
         }
@@ -582,12 +582,12 @@ fn lower_expression(
 }
 
 fn lower_lvalue(
-    declarations: &HashMap<ID, TypeMemoryLayout>,
-    stack_entries: &HashMap<ID, usize>,
+    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    stack_entries: &HashMap<VariableID, usize>,
     lvalue: HirNode,
 ) -> (LinearNode, usize) {
     match lvalue.value {
-        HirNodeValue::VariableReference(id) => variable_location(stack_entries, &id),
+        HirNodeValue::VariableReference(id) => variable_location(stack_entries, id.as_var()),
         HirNodeValue::Access(lhs, rhs) => access_location(declarations, stack_entries, *lhs, rhs),
         HirNodeValue::Dereference(inner) => {
             (lower_expression(declarations, stack_entries, *inner), 0)
@@ -637,14 +637,17 @@ fn lower_lvalue(
     }
 }*/
 
-fn variable_location(stack_entries: &HashMap<ID, usize>, var_id: &ID) -> (LinearNode, usize) {
+fn variable_location(
+    stack_entries: &HashMap<VariableID, usize>,
+    var_id: VariableID,
+) -> (LinearNode, usize) {
     (
         LinearNode::new(LinearNodeValue::BinOp(
             HirBinOp::Subtract,
             PrimitiveType::PointerSize,
             Box::new(LinearNode::new(LinearNodeValue::StackFrame)),
             Box::new(LinearNode::new(LinearNodeValue::Size(
-                stack_entries[var_id],
+                stack_entries[&var_id],
             ))),
         )),
         0,
@@ -652,8 +655,8 @@ fn variable_location(stack_entries: &HashMap<ID, usize>, var_id: &ID) -> (Linear
 }
 
 fn access_location(
-    declarations: &HashMap<ID, TypeMemoryLayout>,
-    stack_entries: &HashMap<ID, usize>,
+    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    stack_entries: &HashMap<VariableID, usize>,
     lhs: HirNode,
     rhs: String,
 ) -> (LinearNode, usize) {
@@ -675,8 +678,8 @@ fn access_location(
 }
 
 fn array_index_location(
-    declarations: &HashMap<ID, TypeMemoryLayout>,
-    stack_entries: &HashMap<ID, usize>,
+    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    stack_entries: &HashMap<VariableID, usize>,
     arr: HirNode,
     idx: HirNode,
     ty: &ExpressionType,
@@ -726,7 +729,7 @@ fn array_index_location(
 const POINTER_SIZE: usize = 8;
 
 fn expression_type_size(
-    declarations: &HashMap<ID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, TypeMemoryLayout>,
     expr: &ExpressionType,
 ) -> usize {
     // TODO: alignment
@@ -771,14 +774,14 @@ pub struct TypeMemoryLayout {
 #[derive(Debug)]
 pub enum TypeLayoutValue {
     Structure(Vec<(String, usize, TypeLayoutField)>),
-    Interface(Vec<ID>),
+    Interface(Vec<FunctionID>),
     FunctionPointer,
 }
 
 #[derive(Debug)]
 pub enum TypeLayoutField {
     Primitive(PrimitiveType),
-    Referenced(ID),
+    Referenced(TypeID),
     Nullable(Box<TypeLayoutField>),
     Pointer,
 }
@@ -791,7 +794,7 @@ impl TypeMemoryLayout {
 
 pub fn layout_types(
     declarations: &HashMap<String, StaticDeclaration>,
-    layouts: &mut HashMap<ID, TypeMemoryLayout>,
+    layouts: &mut HashMap<TypeID, TypeMemoryLayout>,
 ) {
     let declarations: HashMap<_, _> = declarations
         .iter()
@@ -803,8 +806,8 @@ pub fn layout_types(
 }
 
 fn layout_static_decl(
-    declarations: &HashMap<ID, &StaticDeclaration>,
-    layouts: &mut HashMap<ID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, &StaticDeclaration>,
+    layouts: &mut HashMap<TypeID, TypeMemoryLayout>,
     decl: &StaticDeclaration,
 ) -> usize {
     if let Some(layout) = layouts.get(&decl.id()) {
@@ -841,7 +844,10 @@ fn layout_static_decl(
                 .map(|decl| {
                     // TODO: don't hardcode function ID
                     size += 4;
-                    decl.id()
+                    let StaticDeclaration::Func(func) = decl else {
+                        unreachable!()
+                    };
+                    func.func_id
                 })
                 .collect();
             TypeMemoryLayout {
@@ -864,8 +870,8 @@ fn layout_static_decl(
 }
 
 fn layout_type(
-    declarations: &HashMap<ID, &StaticDeclaration>,
-    layouts: &mut HashMap<ID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, &StaticDeclaration>,
+    layouts: &mut HashMap<TypeID, TypeMemoryLayout>,
     ty: &ExpressionType,
 ) -> (TypeLayoutField, usize) {
     match ty {

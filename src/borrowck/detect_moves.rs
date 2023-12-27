@@ -4,7 +4,7 @@ use petgraph::{stable_graph::NodeIndex, Direction};
 
 use crate::{
     hir::{HirNode, HirNodeValue},
-    id::ID,
+    id::{TypeID, VariableID},
     typecheck::{ExpressionType, PointerKind, StaticDeclaration},
 };
 
@@ -16,7 +16,7 @@ use super::{
 pub fn detect_moves(
     cfg: &mut FunctionCFG,
     errors: &mut Vec<BorrowError>,
-    declarations: &HashMap<ID, &StaticDeclaration>,
+    declarations: &HashMap<TypeID, &StaticDeclaration>,
 ) {
     detect_moves_node(&mut cfg.cfg, cfg.end, errors, declarations);
 }
@@ -25,7 +25,7 @@ fn detect_moves_node(
     cfg: &mut ControlFlowGraph,
     node: NodeIndex,
     errors: &mut Vec<BorrowError>,
-    declarations: &HashMap<ID, &StaticDeclaration>,
+    declarations: &HashMap<TypeID, &StaticDeclaration>,
 ) {
     if let CfgNode::Block { liveness, .. } = cfg.node_weight(node).unwrap() {
         // Moves already detected here?
@@ -106,26 +106,27 @@ fn detect_moves_node(
 }
 
 fn move_all(
-    liveness: &mut HashMap<ID, Liveness>,
+    liveness: &mut HashMap<VariableID, Liveness>,
     errors: &mut Vec<BorrowError>,
-    declarations: &HashMap<ID, &StaticDeclaration>,
+    declarations: &HashMap<TypeID, &StaticDeclaration>,
     expr: &HirNode,
 ) {
     match &expr.value {
         HirNodeValue::VariableReference(id) => {
             if is_affine(declarations, &expr.ty) {
-                match liveness.get(id) {
+                let id = id.as_var();
+                match liveness.get(&id) {
                     Some(Liveness::Moved | Liveness::ParentConditionalMoved(_)) => {
                         errors.push(BorrowError::UseAfterMove);
                     }
                     Some(Liveness::Referenced(_) | Liveness::ParentReferenced) | None => {
-                        liveness.insert(*id, Liveness::Moved);
+                        liveness.insert(id, Liveness::Moved);
                     }
                 }
             }
         }
-        HirNodeValue::Declaration(_) => {
-            liveness.insert(expr.id, Liveness::Referenced(expr.id));
+        HirNodeValue::Declaration(id) => {
+            liveness.insert(*id, Liveness::Referenced(expr.id));
         }
         HirNodeValue::Parameter(_, _)
         | HirNodeValue::Float(_)
@@ -192,20 +193,21 @@ fn move_all(
 }
 
 fn reference_all(
-    liveness: &mut HashMap<ID, Liveness>,
+    liveness: &mut HashMap<VariableID, Liveness>,
     errors: &mut Vec<BorrowError>,
-    declarations: &HashMap<ID, &StaticDeclaration>,
+    declarations: &HashMap<TypeID, &StaticDeclaration>,
     expr: &HirNode,
 ) {
     expr.visit(|_, expr| {
         if let HirNodeValue::VariableReference(id) = &expr.value {
+            let id = id.as_var();
             if is_affine(declarations, &expr.ty) {
-                match liveness.get(id) {
+                match liveness.get(&id) {
                     Some(Liveness::Moved | Liveness::ParentConditionalMoved(_)) => {
                         errors.push(BorrowError::UseAfterMove);
                     }
                     Some(Liveness::Referenced(_) | Liveness::ParentReferenced) | None => {
-                        liveness.insert(*id, Liveness::Referenced(expr.id));
+                        liveness.insert(id, Liveness::Referenced(expr.id));
                     }
                 }
             }
@@ -214,7 +216,7 @@ fn reference_all(
 }
 
 // TODO
-fn is_affine(declarations: &HashMap<ID, &StaticDeclaration>, ty: &ExpressionType) -> bool {
+fn is_affine(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &ExpressionType) -> bool {
     match ty {
         ExpressionType::Void => unreachable!(),
         ExpressionType::Primitive(_) => false,
