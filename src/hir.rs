@@ -329,7 +329,7 @@ impl HirNode {
                     unreachable!();
                 };
                 for (name, field) in fields.iter() {
-                    callback(ty.fields.get(name).expect("field present"), field);
+                    callback(&ty.fields[name], field);
                 }
             }
             // TODO: heterogenous collections
@@ -406,7 +406,7 @@ impl HirNode {
                     unreachable!();
                 };
                 for (name, field) in fields.iter_mut() {
-                    callback(ty.fields.get(name).expect("field present"), field);
+                    callback(&ty.fields[name], field);
                 }
             }
             // TODO: heterogenous collections

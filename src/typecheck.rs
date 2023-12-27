@@ -866,8 +866,8 @@ pub fn is_assignable_to(
         (Primitive(_), _) => false,
 
         (DeclaredType(left), DeclaredType(right)) => {
-            let left = id_to_decl.get(left).expect("ID is in map");
-            let right = id_to_decl.get(right).expect("ID is in map");
+            let left = id_to_decl[left];
+            let right = id_to_decl[right];
             use StaticDeclaration::*;
             match (left, right) {
                 // TODO: support function pointer types?

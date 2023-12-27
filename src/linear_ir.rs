@@ -562,9 +562,7 @@ fn lower_expression(
                 unreachable!()
             };
             for field in fields.iter().rev() {
-                values.push(LinearNode::new(LinearNodeValue::FunctionID(
-                    *vtable.get(field).unwrap(),
-                )));
+                values.push(LinearNode::new(LinearNodeValue::FunctionID(vtable[field])));
             }
 
             let (pointer, offset) = lower_lvalue(declarations, stack_entries, *value);
@@ -640,14 +638,14 @@ fn lower_lvalue(
 }*/
 
 fn variable_location(stack_entries: &HashMap<ID, usize>, var_id: &ID) -> (LinearNode, usize) {
-    let offset = stack_entries.get(var_id).unwrap();
-
     (
         LinearNode::new(LinearNodeValue::BinOp(
             HirBinOp::Subtract,
             PrimitiveType::PointerSize,
             Box::new(LinearNode::new(LinearNodeValue::StackFrame)),
-            Box::new(LinearNode::new(LinearNodeValue::Size(*offset))),
+            Box::new(LinearNode::new(LinearNodeValue::Size(
+                stack_entries[var_id],
+            ))),
         )),
         0,
     )
@@ -662,7 +660,7 @@ fn access_location(
     let ExpressionType::DeclaredType(ty_id) = lhs.ty else {
         unreachable!()
     };
-    let TypeMemoryLayout { value, .. } = declarations.get(&ty_id).unwrap();
+    let TypeMemoryLayout { value, .. } = &declarations[&ty_id];
     let (lhs, mut offset) = lower_lvalue(declarations, stack_entries, lhs);
     offset += match value {
         TypeLayoutValue::Structure(fields) => fields
@@ -735,7 +733,7 @@ fn expression_type_size(
     match expr {
         ExpressionType::Void => 0,
         ExpressionType::Primitive(prim) => primitive_type_size(*prim),
-        ExpressionType::DeclaredType(id) => declarations.get(id).unwrap().size(),
+        ExpressionType::DeclaredType(id) => declarations[id].size(),
         ExpressionType::Pointer(_, _) => POINTER_SIZE,
         ExpressionType::Array(_) => POINTER_SIZE * 3,
         ExpressionType::Null => 1,
@@ -878,7 +876,7 @@ fn layout_type(
             (TypeLayoutField::Primitive(*p), size)
         }
         ExpressionType::DeclaredType(id) => {
-            let size = layout_static_decl(declarations, layouts, declarations.get(id).unwrap());
+            let size = layout_static_decl(declarations, layouts, declarations[id]);
             (TypeLayoutField::Referenced(*id), size)
         }
         ExpressionType::Pointer(_, _) => (TypeLayoutField::Pointer, POINTER_SIZE),

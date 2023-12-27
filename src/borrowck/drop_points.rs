@@ -27,7 +27,7 @@ fn find_drop_points_node(
         let CfgNode::Block { liveness, .. } = cfg.node_weight(parent).unwrap() else {
             unreachable!()
         };
-        match liveness.get(variable).unwrap() {
+        match liveness[variable] {
             // If the variable is moved in this branch, don't drop
             Liveness::Moved => {}
             // If the variable is moved or referenced in some branches, drop in those only
@@ -36,7 +36,7 @@ fn find_drop_points_node(
             }
             // The variable is referenced here. Drop after this
             Liveness::Referenced(id) => {
-                map.entry(*variable).or_default().push(*id);
+                map.entry(*variable).or_default().push(id);
             }
         }
     }

@@ -104,7 +104,7 @@ pub async fn evaluate_function(
     vm: &mut VM,
     fn_id: ID,
 ) -> Result<(), Unwind> {
-    let function = fns.get(&fn_id).unwrap();
+    let function = &fns[&fn_id];
     match function {
         Function::Ir(function) => {
             // Write the current base ptr at the stack ptr location
@@ -436,7 +436,7 @@ fn write(
         ExpressionType::Primitive(_) => {
             write_primitive(op_stack, memory, location);
         }
-        ExpressionType::DeclaredType(id) => match &layouts.get(id).unwrap().value {
+        ExpressionType::DeclaredType(id) => match &layouts[id].value {
             TypeLayoutValue::Structure(fields) => {
                 for (_, offset, ty) in fields.iter() {
                     let location = location + offset;
@@ -514,7 +514,7 @@ fn read(
             read_primitive(op_stack, memory, location, *p);
         }
         ExpressionType::DeclaredType(id) => {
-            let layout = layouts.get(id).unwrap();
+            let layout = &layouts[id];
             match &layout.value {
                 TypeLayoutValue::Structure(fields) => {
                     for (_, offset, ty) in fields.iter().rev() {
