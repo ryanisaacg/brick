@@ -38,25 +38,22 @@ pub fn lower_module<'ast>(
 // TODO: should the IR be a stack machine?
 
 pub struct HirModule {
-    pub top_level_statements: Vec<HirNode>,
+    pub top_level_statements: HirNode,
     // TODO: include imports, structs, and extern function declaration
     pub functions: Vec<HirFunction>,
 }
 
 impl HirModule {
     pub fn visit_mut(&mut self, mut callback: impl FnMut(&mut HirNode)) {
-        for expr in self.top_level_statements.iter_mut() {
-            expr.visit_mut_recursive(&mut callback);
-        }
+        self.top_level_statements.visit_mut_recursive(&mut callback);
         for func in self.functions.iter_mut() {
             func.body.visit_mut_recursive(&mut callback);
         }
     }
 
     pub fn visit(&self, mut callback: impl FnMut(Option<&HirNode>, &HirNode)) {
-        for expr in self.top_level_statements.iter() {
-            expr.visit_recursive(None, &mut callback);
-        }
+        self.top_level_statements
+            .visit_recursive(None, &mut callback);
         for func in self.functions.iter() {
             func.body.visit_recursive(None, &mut callback);
         }

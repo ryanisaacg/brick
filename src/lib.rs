@@ -86,7 +86,7 @@ pub async fn interpret_code(
     for (name, module) in modules {
         // TODO: execute imported statements?
         if name == "main" {
-            statements.extend(module.top_level_statements);
+            statements.push(module.top_level_statements);
         }
         for function in module.functions {
             let function = linearize_function(&ty_declarations, function);
