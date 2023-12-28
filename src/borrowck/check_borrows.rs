@@ -108,7 +108,9 @@ fn check_borrow_expr(
                 };
                 let borrow_var_id = borrow_var_id.as_var();
                 let var_id = var_id.as_var();
-                if let std::collections::hash_map::Entry::Vacant(e) = borrowed_variables.entry(var_id) {
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    borrowed_variables.entry(var_id)
+                {
                     e.insert(Borrow::Unique);
                     borrow_to_variable.insert(borrow_var_id, var_id);
                 } else {

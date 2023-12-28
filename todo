@@ -25,6 +25,7 @@ collections:
 - cells
 
 borrow checker and lifetimes:
+- check borrows for top-level code
 - check borrows for function calls
 - allow disjoint borrows of struct fields
 - correctly mark references through collection indices
@@ -32,6 +33,10 @@ borrow checker and lifetimes:
 - copy vs clone vs affine vs linear?
 - drop (hard-coded)
 - drop (custom)
+
+metaprogramming:
+- proc macros? comptime? compile-time reflection (what is that even)? no metaprogramming?
+- use whatever mechanism above for ser/des
 
 allocator:
 - support dealloc
