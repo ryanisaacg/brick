@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use petgraph::{stable_graph::NodeIndex, Direction};
 
@@ -25,6 +25,7 @@ pub fn check_borrows(
     check_borrow_cfg_node(
         &cfg.cfg,
         drops,
+        &mut HashSet::new(),
         cfg.start,
         HashMap::new(),
         HashMap::new(),
@@ -35,6 +36,7 @@ pub fn check_borrows(
 fn check_borrow_cfg_node(
     cfg: &ControlFlowGraph,
     drops: &HashMap<NodeID, Vec<VariableID>>,
+    visited: &mut HashSet<NodeIndex>,
     node: NodeIndex,
     mut existing_borrows: HashMap<VariableID, Borrow>,
     mut borrow_to_variable: HashMap<VariableID, VariableID>,
@@ -43,6 +45,11 @@ fn check_borrow_cfg_node(
     let Some(CfgNode::Block { expressions, .. }) = cfg.node_weight(node) else {
         return;
     };
+    // TODO: is this legal? what if you do need to visit a node more than once
+    if visited.contains(&node) {
+        return;
+    }
+    visited.insert(node);
 
     for expr in expressions.iter() {
         check_borrow_expr(
@@ -58,6 +65,7 @@ fn check_borrow_cfg_node(
         check_borrow_cfg_node(
             cfg,
             drops,
+            visited,
             neighbor,
             existing_borrows.clone(),
             borrow_to_variable.clone(),

@@ -104,7 +104,6 @@ pub async fn evaluate_function(
     vm: &mut VM,
     fn_id: FunctionID,
 ) -> Result<(), Unwind> {
-    dbg!(fn_id);
     let function = &fns[&fn_id];
     match function {
         Function::Ir(function) => {
@@ -462,7 +461,6 @@ fn write(
                 }
             }
             TypeLayoutValue::Interface(fields) => {
-                println!("I'm an interface");
                 let mut offset = write_primitive(op_stack, memory, location);
                 for _field in fields.iter() {
                     offset += write_primitive(op_stack, memory, location + offset);
@@ -541,7 +539,6 @@ fn read(
                     }
                 }
                 TypeLayoutValue::Interface(fields) => {
-                    println!("I'm an interface");
                     let mut location = location + layout.size;
                     for _ in fields.iter().rev() {
                         read_primitive(op_stack, memory, location, PrimitiveType::FunctionID);

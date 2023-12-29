@@ -1,18 +1,7 @@
-import stdio
-
-stdio.print("I will double your numbers");
-let x = stdio.read();
-while x > 0 {
-    stdio.write(x * 2);
-    x = stdio.read();
+let array = [0, 0, 0, 0];
+let index = 0;
+while index < 4 {
+    array[index] = index;
+    index += 1;
 }
-
-interface Point {
-    x: f32,
-    y: f32,
-}
-
-fn move(point: Point): f32 {
-    point.x + point.y
-}
-
+array[2]

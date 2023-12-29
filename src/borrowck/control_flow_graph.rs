@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     hir::{HirNode, HirNodeValue},
@@ -142,10 +142,26 @@ pub enum CfgNode<'a> {
     },
 }
 
+impl CfgNode<'_> {
+    pub fn liveness(&self) -> &HashMap<VariableID, Liveness> {
+        match self {
+            CfgNode::Block { liveness, .. } => liveness,
+            CfgNode::Exit { liveness } => liveness,
+        }
+    }
+
+    pub fn liveness_mut(&mut self) -> &mut HashMap<VariableID, Liveness> {
+        match self {
+            CfgNode::Block { liveness, .. } => liveness,
+            CfgNode::Exit { liveness } => liveness,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Liveness {
-    Moved,
-    ParentConditionalMoved(u32),
+    Moved(NodeID),
+    MovedInParents(HashSet<NodeIndex>),
 
     Referenced(NodeID),
     ParentReferenced,

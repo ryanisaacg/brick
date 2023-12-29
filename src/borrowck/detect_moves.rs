@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use petgraph::{stable_graph::NodeIndex, Direction};
+use petgraph::Direction;
 
 use crate::{
     hir::{HirNode, HirNodeValue},
@@ -9,91 +9,112 @@ use crate::{
 };
 
 use super::{
-    control_flow_graph::{CfgNode, ControlFlowGraph, FunctionCFG, Liveness},
+    control_flow_graph::{CfgNode, FunctionCFG, Liveness},
     BorrowError,
 };
+
+/*
+ * The liveness detection algorithm walks the control flow graph repeatedly to find the liveness
+ * states of each variable at each point in the program. It starts with a list of all directed
+ * edges in the graph, and examines
+ */
 
 pub fn detect_moves(
     cfg: &mut FunctionCFG,
     errors: &mut Vec<BorrowError>,
     declarations: &HashMap<TypeID, &StaticDeclaration>,
 ) {
-    detect_moves_node(&mut cfg.cfg, cfg.end, errors, declarations);
+    for cfg_node in cfg.cfg.node_weights_mut() {
+        calculate_liveness_of_expressions_in_node(errors, declarations, cfg_node);
+    }
+
+    let mut stack: Vec<_> = cfg.cfg.node_indices().collect();
+
+    let mut changed_nodes = Vec::new();
+
+    while let Some(parent) = stack.pop() {
+        let parent_liveness = cfg.cfg.node_weight(parent).unwrap().liveness();
+        let mut outgoing_neighbors = cfg
+            .cfg
+            .neighbors_directed(parent, Direction::Outgoing)
+            .detach();
+
+        while let Some((_edge, child)) = outgoing_neighbors.next(&cfg.cfg) {
+            let mut changes_for_child = Vec::new();
+            let child_liveness = cfg.cfg.node_weight(child).unwrap().liveness();
+
+            for (var_id, parent_liveness) in parent_liveness.iter() {
+                if let Some(child_liveness) = child_liveness.get(var_id) {
+                    match (parent_liveness, child_liveness) {
+                        (
+                            Liveness::Moved(_) | Liveness::MovedInParents(_),
+                            Liveness::Referenced(_) | Liveness::Moved(_),
+                        ) => {
+                            errors.push(BorrowError::UseAfterMove);
+                        }
+                        (
+                            Liveness::Moved(_) | Liveness::MovedInParents(_),
+                            Liveness::ParentReferenced,
+                        ) => {
+                            let mut parents = HashSet::new();
+                            parents.insert(parent);
+                            changes_for_child.push((*var_id, Liveness::MovedInParents(parents)));
+                        }
+                        (Liveness::Referenced(_) | Liveness::ParentReferenced, _) => {}
+                        (
+                            Liveness::Moved(_) | Liveness::MovedInParents(_),
+                            Liveness::MovedInParents(parents),
+                        ) => {
+                            if !parents.contains(&parent) {
+                                let mut parents = parents.clone();
+                                parents.insert(parent);
+                                changes_for_child
+                                    .push((*var_id, Liveness::MovedInParents(parents)));
+                            }
+                        }
+                    }
+                } else {
+                    match parent_liveness {
+                        Liveness::Moved(_) | Liveness::MovedInParents(_) => {
+                            let mut parents = HashSet::new();
+                            parents.insert(parent);
+                            changes_for_child.push((*var_id, Liveness::MovedInParents(parents)));
+                        }
+                        Liveness::Referenced(_) | Liveness::ParentReferenced => {
+                            changes_for_child.push((*var_id, Liveness::ParentReferenced));
+                        }
+                    }
+                }
+            }
+            if !changes_for_child.is_empty() {
+                changed_nodes.push((child, changes_for_child));
+            }
+        }
+
+        for (child, changes_for_child) in changed_nodes.drain(..) {
+            let child_liveness = cfg.cfg.node_weight_mut(child).unwrap().liveness_mut();
+            for (var_id, liveness) in changes_for_child {
+                child_liveness.insert(var_id, liveness);
+            }
+            if !stack.contains(&child) {
+                stack.push(child);
+            }
+        }
+    }
 }
 
-fn detect_moves_node(
-    cfg: &mut ControlFlowGraph,
-    node: NodeIndex,
+fn calculate_liveness_of_expressions_in_node(
     errors: &mut Vec<BorrowError>,
     declarations: &HashMap<TypeID, &StaticDeclaration>,
+    cfg_node: &mut CfgNode,
 ) {
-    if let CfgNode::Block { liveness, .. } = cfg.node_weight(node).unwrap() {
-        // Moves already detected here?
-        if !liveness.is_empty() {
-            return;
-        }
-    }
-
-    let mut parent_liveness = HashMap::new();
-    let mut incoming_connections = cfg.neighbors_directed(node, Direction::Incoming).detach();
-    let mut edge_count = 0;
-    while let Some((_edge, connector)) = incoming_connections.next(cfg) {
-        detect_moves_node(cfg, connector, errors, declarations);
-        let Some(
-            CfgNode::Block {
-                liveness: incoming_liveness,
-                ..
-            }
-            | CfgNode::Exit {
-                liveness: incoming_liveness,
-            },
-        ) = cfg.node_weight(connector)
-        else {
-            unreachable!()
-        };
-        for (var_id, liveness) in incoming_liveness.iter() {
-            match liveness {
-                Liveness::Moved | Liveness::ParentConditionalMoved(_) => {
-                    match parent_liveness.get_mut(var_id) {
-                        Some(Liveness::ParentConditionalMoved(count)) => {
-                            *count += 1;
-                        }
-                        Some(Liveness::Moved) => unreachable!(),
-                        _ => {
-                            parent_liveness.insert(*var_id, Liveness::ParentConditionalMoved(1));
-                        }
-                    }
-                }
-                Liveness::Referenced(_) | Liveness::ParentReferenced => {
-                    if !parent_liveness.contains_key(var_id) {
-                        parent_liveness.insert(*var_id, Liveness::ParentReferenced);
-                    }
-                }
-            }
-        }
-        edge_count += 1;
-    }
-
-    for mv in parent_liveness.values_mut() {
-        match mv {
-            Liveness::ParentConditionalMoved(count) if *count == edge_count => {
-                *mv = Liveness::Moved;
-            }
-            Liveness::ParentConditionalMoved(_)
-            | Liveness::ParentReferenced
-            | Liveness::Referenced(_) => {}
-            Liveness::Moved => unreachable!(),
-        }
-    }
-
     let CfgNode::Block {
         expressions,
         liveness: moves,
-    } = cfg.node_weight_mut(node).unwrap()
+    } = cfg_node
     else {
         return;
     };
-    *moves = parent_liveness;
     for expr in expressions.iter() {
         if matches!(
             &expr.value,
@@ -101,11 +122,11 @@ fn detect_moves_node(
         ) {
             continue;
         }
-        move_all(moves, errors, declarations, expr);
+        find_moves_in_node(moves, errors, declarations, expr);
     }
 }
 
-fn move_all(
+fn find_moves_in_node(
     liveness: &mut HashMap<VariableID, Liveness>,
     errors: &mut Vec<BorrowError>,
     declarations: &HashMap<TypeID, &StaticDeclaration>,
@@ -116,11 +137,11 @@ fn move_all(
             if is_affine(declarations, &expr.ty) {
                 let id = id.as_var();
                 match liveness.get(&id) {
-                    Some(Liveness::Moved | Liveness::ParentConditionalMoved(_)) => {
+                    Some(Liveness::Moved(_) | Liveness::MovedInParents(_)) => {
                         errors.push(BorrowError::UseAfterMove);
                     }
                     Some(Liveness::Referenced(_) | Liveness::ParentReferenced) | None => {
-                        liveness.insert(id, Liveness::Moved);
+                        liveness.insert(id, Liveness::Moved(expr.id));
                     }
                 }
             }
@@ -136,54 +157,54 @@ fn move_all(
         | HirNodeValue::StringLiteral(_)
         | HirNodeValue::Int(_) => {}
         HirNodeValue::TakeUnique(val) | HirNodeValue::TakeShared(val) => {
-            reference_all(liveness, errors, declarations, val);
+            find_references_in_node(liveness, errors, declarations, val);
         }
         HirNodeValue::Sequence(vals) => {
             for val in vals.iter() {
-                move_all(liveness, errors, declarations, val);
+                find_moves_in_node(liveness, errors, declarations, val);
             }
         }
         HirNodeValue::VtableCall(_, _, params)
         | HirNodeValue::Call(_, params)
         | HirNodeValue::ArrayLiteral(params) => {
             for param in params.iter() {
-                move_all(liveness, errors, declarations, param);
+                find_moves_in_node(liveness, errors, declarations, param);
             }
         }
         HirNodeValue::NumericCast { value, .. } => {
-            move_all(liveness, errors, declarations, value);
+            find_moves_in_node(liveness, errors, declarations, value);
         }
         HirNodeValue::ArrayLiteralLength(lhs, rhs) | HirNodeValue::BinOp(_, lhs, rhs) => {
-            move_all(liveness, errors, declarations, lhs);
-            move_all(liveness, errors, declarations, rhs);
+            find_moves_in_node(liveness, errors, declarations, lhs);
+            find_moves_in_node(liveness, errors, declarations, rhs);
         }
         HirNodeValue::ArrayIndex(arr, idx) => {
             if is_affine(declarations, &expr.ty) {
-                move_all(liveness, errors, declarations, arr);
+                find_moves_in_node(liveness, errors, declarations, arr);
             } else {
-                reference_all(liveness, errors, declarations, arr);
+                find_references_in_node(liveness, errors, declarations, arr);
             }
-            move_all(liveness, errors, declarations, idx);
+            find_moves_in_node(liveness, errors, declarations, idx);
         }
         HirNodeValue::Access(val, _) | HirNodeValue::Dereference(val) => {
             if is_affine(declarations, &expr.ty) {
-                move_all(liveness, errors, declarations, val);
+                find_moves_in_node(liveness, errors, declarations, val);
             } else {
-                reference_all(liveness, errors, declarations, val);
+                find_references_in_node(liveness, errors, declarations, val);
             }
         }
         HirNodeValue::Return(val) => {
-            move_all(liveness, errors, declarations, val);
+            find_moves_in_node(liveness, errors, declarations, val);
         }
         HirNodeValue::Assignment(_, rhs) => {
-            move_all(liveness, errors, declarations, rhs);
+            find_moves_in_node(liveness, errors, declarations, rhs);
         }
         HirNodeValue::If(cond, _, _) | HirNodeValue::While(cond, _) => {
-            move_all(liveness, errors, declarations, cond);
+            find_moves_in_node(liveness, errors, declarations, cond);
         }
         HirNodeValue::StructLiteral(_, fields) => {
             for field in fields.values() {
-                move_all(liveness, errors, declarations, field);
+                find_moves_in_node(liveness, errors, declarations, field);
             }
         }
         // TODO
@@ -192,7 +213,7 @@ fn move_all(
     }
 }
 
-fn reference_all(
+fn find_references_in_node(
     liveness: &mut HashMap<VariableID, Liveness>,
     errors: &mut Vec<BorrowError>,
     declarations: &HashMap<TypeID, &StaticDeclaration>,
@@ -203,7 +224,7 @@ fn reference_all(
             let id = id.as_var();
             if is_affine(declarations, &expr.ty) {
                 match liveness.get(&id) {
-                    Some(Liveness::Moved | Liveness::ParentConditionalMoved(_)) => {
+                    Some(Liveness::Moved(_) | Liveness::MovedInParents(_)) => {
                         errors.push(BorrowError::UseAfterMove);
                     }
                     Some(Liveness::Referenced(_) | Liveness::ParentReferenced) | None => {

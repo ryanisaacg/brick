@@ -25,8 +25,8 @@ collections:
 - cells
 
 borrow checker and lifetimes:
-- check borrows for top-level code
 - check borrows for function calls
+- handle assignments - both in terms of drop detection and borrow detection
 - allow disjoint borrows of struct fields
 - correctly mark references through collection indices
 - mark custom types as copy

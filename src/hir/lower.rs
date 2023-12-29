@@ -20,7 +20,6 @@ pub fn lower_module<'ast>(
         functions,
         top_level_statements,
     } = module;
-    dbg!(&declarations);
     HirModule {
         functions: functions
             .into_iter()

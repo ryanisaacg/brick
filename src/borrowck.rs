@@ -2,7 +2,11 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-use crate::{hir::HirModule, id::TypeID, typecheck::StaticDeclaration};
+use crate::{
+    hir::{HirModule, HirNode},
+    id::TypeID,
+    typecheck::StaticDeclaration,
+};
 
 mod check_borrows;
 mod control_flow_graph;
@@ -29,11 +33,21 @@ pub fn borrow_check(
     // TODO: borrow chekck top level statements
     let mut errors = Vec::new();
     for func in module.functions.iter() {
-        let mut cfg = build_control_flow_graph(&func.body);
-        detect_moves::detect_moves(&mut cfg, &mut errors, declarations);
-        let drop_points = drop_points::find_drop_points(&cfg);
-        check_borrows::check_borrows(&cfg, &drop_points, &mut errors);
+        borrow_check_node(declarations, &mut errors, &func.body);
     }
 
+    borrow_check_node(declarations, &mut errors, &module.top_level_statements);
+
     errors
+}
+
+fn borrow_check_node(
+    declarations: &HashMap<TypeID, &StaticDeclaration>,
+    errors: &mut Vec<BorrowError>,
+    node: &HirNode,
+) {
+    let mut cfg = build_control_flow_graph(node);
+    detect_moves::detect_moves(&mut cfg, errors, declarations);
+    let drop_points = drop_points::find_drop_points(&cfg);
+    check_borrows::check_borrows(&cfg, &drop_points, errors);
 }
