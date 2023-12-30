@@ -9,8 +9,8 @@ use crate::{
 };
 
 use super::{
-    ExpressionType, FuncType, InterfaceType, PointerKind, PrimitiveType, StaticDeclaration,
-    StructType, TypecheckError, UnionType,
+    CollectionType, ExpressionType, FuncType, InterfaceType, PointerKind, PrimitiveType,
+    StaticDeclaration, StructType, TypecheckError, UnionType,
 };
 
 pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, StaticDeclaration> {
@@ -221,9 +221,9 @@ pub fn resolve_type_expr(
             PointerKind::Shared,
             Box::new(resolve_type_expr(name_to_type_id, inner)?),
         ),
-        AstNodeValue::ArrayType(inner) => {
-            ExpressionType::Array(Box::new(resolve_type_expr(name_to_type_id, inner)?))
-        }
+        AstNodeValue::ArrayType(inner) => ExpressionType::Collection(CollectionType::Array(
+            Box::new(resolve_type_expr(name_to_type_id, inner)?),
+        )),
         AstNodeValue::NullableType(inner) => {
             ExpressionType::Nullable(Box::new(resolve_type_expr(name_to_type_id, inner)?))
         }

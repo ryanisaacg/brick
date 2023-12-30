@@ -5,7 +5,7 @@ use petgraph::Direction;
 use crate::{
     hir::{HirNode, HirNodeValue},
     id::{TypeID, VariableID},
-    typecheck::{ExpressionType, PointerKind, StaticDeclaration},
+    typecheck::{CollectionType, ExpressionType, PointerKind, StaticDeclaration},
 };
 
 use super::{
@@ -171,6 +171,12 @@ fn find_moves_in_node(
                 find_moves_in_node(liveness, errors, declarations, param);
             }
         }
+        HirNodeValue::DictLiteral(entries) => {
+            for (key, value) in entries.iter() {
+                find_moves_in_node(liveness, errors, declarations, key);
+                find_moves_in_node(liveness, errors, declarations, value);
+            }
+        }
         HirNodeValue::NumericCast { value, .. } => {
             find_moves_in_node(liveness, errors, declarations, value);
         }
@@ -183,6 +189,14 @@ fn find_moves_in_node(
                 find_moves_in_node(liveness, errors, declarations, arr);
             } else {
                 find_references_in_node(liveness, errors, declarations, arr);
+            }
+            find_moves_in_node(liveness, errors, declarations, idx);
+        }
+        HirNodeValue::DictIndex(dict, idx) => {
+            if is_affine(declarations, &expr.ty) {
+                find_moves_in_node(liveness, errors, declarations, dict);
+            } else {
+                find_references_in_node(liveness, errors, declarations, dict);
             }
             find_moves_in_node(liveness, errors, declarations, idx);
         }
@@ -252,7 +266,8 @@ fn is_affine(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &Expression
             PointerKind::Shared => false,
             PointerKind::Unique => true,
         },
-        ExpressionType::Array(_) => true,
+        ExpressionType::Collection(CollectionType::Array(_)) => true,
+        ExpressionType::Collection(CollectionType::Dict(_, _)) => true,
         ExpressionType::Null => false,
         ExpressionType::Nullable(inner) => is_affine(declarations, inner),
     }

@@ -6,8 +6,8 @@ use crate::{
     id::{NodeID, TypeID},
     parser::{AstNode, AstNodeValue, BinOp, IfDeclaration},
     typecheck::{
-        find_func, fully_dereference, ExpressionType, StaticDeclaration, TypecheckedFile,
-        TypecheckedFunction,
+        find_func, fully_dereference, CollectionType, ExpressionType, StaticDeclaration,
+        TypecheckedFile, TypecheckedFunction,
     },
 };
 
@@ -167,6 +167,18 @@ fn lower_node<'ast>(
                 HirNodeValue::Access(left, name.clone())
             }
         }
+        AstNodeValue::BinExpr(BinOp::Index, left, right) => {
+            let ty = left.ty.get().unwrap();
+            let left = lower_node_alloc(decls, left);
+            let right = lower_node_alloc(decls, right);
+            match ty {
+                ExpressionType::Collection(collection) => match collection {
+                    CollectionType::Dict(_, _) => HirNodeValue::DictIndex(left, right),
+                    CollectionType::Array(_) => HirNodeValue::ArrayIndex(left, right),
+                },
+                _ => unreachable!(),
+            }
+        }
         AstNodeValue::BinExpr(op, left, right) => {
             let left = lower_node_alloc(decls, left);
             let right = lower_node_alloc(decls, right);
@@ -214,8 +226,7 @@ fn lower_node<'ast>(
                 }
                 BinOp::EqualTo => HirNodeValue::BinOp(HirBinOp::EqualTo, left, right),
                 BinOp::NotEquals => HirNodeValue::BinOp(HirBinOp::NotEquals, left, right),
-                BinOp::Index => HirNodeValue::ArrayIndex(left, right),
-                BinOp::Dot => unreachable!(),
+                BinOp::Index | BinOp::Dot => unreachable!(),
             }
         }
         AstNodeValue::Call(func, params) => {
@@ -239,7 +250,12 @@ fn lower_node<'ast>(
                 .collect();
             HirNodeValue::StructLiteral(id.as_type(), fields)
         }
-        AstNodeValue::DictLiteral(_) => todo!(),
+        AstNodeValue::DictLiteral(elements) => HirNodeValue::DictLiteral(
+            elements
+                .iter()
+                .map(|(key, value)| (lower_node(decls, key), lower_node(decls, value)))
+                .collect(),
+        ),
         AstNodeValue::ArrayLiteral(arr) => {
             let arr = arr.iter().map(|elem| lower_node(decls, elem)).collect();
             HirNodeValue::ArrayLiteral(arr)

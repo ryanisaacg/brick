@@ -95,3 +95,30 @@ array[5]
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn basic_dict_keys() {
+    let result = eval(
+        r#"
+let val = dict[ [1]: 30, [2]: 8 ];
+val[1] - val[2]
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(22)]);
+}
+
+#[tokio::test]
+async fn write_to_dict() {
+    let result = eval(
+        r#"
+let val = dict[ [1]: 30, [2]: 8 ];
+val[1] = 80;
+val[1]
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(80)]);
+}

@@ -22,9 +22,15 @@ pub enum ExpressionType {
     Primitive(PrimitiveType),
     DeclaredType(TypeID),
     Pointer(PointerKind, Box<ExpressionType>),
-    Array(Box<ExpressionType>),
+    Collection(CollectionType),
     Null,
     Nullable(Box<ExpressionType>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CollectionType {
+    Array(Box<ExpressionType>),
+    Dict(Box<ExpressionType>, Box<ExpressionType>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -506,9 +512,7 @@ fn typecheck_expression<'a>(
             let collection_ty =
                 typecheck_expression(collection, outer_scopes, current_scope, context)?;
             match collection_ty {
-                ExpressionType::Array(item_ty) => {
-                    // TODO: new type for indexing arrays?
-                    // TODO: int64?
+                ExpressionType::Collection(CollectionType::Array(item_ty)) => {
                     let index_ty =
                         typecheck_expression(index, outer_scopes, current_scope, context)?;
                     if !is_assignable_to(
@@ -523,6 +527,18 @@ fn typecheck_expression<'a>(
                     }
 
                     *item_ty.clone()
+                }
+                ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) => {
+                    let index_ty =
+                        typecheck_expression(index, outer_scopes, current_scope, context)?;
+                    if !is_assignable_to(&context.id_to_decl, index_ty, key_ty) {
+                        return Err(TypecheckError::TypeMismatch {
+                            received: index_ty.clone(),
+                            expected: ExpressionType::Primitive(PrimitiveType::Int32),
+                        });
+                    }
+
+                    *value_ty.clone()
                 }
                 _ => todo!("can't index that"),
             }
@@ -740,7 +756,39 @@ fn typecheck_expression<'a>(
 
             ExpressionType::DeclaredType(*struct_type_id)
         }
-        AstNodeValue::DictLiteral(_entries) => todo!(),
+        AstNodeValue::DictLiteral(entries) => {
+            let mut result_key_ty = None;
+            let mut result_value_ty = None;
+            for (key, value) in entries.iter() {
+                let key_ty = typecheck_expression(key, outer_scopes, current_scope, context)?;
+                if let Some(expected_key_ty) = result_key_ty {
+                    if !is_assignable_to(&context.id_to_decl, key_ty, expected_key_ty) {
+                        return Err(TypecheckError::TypeMismatch {
+                            received: key_ty.clone(),
+                            expected: expected_key_ty.clone(),
+                        });
+                    }
+                } else {
+                    result_key_ty = Some(key_ty);
+                }
+                let value_ty = typecheck_expression(value, outer_scopes, current_scope, context)?;
+                if let Some(expected_value_ty) = result_value_ty {
+                    if !is_assignable_to(&context.id_to_decl, value_ty, expected_value_ty) {
+                        return Err(TypecheckError::TypeMismatch {
+                            received: value_ty.clone(),
+                            expected: expected_value_ty.clone(),
+                        });
+                    }
+                } else {
+                    result_value_ty = Some(value_ty);
+                }
+            }
+
+            ExpressionType::Collection(CollectionType::Dict(
+                Box::new(result_key_ty.unwrap().clone()),
+                Box::new(result_value_ty.unwrap().clone()),
+            ))
+        }
         // TODO: assert that this is an lvalue
         AstNodeValue::TakeUnique(inner) => ExpressionType::Pointer(
             PointerKind::Unique,
@@ -775,7 +823,7 @@ fn typecheck_expression<'a>(
                     });
                 }
             }
-            ExpressionType::Array(Box::new(ty))
+            ExpressionType::Collection(CollectionType::Array(Box::new(ty)))
         }
         AstNodeValue::ArrayLiteralLength(value, length) => {
             let inner = typecheck_expression(value, outer_scopes, current_scope, context)?;
@@ -787,7 +835,7 @@ fn typecheck_expression<'a>(
                     received: length.clone(),
                 });
             }
-            ExpressionType::Array(Box::new(inner.clone()))
+            ExpressionType::Collection(CollectionType::Array(Box::new(inner.clone())))
         }
     };
 
@@ -958,10 +1006,12 @@ pub fn is_assignable_to(
         }
 
         // TODO: could these ever be valid?
-        (DeclaredType(_), Primitive(_)) | (DeclaredType(_), Array(_)) => false,
+        (DeclaredType(_), Primitive(_)) | (DeclaredType(_), Collection(_)) => false,
 
         // TODO: arrays
-        (Array(_), Primitive(_)) | (Array(_), DeclaredType(_)) | (Array(_), Array(_)) => todo!(),
+        (Collection(_), Primitive(_))
+        | (Collection(_), DeclaredType(_))
+        | (Collection(_), Collection(_)) => todo!(),
     }
 }
 

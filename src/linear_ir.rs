@@ -4,7 +4,7 @@ use crate::{
     hir::{HirBinOp, HirFunction, HirNode, HirNodeValue},
     id::{FunctionID, TypeID, VariableID},
     provenance::SourceRange,
-    typecheck::{ExpressionType, PrimitiveType, StaticDeclaration},
+    typecheck::{CollectionType, ExpressionType, PrimitiveType, StaticDeclaration},
 };
 
 #[derive(Debug)]
@@ -100,6 +100,17 @@ impl LinearNode {
     fn read_temp(tmp: u8) -> LinearNode {
         LinearNode {
             value: LinearNodeValue::ReadTemporary(tmp),
+            provenance: None,
+        }
+    }
+
+    fn read_memory(location: LinearNode, offset: usize, ty: ExpressionType) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::ReadMemory {
+                location: Box::new(location),
+                offset,
+                ty,
+            },
             provenance: None,
         }
     }
@@ -410,7 +421,7 @@ fn lower_expression(
             )
         }
         HirNodeValue::ArrayLiteral(values) => {
-            let ExpressionType::Array(inner_ty) = ty else {
+            let ExpressionType::Collection(CollectionType::Array(inner_ty)) = ty else {
                 unreachable!()
             };
             let size = expression_type_size(declarations, &inner_ty);
@@ -439,7 +450,7 @@ fn lower_expression(
             LinearNodeValue::Sequence(instrs)
         }
         HirNodeValue::ArrayLiteralLength(value, length) => {
-            let ExpressionType::Array(inner_ty) = ty else {
+            let ExpressionType::Collection(CollectionType::Array(inner_ty)) = ty else {
                 unreachable!()
             };
             let size = expression_type_size(declarations, &inner_ty);
@@ -576,6 +587,56 @@ fn lower_expression(
             from,
             to,
         },
+        HirNodeValue::DictIndex(dict, idx) => {
+            let (location, offset) = dict_index_location(declarations, stack_entries, *dict, *idx);
+            LinearNodeValue::ReadMemory {
+                location: Box::new(location),
+                offset,
+                ty,
+            }
+        }
+        HirNodeValue::DictLiteral(entries) => {
+            let ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) = ty else {
+                unreachable!()
+            };
+            let key_ty = *key_ty;
+            let value_ty = *value_ty;
+
+            let key_size = expression_type_size(declarations, &key_ty);
+            let value_size = expression_type_size(declarations, &value_ty);
+            let entry_size = key_size + value_size;
+
+            let length = entries.len();
+
+            let mut instrs = vec![LinearNode::write_temp(
+                0,
+                LinearNode::heap_alloc(entry_size * length),
+            )];
+            let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
+            instrs.extend(keys.into_iter().enumerate().map(|(idx, value)| {
+                LinearNode::new(LinearNodeValue::WriteMemory {
+                    location: Box::new(LinearNode::read_temp(0)),
+                    offset: entry_size * idx,
+                    ty: key_ty.clone(),
+                    value: Box::new(lower_expression(declarations, stack_entries, value)),
+                })
+            }));
+            instrs.extend(values.into_iter().enumerate().map(|(idx, value)| {
+                LinearNode::new(LinearNodeValue::WriteMemory {
+                    location: Box::new(LinearNode::read_temp(0)),
+                    offset: entry_size * idx + key_size,
+                    ty: value_ty.clone(),
+                    value: Box::new(lower_expression(declarations, stack_entries, value)),
+                })
+            }));
+            // capacity
+            instrs.push(LinearNode::size(length));
+            // length
+            instrs.push(LinearNode::size(length));
+            instrs.push(LinearNode::new(LinearNodeValue::ReadTemporary(0)));
+
+            LinearNodeValue::Sequence(instrs)
+        }
     };
 
     LinearNode { value, provenance }
@@ -594,6 +655,9 @@ fn lower_lvalue(
         }
         HirNodeValue::ArrayIndex(arr, idx) => {
             array_index_location(declarations, stack_entries, *arr, *idx, &lvalue.ty)
+        }
+        HirNodeValue::DictIndex(dict, idx) => {
+            dict_index_location(declarations, stack_entries, *dict, *idx)
         }
 
         HirNodeValue::Parameter(_, _) => todo!(),
@@ -620,22 +684,9 @@ fn lower_lvalue(
 
         HirNodeValue::ArrayLiteral(_) | HirNodeValue::ArrayLiteralLength(_, _) => unreachable!(),
         HirNodeValue::NumericCast { .. } => todo!(),
+        HirNodeValue::DictLiteral(_) => todo!(),
     }
 }
-
-/*fn read(
-    declarations: &HashMap<ID, TypeMemoryLayout>,
-    location: Box<LinearNode>,
-    offset: usize,
-    ty: ExpressionType,
-) -> LinearNodeValue {
-    LinearNodeValue::ReadMemory {
-        location: Box::new(location),
-        offset,
-        size: expression_type_size(declarations, &ty),
-        ty,
-    }
-}*/
 
 fn variable_location(
     stack_entries: &HashMap<VariableID, usize>,
@@ -725,6 +776,90 @@ fn array_index_location(
     )
 }
 
+fn dict_index_location(
+    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    stack_entries: &HashMap<VariableID, usize>,
+    dict: HirNode,
+    idx: HirNode,
+) -> (LinearNode, usize) {
+    let ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) = &dict.ty else {
+        unreachable!()
+    };
+    let ExpressionType::Primitive(idx_ty) = &idx.ty else {
+        todo!("non-primitive keys for dictionaries")
+    };
+    let idx_ty = *idx_ty;
+
+    let key_size = expression_type_size(declarations, key_ty);
+    let value_size = expression_type_size(declarations, value_ty);
+    let entry_size = key_size + value_size;
+
+    let dict = lower_expression(declarations, stack_entries, dict);
+
+    (
+        LinearNode::new(LinearNodeValue::Sequence(vec![
+            // pointer
+            LinearNode::write_temp(1, dict),
+            // length
+            LinearNode::write_temp(2, LinearNode::new(LinearNodeValue::TopOfStack)),
+            // capacity
+            LinearNode::new(LinearNodeValue::Discard),
+            // index
+            LinearNode::write_temp(3, LinearNode::size(0)),
+            LinearNode::new(LinearNodeValue::Loop(vec![
+                // Check if we've found the key
+                LinearNode::if_node(
+                    LinearNode::new(LinearNodeValue::BinOp(
+                        HirBinOp::EqualTo,
+                        idx_ty,
+                        Box::new(LinearNode::read_memory(
+                            LinearNode::read_temp(1),
+                            0,
+                            ExpressionType::Primitive(idx_ty),
+                        )),
+                        // TODO: don't repeatedly call this
+                        Box::new(lower_expression(declarations, stack_entries, idx)),
+                    )),
+                    vec![
+                        LinearNode::read_temp(1),
+                        LinearNode::new(LinearNodeValue::Break),
+                    ],
+                    None,
+                    None,
+                ),
+                // Increment the length counter and check if we've overflowed the bounds
+                LinearNode::write_temp(
+                    3,
+                    LinearNode::ptr_op(
+                        HirBinOp::Add,
+                        LinearNode::read_temp(3),
+                        LinearNode::size(1),
+                    ),
+                ),
+                LinearNode::write_temp(
+                    1,
+                    LinearNode::ptr_op(
+                        HirBinOp::Add,
+                        LinearNode::read_temp(1),
+                        LinearNode::size(entry_size),
+                    ),
+                ),
+                LinearNode::if_node(
+                    LinearNode::ptr_op(
+                        HirBinOp::EqualTo,
+                        LinearNode::read_temp(2),
+                        LinearNode::read_temp(3),
+                    ),
+                    vec![LinearNode::new(LinearNodeValue::Abort)],
+                    None,
+                    None,
+                ),
+            ])),
+        ])),
+        key_size,
+    )
+}
+
 // TODO: this should probably be determined by the backend...
 const POINTER_SIZE: usize = 8;
 
@@ -738,7 +873,8 @@ fn expression_type_size(
         ExpressionType::Primitive(prim) => primitive_type_size(*prim),
         ExpressionType::DeclaredType(id) => declarations[id].size(),
         ExpressionType::Pointer(_, _) => POINTER_SIZE,
-        ExpressionType::Array(_) => POINTER_SIZE * 3,
+        ExpressionType::Collection(CollectionType::Array(_)) => POINTER_SIZE * 3,
+        ExpressionType::Collection(CollectionType::Dict(..)) => POINTER_SIZE * 3,
         ExpressionType::Null => 1,
         ExpressionType::Nullable(inner) => {
             // TODO: would this be an alignment issue?
@@ -886,7 +1022,12 @@ fn layout_type(
             (TypeLayoutField::Referenced(*id), size)
         }
         ExpressionType::Pointer(_, _) => (TypeLayoutField::Pointer, POINTER_SIZE),
-        ExpressionType::Array(_) => (TypeLayoutField::Pointer, POINTER_SIZE),
+        ExpressionType::Collection(CollectionType::Array(_)) => {
+            (TypeLayoutField::Pointer, POINTER_SIZE)
+        }
+        ExpressionType::Collection(CollectionType::Dict(_, _)) => {
+            todo!()
+        }
         ExpressionType::Nullable(inner) => {
             let (inner, size) = layout_type(declarations, layouts, inner);
             (TypeLayoutField::Nullable(Box::new(inner)), size + 1)

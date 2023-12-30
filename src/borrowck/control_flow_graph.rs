@@ -223,6 +223,8 @@ fn create_graph_for_node<'a>(
         | Parameter(_, _)
         | Access(_, _)
         | ArrayIndex(_, _)
+        | DictIndex(_, _)
+        | DictLiteral(_)
         | InterfaceAddress(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));
 

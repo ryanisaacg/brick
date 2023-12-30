@@ -15,10 +15,9 @@ collections:
     - allow empty arrays to typecheck
     - length() method on arrays
 - dicts:
-    - differentiate index operator
     - dict type syntax
-    - typechecking
-    - interpreter
+    - insert new entries into dictionaries
+    - use a hash table
 - slices
 - boxes
 - rc's

@@ -9,7 +9,7 @@ use crate::{
         LinearFunction, LinearNode, LinearNodeValue, TypeLayoutField, TypeLayoutValue,
         TypeMemoryLayout,
     },
-    typecheck::{ExpressionType, PrimitiveType},
+    typecheck::{CollectionType, ExpressionType, PrimitiveType},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -251,7 +251,7 @@ pub async fn evaluate_block(
             evaluate_block(fns, params, vm, lhs).await?;
             let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
-            let val = match (left, right) {
+            let val = match dbg!((left, right)) {
                 (Numeric::Int32(left), Numeric::Int32(right)) => match op {
                     HirBinOp::Add => Value::Int32(left + right),
                     HirBinOp::Subtract => Value::Int32(left - right),
@@ -341,6 +341,7 @@ pub async fn evaluate_block(
             vm.op_stack.push(Value::FunctionID(*x));
         }
         LinearNodeValue::WriteTemporary(tmp, val) => {
+            dbg!(node);
             evaluate_block(fns, params, vm, val).await?;
             let Value::Size(val) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
@@ -468,7 +469,8 @@ fn write(
             }
             TypeLayoutValue::FunctionPointer => todo!(),
         },
-        ExpressionType::Array(_) => {
+        ExpressionType::Collection(CollectionType::Dict(_, _))
+        | ExpressionType::Collection(CollectionType::Array(_)) => {
             write_primitive(op_stack, memory, location);
             write_primitive(op_stack, memory, location + 8);
             write_primitive(op_stack, memory, location + 16);
@@ -553,7 +555,8 @@ fn read(
                 }
             }
         }
-        ExpressionType::Array(_) => {
+        ExpressionType::Collection(CollectionType::Dict(_, _))
+        | ExpressionType::Collection(CollectionType::Array(_)) => {
             read_primitive(op_stack, memory, location + 16, PrimitiveType::PointerSize);
             read_primitive(op_stack, memory, location + 8, PrimitiveType::PointerSize);
             read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
