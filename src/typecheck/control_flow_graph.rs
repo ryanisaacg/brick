@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{
-    arena::ArenaNode,
-    parser::{AstNode, AstNodeValue, IfDeclaration},
-};
+use crate::parser::{AstNode, AstNodeValue, IfDeclaration};
 
 // Based on https://ics.uci.edu/~lopes/teaching/inf212W12/readings/rep-analysis-soft.pdf
 
@@ -178,14 +175,11 @@ fn create_graph_for_node<'a>(
         | DictLiteral(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));
             let mut current_node = start;
-            let mut children = Vec::new();
-            current.write_children(&mut children);
-
-            for child in children {
+            current.children(|child| {
                 let (start_child, end_child) = create_graph_for_node(child, graph, exit);
                 graph.add_edge(current_node, start_child, CfgEdge::Flow);
                 current_node = end_child;
-            }
+            });
 
             (start, current_node)
         }

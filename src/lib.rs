@@ -16,7 +16,6 @@ use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
 
-mod arena;
 mod borrowck;
 mod hir;
 mod id;

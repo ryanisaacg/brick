@@ -4,7 +4,6 @@ use thiserror::Error;
 use typed_arena::Arena;
 
 use crate::{
-    arena::ArenaNode,
     id::{AnyID, FunctionID, NodeID, VariableID},
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
@@ -33,6 +32,130 @@ impl<'a> AstNode<'a> {
             value,
             provenance,
             ty: OnceLock::new(),
+        }
+    }
+
+    pub fn children(&'a self, mut callback: impl FnMut(&'a AstNode<'a>)) {
+        use AstNodeValue::*;
+
+        match &self.value {
+            TakeRef(child)
+            | TakeUnique(child)
+            | ArrayLiteralLength(child, _)
+            | UniqueType(child)
+            | SharedType(child)
+            | NullableType(child)
+            | Return(child)
+            | Statement(child)
+            | Deref(child)
+            | ArrayType(child) => {
+                callback(child);
+            }
+            BinExpr(_, left, right) | While(left, right) => {
+                callback(right);
+                callback(left);
+            }
+            If(IfDeclaration {
+                condition,
+                if_branch,
+                else_branch,
+            }) => {
+                callback(condition);
+                callback(if_branch);
+                if let Some(else_branch) = else_branch {
+                    callback(else_branch);
+                }
+            }
+            Declaration(_, type_hint, child) => {
+                if let Some(type_hint) = type_hint {
+                    callback(type_hint);
+                }
+                callback(child);
+            }
+            ArrayLiteral(values) | Block(values) => {
+                for value in values.iter() {
+                    callback(value);
+                }
+            }
+            StructLiteral { fields, .. } => {
+                for expression in fields.values() {
+                    callback(expression);
+                }
+            }
+            DictLiteral(entries) => {
+                for (left, right) in entries.iter() {
+                    callback(left);
+                    callback(right);
+                }
+            }
+            Call(function, parameters) => {
+                callback(function);
+                for expression in parameters.iter() {
+                    callback(expression);
+                }
+            }
+            AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+                body,
+                params,
+                returns,
+                ..
+            }) => {
+                callback(body);
+                for (_, param) in params.iter() {
+                    callback(param.ty);
+                }
+                if let Some(returns) = returns {
+                    callback(returns);
+                }
+            }
+            ExternFunctionBinding(FunctionHeaderValue {
+                params, returns, ..
+            })
+            | RequiredFunction(FunctionHeaderValue {
+                params, returns, ..
+            }) => {
+                for param in params.iter() {
+                    callback(param.ty);
+                }
+                if let Some(returns) = returns {
+                    callback(returns);
+                }
+            }
+            StructDeclaration(StructDeclarationValue {
+                fields,
+                associated_functions,
+                ..
+            }) => {
+                for field in fields.iter() {
+                    callback(field.ty);
+                }
+                for node in associated_functions.iter() {
+                    callback(node);
+                }
+            }
+            InterfaceDeclaration(InterfaceDeclarationValue {
+                associated_functions: fields,
+                ..
+            }) => {
+                for field in fields.iter() {
+                    callback(field);
+                }
+            }
+            UnionDeclaration(UnionDeclarationValue {
+                variants: fields, ..
+            }) => {
+                for field in fields.iter() {
+                    callback(field.ty);
+                }
+            }
+            Name { .. }
+            | Import(_)
+            | Int(_)
+            | Float(_)
+            | Bool(_)
+            | Null
+            | CharLiteral(_)
+            | StringLiteral(_) => {}
         }
     }
 }
@@ -135,137 +258,11 @@ pub enum AstNodeValue<'a> {
     NullableType(&'a mut AstNode<'a>),
 }
 
-impl AstNodeValue<'_> {
-    fn name<'a>(value: String) -> AstNodeValue<'a> {
+impl<'a> AstNodeValue<'a> {
+    fn name(value: String) -> AstNodeValue<'a> {
         AstNodeValue::Name {
             value,
             referenced_id: OnceLock::new(),
-        }
-    }
-}
-
-impl<'a> ArenaNode<'a> for AstNode<'a> {
-    fn write_children(&'a self, children: &mut Vec<&'a Self>) {
-        use AstNodeValue::*;
-
-        match &self.value {
-            TakeRef(child)
-            | TakeUnique(child)
-            | ArrayLiteralLength(child, _)
-            | UniqueType(child)
-            | SharedType(child)
-            | NullableType(child)
-            | Return(child)
-            | Statement(child)
-            | Deref(child)
-            | ArrayType(child) => {
-                children.push(*child);
-            }
-            BinExpr(_, left, right) | While(left, right) => {
-                children.push(*right);
-                children.push(*left);
-            }
-            If(IfDeclaration {
-                condition,
-                if_branch,
-                else_branch,
-            }) => {
-                children.push(*condition);
-                children.push(*if_branch);
-                if let Some(else_branch) = else_branch {
-                    children.push(*else_branch);
-                }
-            }
-            Declaration(_, type_hint, child) => {
-                if let Some(type_hint) = type_hint {
-                    children.push(*type_hint);
-                }
-                children.push(*child);
-            }
-            ArrayLiteral(values) | Block(values) => {
-                for value in values.iter() {
-                    children.push(value);
-                }
-            }
-            StructLiteral { fields, .. } => {
-                for expression in fields.values() {
-                    children.push(expression);
-                }
-            }
-            DictLiteral(entries) => {
-                for (left, right) in entries.iter() {
-                    children.push(left);
-                    children.push(right);
-                }
-            }
-            Call(function, parameters) => {
-                children.push(*function);
-                for expression in parameters.iter() {
-                    children.push(expression);
-                }
-            }
-            AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-                body,
-                params,
-                returns,
-                ..
-            }) => {
-                children.push(*body);
-                for (_, param) in params.iter() {
-                    children.push(param.ty);
-                }
-                if let Some(returns) = returns {
-                    children.push(*returns);
-                }
-            }
-            ExternFunctionBinding(FunctionHeaderValue {
-                params, returns, ..
-            })
-            | RequiredFunction(FunctionHeaderValue {
-                params, returns, ..
-            }) => {
-                for param in params.iter() {
-                    children.push(param.ty);
-                }
-                if let Some(returns) = returns {
-                    children.push(*returns);
-                }
-            }
-            StructDeclaration(StructDeclarationValue {
-                fields,
-                associated_functions,
-                ..
-            }) => {
-                for field in fields.iter() {
-                    children.push(field.ty);
-                }
-                for node in associated_functions.iter() {
-                    children.push(node);
-                }
-            }
-            InterfaceDeclaration(InterfaceDeclarationValue {
-                associated_functions: fields,
-                ..
-            }) => {
-                for field in fields.iter() {
-                    children.push(field);
-                }
-            }
-            UnionDeclaration(UnionDeclarationValue {
-                variants: fields, ..
-            }) => {
-                for field in fields.iter() {
-                    children.push(field.ty);
-                }
-            }
-            Name { .. }
-            | Import(_)
-            | Int(_)
-            | Float(_)
-            | Bool(_)
-            | Null
-            | CharLiteral(_)
-            | StringLiteral(_) => {}
         }
     }
 }
@@ -1321,12 +1318,13 @@ fn dict_literal<'a>(
     let mut cursor = token.range.end();
     let mut entries = Vec::new();
     loop {
-        let key = match peek_token(source, cursor, "expected } or next field")?.value {
+        let key = match peek_token(source, cursor, "expected ] or next entry")?.value {
             TokenValue::CloseBracket => {
                 source.next();
                 break;
             }
             TokenValue::OpenSquare => {
+                already_peeked_token(source)?;
                 let key = expression(source, context, cursor, true)?;
                 let token = assert_next_lexeme_eq(
                     source.next(),
