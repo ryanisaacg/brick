@@ -441,7 +441,7 @@ fn write(
         ExpressionType::Primitive(_) => {
             write_primitive(op_stack, memory, location);
         }
-        ExpressionType::DeclaredType(id) => match &layouts[id].value {
+        ExpressionType::InstanceOf(id) => match &layouts[id].value {
             TypeLayoutValue::Structure(fields) => {
                 for (_, offset, ty) in fields.iter() {
                     let location = location + offset;
@@ -454,7 +454,7 @@ fn write(
                             layouts,
                             memory,
                             location,
-                            &ExpressionType::DeclaredType(*id),
+                            &ExpressionType::InstanceOf(*id),
                         ),
                         TypeLayoutField::Nullable(_) => todo!(),
                         TypeLayoutField::Pointer => todo!(),
@@ -480,6 +480,7 @@ fn write(
         }
         ExpressionType::Null => todo!(),
         ExpressionType::Nullable(_) => todo!(),
+        ExpressionType::ReferenceTo(_) => todo!(),
     }
 }
 
@@ -518,7 +519,7 @@ fn read(
         ExpressionType::Primitive(p) => {
             read_primitive(op_stack, memory, location, *p);
         }
-        ExpressionType::DeclaredType(id) => {
+        ExpressionType::InstanceOf(id) => {
             let layout = &layouts[id];
             match &layout.value {
                 TypeLayoutValue::Structure(fields) => {
@@ -533,7 +534,7 @@ fn read(
                                 layouts,
                                 memory,
                                 location,
-                                &ExpressionType::DeclaredType(*id),
+                                &ExpressionType::InstanceOf(*id),
                             ),
                             TypeLayoutField::Nullable(_) => todo!(),
                             TypeLayoutField::Pointer => todo!(),
@@ -565,6 +566,7 @@ fn read(
             read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
         }
         ExpressionType::Nullable(_) => todo!(),
+        ExpressionType::ReferenceTo(_) => todo!(),
     }
 }
 

@@ -6,7 +6,7 @@ use crate::{
     provenance::SourceRange,
     typecheck::{
         find_func, is_assignable_to, CollectionType, ExpressionType, PrimitiveType,
-        StaticDeclaration, TypecheckedFile,
+        StaticDeclaration, StructType, TypecheckedFile, UnionType,
     },
 };
 
@@ -315,7 +315,7 @@ impl HirNode {
                 }
             }
             HirNodeValue::Call(lhs, params) => {
-                let ExpressionType::DeclaredType(id) = &lhs.ty else {
+                let ExpressionType::InstanceOf(id) = &lhs.ty else {
                     unreachable!()
                 };
                 let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
@@ -398,7 +398,8 @@ impl HirNode {
                 }
             }
             HirNodeValue::Call(lhs, params) => {
-                let ExpressionType::DeclaredType(id) = &lhs.ty else {
+                let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id)) = &lhs.ty
+                else {
                     unreachable!()
                 };
                 let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
@@ -418,11 +419,18 @@ impl HirNode {
                 // TODO: check return types
             }
             HirNodeValue::StructLiteral(ty_id, fields) => {
-                let Some(StaticDeclaration::Struct(ty)) = declarations.get(ty_id) else {
+                let (StaticDeclaration::Struct(StructType {
+                    fields: ty_fields, ..
+                })
+                | StaticDeclaration::Union(UnionType {
+                    variants: ty_fields,
+                    ..
+                })) = declarations.get(ty_id).unwrap()
+                else {
                     unreachable!();
                 };
                 for (name, field) in fields.iter_mut() {
-                    callback(&ty.fields[name], field);
+                    callback(&ty_fields[name], field);
                 }
             }
             // TODO: heterogenous collections

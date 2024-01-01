@@ -521,7 +521,7 @@ fn lower_expression(
             }
         }
         HirNodeValue::VtableCall(table, fn_id, params) => {
-            let ExpressionType::DeclaredType(ty_id) = &table.ty else {
+            let ExpressionType::InstanceOf(ty_id) = &table.ty else {
                 unreachable!()
             };
             let Some(TypeMemoryLayout {
@@ -562,7 +562,7 @@ fn lower_expression(
         HirNodeValue::StructToInterface { value, vtable } => {
             let mut values = Vec::new();
 
-            let ExpressionType::DeclaredType(ty_id) = &ty else {
+            let ExpressionType::InstanceOf(ty_id) = &ty else {
                 unreachable!()
             };
             let Some(TypeMemoryLayout {
@@ -711,7 +711,7 @@ fn access_location(
     lhs: HirNode,
     rhs: String,
 ) -> (LinearNode, usize) {
-    let ExpressionType::DeclaredType(ty_id) = lhs.ty else {
+    let ExpressionType::InstanceOf(ty_id) = lhs.ty else {
         unreachable!()
     };
     let TypeMemoryLayout { value, .. } = &declarations[&ty_id];
@@ -871,7 +871,7 @@ fn expression_type_size(
     match expr {
         ExpressionType::Void => 0,
         ExpressionType::Primitive(prim) => primitive_type_size(*prim),
-        ExpressionType::DeclaredType(id) => declarations[id].size(),
+        ExpressionType::InstanceOf(id) => declarations[id].size(),
         ExpressionType::Pointer(_, _) => POINTER_SIZE,
         ExpressionType::Collection(CollectionType::Array(_)) => POINTER_SIZE * 3,
         ExpressionType::Collection(CollectionType::Dict(..)) => POINTER_SIZE * 3,
@@ -880,6 +880,7 @@ fn expression_type_size(
             // TODO: would this be an alignment issue?
             1 + expression_type_size(declarations, inner)
         }
+        ExpressionType::ReferenceTo(_) => todo!(),
     }
 }
 
@@ -1017,7 +1018,7 @@ fn layout_type(
             let size = primitive_type_size(*p);
             (TypeLayoutField::Primitive(*p), size)
         }
-        ExpressionType::DeclaredType(id) => {
+        ExpressionType::InstanceOf(id) => {
             let size = layout_static_decl(declarations, layouts, declarations[id]);
             (TypeLayoutField::Referenced(*id), size)
         }
@@ -1032,5 +1033,6 @@ fn layout_type(
             let (inner, size) = layout_type(declarations, layouts, inner);
             (TypeLayoutField::Nullable(Box::new(inner)), size + 1)
         }
+        ExpressionType::ReferenceTo(_) => todo!(),
     }
 }

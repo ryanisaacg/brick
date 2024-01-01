@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use brick::{eval, Value};
+use brick::{eval, typecheck_module, Value};
 
 #[tokio::test]
 async fn basic_construction() {
@@ -150,5 +150,25 @@ struct Square {
 "#,
     )
     .await
+    .unwrap();
+}
+
+#[test]
+#[should_panic]
+fn illegal_use_member_field_like_static() {
+    typecheck_module(
+        "test",
+        "test.brick",
+        r#"
+struct Test {
+    field: i32
+}
+
+fn test(): i32 {
+    Test.field
+}
+"#
+        .to_string(),
+    )
     .unwrap();
 }

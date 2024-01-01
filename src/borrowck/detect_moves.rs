@@ -255,7 +255,7 @@ fn is_affine(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &Expression
     match ty {
         ExpressionType::Void => unreachable!(),
         ExpressionType::Primitive(_) => false,
-        ExpressionType::DeclaredType(ty) => match declarations[ty] {
+        ExpressionType::InstanceOf(ty) => match declarations[ty] {
             StaticDeclaration::Func(_) => false,
             StaticDeclaration::Struct(_) => true,
             StaticDeclaration::Interface(_) => false,
@@ -270,5 +270,6 @@ fn is_affine(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &Expression
         ExpressionType::Collection(CollectionType::Dict(_, _)) => true,
         ExpressionType::Null => false,
         ExpressionType::Nullable(inner) => is_affine(declarations, inner),
+        ExpressionType::ReferenceTo(_) => todo!(),
     }
 }

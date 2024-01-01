@@ -10,7 +10,7 @@ use super::{HirModule, HirNode, HirNodeValue};
 pub fn rewrite(module: &mut HirModule, declarations: &HashMap<TypeID, &StaticDeclaration>) {
     module.visit_mut(|node| {
         node.walk_expected_types_for_children_mut(declarations, |expected_ty, child| {
-            let ExpressionType::DeclaredType(expected_ty_id) = expected_ty else {
+            let ExpressionType::InstanceOf(expected_ty_id) = expected_ty else {
                 return;
             };
             let Some(StaticDeclaration::Interface(expected_ty)) = declarations.get(expected_ty_id)
@@ -18,7 +18,7 @@ pub fn rewrite(module: &mut HirModule, declarations: &HashMap<TypeID, &StaticDec
                 return;
             };
 
-            let ExpressionType::DeclaredType(child_ty_id) = &child.ty else {
+            let ExpressionType::InstanceOf(child_ty_id) = &child.ty else {
                 return;
             };
             let Some(StaticDeclaration::Struct(child_ty)) = declarations.get(child_ty_id) else {
@@ -36,7 +36,7 @@ pub fn rewrite(module: &mut HirModule, declarations: &HashMap<TypeID, &StaticDec
                         .unwrap_fn_id(),
                 );
             }
-            let ty = ExpressionType::DeclaredType(expected_ty.id);
+            let ty = ExpressionType::InstanceOf(expected_ty.id);
 
             let mut temp = HirNode::dummy();
             std::mem::swap(&mut temp, child);

@@ -146,7 +146,7 @@ fn lower_node<'ast>(
 
         AstNodeValue::Return(inner) => HirNodeValue::Return(lower_node_alloc(decls, inner)),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
-            let ExpressionType::DeclaredType(expr_ty) = fully_dereference(left.ty.get().unwrap())
+            let ExpressionType::InstanceOf(expr_ty) = fully_dereference(left.ty.get().unwrap())
             else {
                 panic!("expected left side of dot to be declared type");
             };

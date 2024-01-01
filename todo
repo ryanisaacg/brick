@@ -40,9 +40,6 @@ metaprogramming:
 allocator:
 - support dealloc
 
-interpreter:
-- union support
-
 syntax:
 - remove ; and , requirements?
 - keyword arguments
@@ -119,6 +116,7 @@ unions:
 - unions can extend unions (refer to fields with nested access?)
 - unions can have empty variants
 - match statement (destructure unions, return value if exhaustive)
+- unions supported in LIR
 
 null:
 - basic null flow analysis - maybe a special operation to de-null stuff

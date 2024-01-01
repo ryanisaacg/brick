@@ -207,7 +207,7 @@ pub fn resolve_type_expr(
             "f64" => ExpressionType::Primitive(PrimitiveType::Float64),
             "char" => ExpressionType::Primitive(PrimitiveType::Char),
             "string" => ExpressionType::Primitive(PrimitiveType::String),
-            other => ExpressionType::DeclaredType(
+            other => ExpressionType::InstanceOf(
                 *name_to_type_id
                     .get(other)
                     .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?,

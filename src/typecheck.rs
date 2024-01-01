@@ -20,7 +20,8 @@ pub mod resolve;
 pub enum ExpressionType {
     Void,
     Primitive(PrimitiveType),
-    DeclaredType(TypeID),
+    InstanceOf(TypeID),
+    ReferenceTo(TypeID),
     Pointer(PointerKind, Box<ExpressionType>),
     Collection(CollectionType),
     Null,
@@ -76,8 +77,8 @@ impl StaticDeclaration {
         }
     }
 
-    pub fn expr(&self) -> ExpressionType {
-        ExpressionType::DeclaredType(self.id())
+    pub fn ref_to(&self) -> ExpressionType {
+        ExpressionType::ReferenceTo(self.id())
     }
 
     pub fn visit<'a>(&'a self, visitor: &mut impl FnMut(&'a StaticDeclaration)) {
@@ -203,14 +204,6 @@ impl<'a> Declarations<'a> {
             _ => panic!("ID unexpectedly pointed to non-function"),
         }
     }
-
-    fn id_to_struct(&self, id: &TypeID) -> &StructType {
-        let expr = self.decl(id).expect("struct with ID should exist");
-        match expr {
-            StaticDeclaration::Struct(inner) => inner,
-            _ => panic!("ID unexpectedly pointed to non-struct"),
-        }
-    }
 }
 
 pub struct TypecheckedFile<'a> {
@@ -244,13 +237,13 @@ pub fn typecheck<'a>(
             StaticDeclaration::Module(module) if current_module_name == name => {
                 for (name, value) in module.exports.iter() {
                     name_to_context_entry
-                        .insert(name.clone(), (value.fn_id_or_type_id(), value.expr()));
+                        .insert(name.clone(), (value.fn_id_or_type_id(), value.ref_to()));
                     name_to_type_id.insert(name.as_str(), value.id());
                 }
             }
             _ => {
                 name_to_context_entry
-                    .insert(name.clone(), (value.fn_id_or_type_id(), value.expr()));
+                    .insert(name.clone(), (value.fn_id_or_type_id(), value.ref_to()));
                 name_to_type_id.insert(name.as_str(), value.id());
             }
         }
@@ -464,7 +457,7 @@ fn typecheck_expression<'a>(
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
-            let ExpressionType::DeclaredType(id) = fully_dereference(left) else {
+            let ExpressionType::InstanceOf(id) = fully_dereference(left) else {
                 panic!("TODO: left side of dot operator");
             };
             let AstNodeValue::Name { value: name, .. } = &right.value else {
@@ -483,7 +476,7 @@ fn typecheck_expression<'a>(
                     .or_else(|| {
                         associated_functions
                             .get(name)
-                            .map(|decl| ExpressionType::DeclaredType(decl.id()))
+                            .map(|decl| ExpressionType::InstanceOf(decl.id()))
                     })
                     .expect("TODO: field is present"),
                 Some(StaticDeclaration::Interface(InterfaceType {
@@ -491,7 +484,7 @@ fn typecheck_expression<'a>(
                     ..
                 })) => associated_functions
                     .get(name)
-                    .map(|decl| ExpressionType::DeclaredType(decl.id()))
+                    .map(|decl| ExpressionType::InstanceOf(decl.id()))
                     .expect("TODO: field is present"),
                 Some(StaticDeclaration::Union(lhs_type)) => ExpressionType::Nullable(Box::new(
                     lhs_type
@@ -504,7 +497,7 @@ fn typecheck_expression<'a>(
                     .exports
                     .get(name)
                     .expect("TODO: export is present")
-                    .expr(),
+                    .ref_to(),
                 _ => todo!("illegal lhs type"),
             }
         }
@@ -589,6 +582,7 @@ fn typecheck_expression<'a>(
         AstNodeValue::BinExpr(BinOp::Assignment, left, right) => {
             let left_ty = typecheck_expression(left, outer_scopes, current_scope, context)?;
             // TODO: actual type errors
+            // TODO: validate legal type to assign
             assert!(validate_lvalue(left));
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
 
@@ -699,7 +693,7 @@ fn typecheck_expression<'a>(
             expr_ty
         }
         AstNodeValue::Call(func, args) => {
-            let ExpressionType::DeclaredType(func) =
+            let (ExpressionType::InstanceOf(func) | ExpressionType::ReferenceTo(func)) =
                 typecheck_expression(func, outer_scopes, current_scope, context)?
             else {
                 return Err(TypecheckError::CantCall(node.provenance.clone()));
@@ -729,32 +723,57 @@ fn typecheck_expression<'a>(
             func.returns.clone()
         }
         AstNodeValue::StructLiteral { name, fields } => {
-            let ExpressionType::DeclaredType(struct_type_id) =
+            let ExpressionType::ReferenceTo(ty_id) =
                 typecheck_expression(name, outer_scopes, current_scope, context)?
             else {
                 return Err(TypecheckError::CantCall(node.provenance.clone()));
             };
-            let struct_type = context.id_to_struct(struct_type_id);
 
-            if struct_type.fields.len() != fields.len() {
-                return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
-            }
+            match context.decl(ty_id).unwrap() {
+                StaticDeclaration::Struct(struct_type) => {
+                    if struct_type.fields.len() != fields.len() {
+                        return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
+                    }
 
-            for (name, param_field) in struct_type.fields.iter() {
-                let Some(arg_field) = fields.get(name) else {
-                    return Err(TypecheckError::MissingField(node.provenance.clone()));
-                };
-                let arg_field =
-                    typecheck_expression(arg_field, outer_scopes, current_scope, context)?;
-                if !is_assignable_to(&context.id_to_decl, param_field, arg_field) {
-                    return Err(TypecheckError::TypeMismatch {
-                        received: arg_field.clone(),
-                        expected: param_field.clone(),
-                    });
+                    for (name, param_field) in struct_type.fields.iter() {
+                        let Some(arg_field) = fields.get(name) else {
+                            return Err(TypecheckError::MissingField(node.provenance.clone()));
+                        };
+                        let arg_field =
+                            typecheck_expression(arg_field, outer_scopes, current_scope, context)?;
+                        if !is_assignable_to(&context.id_to_decl, param_field, arg_field) {
+                            return Err(TypecheckError::TypeMismatch {
+                                received: arg_field.clone(),
+                                expected: param_field.clone(),
+                            });
+                        }
+                    }
+
+                    ExpressionType::InstanceOf(*ty_id)
                 }
-            }
+                StaticDeclaration::Union(union_ty) => {
+                    if fields.len() != 1 {
+                        return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
+                    }
 
-            ExpressionType::DeclaredType(*struct_type_id)
+                    let (name, arg) = fields.iter().next().unwrap();
+                    let Some(param) = union_ty.variants.get(name) else {
+                        return Err(TypecheckError::MissingField(node.provenance.clone()));
+                    };
+                    let arg = typecheck_expression(arg, outer_scopes, current_scope, context)?;
+                    if !is_assignable_to(&context.id_to_decl, param, arg) {
+                        return Err(TypecheckError::TypeMismatch {
+                            received: param.clone(),
+                            expected: arg.clone(),
+                        });
+                    }
+
+                    ExpressionType::InstanceOf(*ty_id)
+                }
+                StaticDeclaration::Func(_) => todo!(),
+                StaticDeclaration::Interface(_) => todo!(),
+                StaticDeclaration::Module(_) => todo!(),
+            }
         }
         AstNodeValue::DictLiteral(entries) => {
             let mut result_key_ty = None;
@@ -943,7 +962,7 @@ pub fn is_assignable_to(
         (Primitive(left), Primitive(right)) => left == right,
         (Primitive(_), _) => false,
 
-        (DeclaredType(left), DeclaredType(right)) => {
+        (InstanceOf(left), InstanceOf(right)) => {
             let left = id_to_decl[left];
             let right = id_to_decl[right];
             use StaticDeclaration::*;
@@ -1006,12 +1025,15 @@ pub fn is_assignable_to(
         }
 
         // TODO: could these ever be valid?
-        (DeclaredType(_), Primitive(_)) | (DeclaredType(_), Collection(_)) => false,
+        (InstanceOf(_), Primitive(_)) | (InstanceOf(_), Collection(_)) => false,
 
         // TODO: arrays
         (Collection(_), Primitive(_))
-        | (Collection(_), DeclaredType(_))
+        | (Collection(_), InstanceOf(_))
         | (Collection(_), Collection(_)) => todo!(),
+
+        // TODO: type references can't ever be in assignments right
+        (ReferenceTo(_), _) | (_, ReferenceTo(_)) => todo!("{:?} = {:?}", left, right),
     }
 }
 
