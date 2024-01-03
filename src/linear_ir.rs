@@ -241,18 +241,33 @@ pub fn linearize_nodes(
                 });
             }
             HirNodeValue::Assignment(lhs, rhs) => {
-                let ty = lhs.ty.clone();
-                let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
-                let rhs = lower_expression(declarations, stack_entries, *rhs);
-                values.push(LinearNode {
-                    value: LinearNodeValue::WriteMemory {
-                        location: Box::new(location),
-                        offset,
-                        value: Box::new(rhs),
-                        ty,
-                    },
-                    provenance: node.provenance,
-                });
+                let is_union = if let ExpressionType::InstanceOf(ty) = &lhs.ty {
+                    // TODO: this is wrong, we need to detect if the left side is assigning to a
+                    // union variant
+                    declarations
+                        .get(ty)
+                        .map(|ty| matches!(&ty.value, TypeLayoutValue::Union(_)))
+                        .unwrap_or(false)
+                        && false
+                } else {
+                    false
+                };
+                if is_union {
+                    todo!()
+                } else {
+                    let ty = lhs.ty.clone();
+                    let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
+                    let rhs = lower_expression(declarations, stack_entries, *rhs);
+                    values.push(LinearNode {
+                        value: LinearNodeValue::WriteMemory {
+                            location: Box::new(location),
+                            offset,
+                            value: Box::new(rhs),
+                            ty,
+                        },
+                        provenance: node.provenance,
+                    });
+                }
             }
 
             HirNodeValue::Return(expr) => {
@@ -363,11 +378,19 @@ fn lower_expression(
             )
         }
         HirNodeValue::Access(lhs, rhs) => {
-            let (location, offset) = access_location(declarations, stack_entries, *lhs, rhs);
-            LinearNodeValue::ReadMemory {
-                location: Box::new(location),
-                offset,
-                ty,
+            if let Some(ty) = lhs.ty.id().and_then(|id| match &declarations[id].value {
+                TypeLayoutValue::Union(ty) => Some(ty),
+                _ => None,
+            }) {
+                let (variant_idx, variant_ty) = &ty[&rhs];
+                todo!();
+            } else {
+                let (location, offset) = access_location(declarations, stack_entries, *lhs, rhs);
+                LinearNodeValue::ReadMemory {
+                    location: Box::new(location),
+                    offset,
+                    ty,
+                }
             }
         }
         HirNodeValue::ArrayIndex(arr, idx) => {
@@ -637,6 +660,15 @@ fn lower_expression(
 
             LinearNodeValue::Sequence(instrs)
         }
+        HirNodeValue::UnionLiteral(ty, variant, value) => {
+            let TypeLayoutValue::Union(ty) = &declarations[&ty].value else {
+                unreachable!()
+            };
+            LinearNodeValue::Sequence(vec![
+                lower_expression(declarations, stack_entries, *value),
+                LinearNode::new(LinearNodeValue::Size(ty[&variant].0)),
+            ])
+        }
     };
 
     LinearNode { value, provenance }
@@ -685,6 +717,7 @@ fn lower_lvalue(
         HirNodeValue::ArrayLiteral(_) | HirNodeValue::ArrayLiteralLength(_, _) => unreachable!(),
         HirNodeValue::NumericCast { .. } => todo!(),
         HirNodeValue::DictLiteral(_) => todo!(),
+        HirNodeValue::UnionLiteral(_, _, _) => todo!(),
     }
 }
 
@@ -717,10 +750,13 @@ fn access_location(
     let TypeMemoryLayout { value, .. } = &declarations[&ty_id];
     let (lhs, mut offset) = lower_lvalue(declarations, stack_entries, lhs);
     offset += match value {
-        TypeLayoutValue::Structure(fields) => fields
-            .iter()
-            .find_map(|(name, offset, _)| if name == &rhs { Some(offset) } else { None })
-            .unwrap(),
+        TypeLayoutValue::Structure(fields) => {
+            *(fields
+                .iter()
+                .find_map(|(name, offset, _)| if name == &rhs { Some(offset) } else { None })
+                .unwrap())
+        }
+        TypeLayoutValue::Union(_) => UNION_TAG_SIZE,
         TypeLayoutValue::Interface(_fields) => todo!(), //*fields.get(&rhs).unwrap(),
         TypeLayoutValue::FunctionPointer => unreachable!(),
     };
@@ -862,6 +898,8 @@ fn dict_index_location(
 
 // TODO: this should probably be determined by the backend...
 const POINTER_SIZE: usize = 8;
+// TODO: is this a good idea
+const UNION_TAG_SIZE: usize = 4;
 
 fn expression_type_size(
     declarations: &HashMap<TypeID, TypeMemoryLayout>,
@@ -912,6 +950,7 @@ pub struct TypeMemoryLayout {
 pub enum TypeLayoutValue {
     Structure(Vec<(String, usize, TypeLayoutField)>),
     Interface(Vec<FunctionID>),
+    Union(HashMap<String, (usize, TypeLayoutField)>),
     FunctionPointer,
 }
 
@@ -992,8 +1031,27 @@ fn layout_static_decl(
                 size,
             }
         }
-        StaticDeclaration::Union(_) => todo!(),
+        StaticDeclaration::Union(union_ty) => {
+            let mut largest_variant = 0;
+            let variants = union_ty
+                .variants
+                .iter()
+                .enumerate()
+                .map(|(idx, (name, ty))| {
+                    let (variant, variant_size) = layout_type(declarations, layouts, ty);
+                    if variant_size > largest_variant {
+                        largest_variant = variant_size;
+                    }
 
+                    (name.clone(), (idx, variant))
+                })
+                .collect();
+
+            TypeMemoryLayout {
+                value: TypeLayoutValue::Union(variants),
+                size: UNION_TAG_SIZE + largest_variant,
+            }
+        }
         // Modules are completely compiled out
         StaticDeclaration::Module(module) => {
             layout_types(&module.exports, layouts);

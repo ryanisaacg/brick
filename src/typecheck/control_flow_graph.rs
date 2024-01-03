@@ -167,7 +167,7 @@ fn create_graph_for_node<'a>(
         | Call(_, _)
         | TakeUnique(_)
         | TakeRef(_)
-        | StructLiteral { .. }
+        | RecordLiteral { .. }
         | ArrayLiteral(_)
         | ArrayLiteralLength(_, _)
         | Declaration(_, _, _)

@@ -207,11 +207,10 @@ fn find_moves_in_node(
                 find_references_in_node(liveness, errors, declarations, val);
             }
         }
-        HirNodeValue::Return(val) => {
-            find_moves_in_node(liveness, errors, declarations, val);
-        }
-        HirNodeValue::Assignment(_, rhs) => {
-            find_moves_in_node(liveness, errors, declarations, rhs);
+        HirNodeValue::UnionLiteral(_, _, child)
+        | HirNodeValue::Return(child)
+        | HirNodeValue::Assignment(_, child) => {
+            find_moves_in_node(liveness, errors, declarations, child);
         }
         HirNodeValue::If(cond, _, _) | HirNodeValue::While(cond, _) => {
             find_moves_in_node(liveness, errors, declarations, cond);

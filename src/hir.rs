@@ -149,6 +149,7 @@ impl HirNode {
                 }
             }
             HirNodeValue::Access(child, _)
+            | HirNodeValue::UnionLiteral(_, _, child)
             | HirNodeValue::InterfaceAddress(child)
             | HirNodeValue::TakeUnique(child)
             | HirNodeValue::TakeShared(child)
@@ -230,6 +231,7 @@ impl HirNode {
                 }
             }
             HirNodeValue::Access(child, _)
+            | HirNodeValue::UnionLiteral(_, _, child)
             | HirNodeValue::InterfaceAddress(child)
             | HirNodeValue::TakeUnique(child)
             | HirNodeValue::TakeShared(child)
@@ -300,6 +302,13 @@ impl HirNode {
             | HirNodeValue::Declaration(_) => {}
             HirNodeValue::ArrayIndex(_, idx) => {
                 callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), idx);
+            }
+            HirNodeValue::UnionLiteral(ty, variant, child) => {
+                let StaticDeclaration::Union(ty) = declarations[ty] else {
+                    unreachable!()
+                };
+                let variant_ty = &ty.variants[variant];
+                callback(variant_ty, child);
             }
             HirNodeValue::BinOp(_, lhs, rhs) => {
                 if is_assignable_to(declarations, &lhs.ty, &rhs.ty) {
@@ -390,6 +399,13 @@ impl HirNode {
                 } else {
                     callback(&rhs.ty, lhs);
                 }
+            }
+            HirNodeValue::UnionLiteral(ty, variant, child) => {
+                let StaticDeclaration::Union(ty) = declarations[ty] else {
+                    unreachable!()
+                };
+                let variant_ty = &ty.variants[variant];
+                callback(variant_ty, child);
             }
             HirNodeValue::VtableCall(_, fn_id, params) => {
                 let func = find_func(declarations, *fn_id).unwrap();
@@ -484,6 +500,7 @@ pub enum HirNodeValue {
     If(Box<HirNode>, Box<HirNode>, Option<Box<HirNode>>),
     While(Box<HirNode>, Box<HirNode>),
     StructLiteral(TypeID, HashMap<String, HirNode>),
+    UnionLiteral(TypeID, String, Box<HirNode>),
     ArrayLiteral(Vec<HirNode>),
     ArrayLiteralLength(Box<HirNode>, Box<HirNode>),
     DictLiteral(Vec<(HirNode, HirNode)>),

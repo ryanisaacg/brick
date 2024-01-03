@@ -19,8 +19,10 @@ collections:
     - insert new entries into dictionaries
     - use a hash table
 - slices
-- boxes
-- rc's
+- boxes (maybe not - maybe just RC?)
+- rc's:
+    - basic RCs
+    - can take RC'ed references to collections? maybe even RC'ed subreferences to user-defined collections?
 - cells
 
 borrow checker and lifetimes:
@@ -117,6 +119,7 @@ unions:
 - unions can have empty variants
 - match statement (destructure unions, return value if exhaustive)
 - unions supported in LIR
+- union literal syntax that makes sense
 
 null:
 - basic null flow analysis - maybe a special operation to de-null stuff
@@ -154,4 +157,7 @@ unsafe:
 
 units of measure:
 - design some system to separate units of measure into various domains (e.g. a "screen pixel" different from a "logical pixel")
+
+language rules:
+- don't allow recursive types without indirection
 

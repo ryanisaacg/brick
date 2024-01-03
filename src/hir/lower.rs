@@ -237,18 +237,29 @@ fn lower_node<'ast>(
                 .collect();
             HirNodeValue::Call(func, params)
         }
-        AstNodeValue::StructLiteral { name, fields } => {
+        AstNodeValue::RecordLiteral { name, fields } => {
             let AstNodeValue::Name { referenced_id, .. } = &name.value else {
                 panic!("Struct literal must have Name");
             };
             let id = referenced_id
                 .get()
-                .expect("referenced fields to be filled in");
-            let fields = fields
-                .iter()
-                .map(|(name, field)| (name.clone(), lower_node(decls, field)))
-                .collect();
-            HirNodeValue::StructLiteral(id.as_type(), fields)
+                .expect("referenced fields to be filled in")
+                .as_type();
+            match decls[&id] {
+                StaticDeclaration::Struct(_) => {
+                    let fields = fields
+                        .iter()
+                        .map(|(name, field)| (name.clone(), lower_node(decls, field)))
+                        .collect();
+                    HirNodeValue::StructLiteral(id, fields)
+                }
+                StaticDeclaration::Union(_) => {
+                    let (variant, node) = fields.iter().next().unwrap();
+                    let node = lower_node_alloc(decls, node);
+                    HirNodeValue::UnionLiteral(id, variant.clone(), node)
+                }
+                _ => unreachable!(),
+            }
         }
         AstNodeValue::DictLiteral(elements) => HirNodeValue::DictLiteral(
             elements
