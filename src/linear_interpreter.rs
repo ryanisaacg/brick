@@ -251,7 +251,7 @@ pub async fn evaluate_block(
             evaluate_block(fns, params, vm, lhs).await?;
             let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
-            let val = match dbg!((left, right)) {
+            let val = match (left, right) {
                 (Numeric::Int32(left), Numeric::Int32(right)) => match op {
                     HirBinOp::Add => Value::Int32(left + right),
                     HirBinOp::Subtract => Value::Int32(left - right),
@@ -341,7 +341,6 @@ pub async fn evaluate_block(
             vm.op_stack.push(Value::FunctionID(*x));
         }
         LinearNodeValue::WriteTemporary(tmp, val) => {
-            dbg!(node);
             evaluate_block(fns, params, vm, val).await?;
             let Value::Size(val) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
@@ -424,6 +423,10 @@ pub async fn evaluate_block(
                 },
             });
         }
+        LinearNodeValue::Debug(inner) => {
+            evaluate_block(fns, params, vm, inner).await?;
+            println!("{:?}", vm.op_stack.last().unwrap());
+        }
     }
 
     Ok(())
@@ -445,20 +448,7 @@ fn write(
             TypeLayoutValue::Structure(fields) => {
                 for (_, offset, ty) in fields.iter() {
                     let location = location + offset;
-                    match ty {
-                        TypeLayoutField::Primitive(_) => {
-                            write_primitive(op_stack, memory, location);
-                        }
-                        TypeLayoutField::Referenced(id) => write(
-                            op_stack,
-                            layouts,
-                            memory,
-                            location,
-                            &ExpressionType::InstanceOf(*id),
-                        ),
-                        TypeLayoutField::Nullable(_) => todo!(),
-                        TypeLayoutField::Pointer => todo!(),
-                    }
+                    write_field(op_stack, layouts, memory, location, ty);
                 }
             }
             TypeLayoutValue::Interface(fields) => {
@@ -468,6 +458,18 @@ fn write(
                 }
             }
             TypeLayoutValue::FunctionPointer => todo!(),
+            TypeLayoutValue::Union(variants) => {
+                let Value::Size(variant) = op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                op_stack.push(Value::Size(variant));
+                let offset = write_primitive(op_stack, memory, location);
+                let variant = variants
+                    .values()
+                    .find_map(|(id, ty)| if *id == variant { Some(ty) } else { None })
+                    .unwrap();
+                write_field(op_stack, layouts, memory, location + offset, variant);
+            }
         },
         ExpressionType::Collection(CollectionType::Dict(_, _))
         | ExpressionType::Collection(CollectionType::Array(_)) => {
@@ -481,6 +483,29 @@ fn write(
         ExpressionType::Null => todo!(),
         ExpressionType::Nullable(_) => todo!(),
         ExpressionType::ReferenceTo(_) => todo!(),
+    }
+}
+
+fn write_field(
+    op_stack: &mut Vec<Value>,
+    layouts: &HashMap<TypeID, TypeMemoryLayout>,
+    memory: &mut [u8],
+    location: usize,
+    ty: &TypeLayoutField,
+) {
+    match ty {
+        TypeLayoutField::Primitive(_) => {
+            write_primitive(op_stack, memory, location);
+        }
+        TypeLayoutField::Referenced(id) => write(
+            op_stack,
+            layouts,
+            memory,
+            location,
+            &ExpressionType::InstanceOf(*id),
+        ),
+        TypeLayoutField::Nullable(_) => todo!(),
+        TypeLayoutField::Pointer => todo!(),
     }
 }
 
@@ -554,6 +579,7 @@ fn read(
                         *bytemuck::from_bytes(&memory[location..(location + 4)]);
                     op_stack.push(Value::FunctionID(fn_id));
                 }
+                TypeLayoutValue::Union(_) => todo!(),
             }
         }
         ExpressionType::Collection(CollectionType::Dict(_, _))

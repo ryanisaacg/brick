@@ -248,7 +248,7 @@ pub fn resolve_type_expr(
         | AstNodeValue::Call(_, _)
         | AstNodeValue::TakeUnique(_)
         | AstNodeValue::TakeRef(_)
-        | AstNodeValue::StructLiteral { .. }
+        | AstNodeValue::RecordLiteral { .. }
         | AstNodeValue::ArrayLiteral(_)
         | AstNodeValue::ArrayLiteralLength(_, _)
         | AstNodeValue::Block(_)

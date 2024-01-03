@@ -77,7 +77,7 @@ impl<'a> AstNode<'a> {
                     callback(value);
                 }
             }
-            StructLiteral { fields, .. } => {
+            RecordLiteral { fields, .. } => {
                 for expression in fields.values() {
                     callback(expression);
                 }
@@ -241,7 +241,7 @@ pub enum AstNodeValue<'a> {
     Call(&'a mut AstNode<'a>, Vec<AstNode<'a>>),
     TakeUnique(&'a mut AstNode<'a>),
     TakeRef(&'a mut AstNode<'a>),
-    StructLiteral {
+    RecordLiteral {
         name: &'a mut AstNode<'a>,
         fields: HashMap<String, AstNode<'a>>,
     },
@@ -1126,7 +1126,7 @@ fn expression_pratt<'a>(
                     };
 
                     left = AstNode::new(
-                        AstNodeValue::StructLiteral {
+                        AstNodeValue::RecordLiteral {
                             name: context.alloc(left),
                             fields,
                         },

@@ -1,10 +1,9 @@
-use brick::typecheck_module;
+use assert_matches::assert_matches;
+use brick::{eval, Value};
 
-#[test]
-fn basic_construction() {
-    typecheck_module(
-        "test",
-        "test.brick",
+#[tokio::test]
+async fn basic_construction() {
+    let result = eval(
         r#"
 union Number {
     int(i32),
@@ -13,8 +12,9 @@ union Number {
 
 let num = Number { int: 12 };
 num.int
-"#
-        .to_string(),
+"#,
     )
+    .await
     .unwrap();
+    assert_matches!(&result[..], [Value::Int32(12)]);
 }

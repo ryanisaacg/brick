@@ -225,6 +225,7 @@ fn create_graph_for_node<'a>(
         | ArrayIndex(_, _)
         | DictIndex(_, _)
         | DictLiteral(_)
+        | UnionLiteral(_, _, _)
         | InterfaceAddress(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));
 

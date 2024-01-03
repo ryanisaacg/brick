@@ -38,7 +38,7 @@ pub fn linearize_function(
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LinearNode {
     pub value: LinearNodeValue,
     pub provenance: Option<SourceRange>,
@@ -131,10 +131,25 @@ impl LinearNode {
             provenance: None,
         }
     }
+
+    fn abort() -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::Abort,
+            provenance: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn debug(inner: LinearNode) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::Debug(Box::new(inner)),
+            provenance: None,
+        }
+    }
 }
 
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum LinearNodeValue {
     // TODO: how to handle function parameters?
 
@@ -192,6 +207,10 @@ pub enum LinearNodeValue {
     CharLiteral(char),
     StringLiteral(String),
     FunctionID(FunctionID),
+
+    // Probably not keeping this around forever
+    #[allow(dead_code)]
+    Debug(Box<LinearNode>),
 }
 
 // TODO: produce a more CFG shaped result?
@@ -363,11 +382,44 @@ fn lower_expression(
             )
         }
         HirNodeValue::Access(lhs, rhs) => {
-            let (location, offset) = access_location(declarations, stack_entries, *lhs, rhs);
-            LinearNodeValue::ReadMemory {
-                location: Box::new(location),
-                offset,
-                ty,
+            if let Some(ty) = lhs.ty.id().and_then(|id| match &declarations[id].value {
+                TypeLayoutValue::Union(ty) => Some(ty),
+                _ => None,
+            }) {
+                let (variant_idx, variant_ty) = &ty[&rhs];
+                let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
+                // TODO: switch from expression type to layout type
+                let variant_ty = match variant_ty {
+                    TypeLayoutField::Primitive(p) => ExpressionType::Primitive(*p),
+                    TypeLayoutField::Referenced(ty) => ExpressionType::InstanceOf(*ty),
+                    TypeLayoutField::Nullable(_) => todo!(),
+                    TypeLayoutField::Pointer => todo!(),
+                };
+                LinearNodeValue::Sequence(vec![LinearNode::if_node(
+                    LinearNode::ptr_op(
+                        HirBinOp::NotEquals,
+                        LinearNode::size(*variant_idx),
+                        LinearNode::read_memory(
+                            location.clone(),
+                            offset,
+                            ExpressionType::Primitive(PrimitiveType::PointerSize),
+                        ),
+                    ),
+                    vec![LinearNode::abort()],
+                    Some(vec![LinearNode::read_memory(
+                        location,
+                        offset + UNION_TAG_SIZE,
+                        variant_ty,
+                    )]),
+                    None,
+                )])
+            } else {
+                let (location, offset) = access_location(declarations, stack_entries, *lhs, rhs);
+                LinearNodeValue::ReadMemory {
+                    location: Box::new(location),
+                    offset,
+                    ty,
+                }
             }
         }
         HirNodeValue::ArrayIndex(arr, idx) => {
@@ -637,6 +689,15 @@ fn lower_expression(
 
             LinearNodeValue::Sequence(instrs)
         }
+        HirNodeValue::UnionLiteral(ty, variant, value) => {
+            let TypeLayoutValue::Union(ty) = &declarations[&ty].value else {
+                unreachable!()
+            };
+            LinearNodeValue::Sequence(vec![
+                lower_expression(declarations, stack_entries, *value),
+                LinearNode::new(LinearNodeValue::Size(ty[&variant].0)),
+            ])
+        }
     };
 
     LinearNode { value, provenance }
@@ -685,6 +746,7 @@ fn lower_lvalue(
         HirNodeValue::ArrayLiteral(_) | HirNodeValue::ArrayLiteralLength(_, _) => unreachable!(),
         HirNodeValue::NumericCast { .. } => todo!(),
         HirNodeValue::DictLiteral(_) => todo!(),
+        HirNodeValue::UnionLiteral(_, _, _) => todo!(),
     }
 }
 
@@ -717,10 +779,13 @@ fn access_location(
     let TypeMemoryLayout { value, .. } = &declarations[&ty_id];
     let (lhs, mut offset) = lower_lvalue(declarations, stack_entries, lhs);
     offset += match value {
-        TypeLayoutValue::Structure(fields) => fields
-            .iter()
-            .find_map(|(name, offset, _)| if name == &rhs { Some(offset) } else { None })
-            .unwrap(),
+        TypeLayoutValue::Structure(fields) => {
+            *(fields
+                .iter()
+                .find_map(|(name, offset, _)| if name == &rhs { Some(offset) } else { None })
+                .unwrap())
+        }
+        TypeLayoutValue::Union(_) => UNION_TAG_SIZE,
         TypeLayoutValue::Interface(_fields) => todo!(), //*fields.get(&rhs).unwrap(),
         TypeLayoutValue::FunctionPointer => unreachable!(),
     };
@@ -761,7 +826,7 @@ fn array_index_location(
                     // length
                     LinearNode::read_temp(2),
                 ),
-                vec![LinearNode::new(LinearNodeValue::Abort)],
+                vec![LinearNode::abort()],
                 None,
                 None,
             ),
@@ -862,6 +927,8 @@ fn dict_index_location(
 
 // TODO: this should probably be determined by the backend...
 const POINTER_SIZE: usize = 8;
+// TODO: is this a good idea
+const UNION_TAG_SIZE: usize = 8;
 
 fn expression_type_size(
     declarations: &HashMap<TypeID, TypeMemoryLayout>,
@@ -912,6 +979,7 @@ pub struct TypeMemoryLayout {
 pub enum TypeLayoutValue {
     Structure(Vec<(String, usize, TypeLayoutField)>),
     Interface(Vec<FunctionID>),
+    Union(HashMap<String, (usize, TypeLayoutField)>),
     FunctionPointer,
 }
 
@@ -992,8 +1060,27 @@ fn layout_static_decl(
                 size,
             }
         }
-        StaticDeclaration::Union(_) => todo!(),
+        StaticDeclaration::Union(union_ty) => {
+            let mut largest_variant = 0;
+            let variants = union_ty
+                .variants
+                .iter()
+                .enumerate()
+                .map(|(idx, (name, ty))| {
+                    let (variant, variant_size) = layout_type(declarations, layouts, ty);
+                    if variant_size > largest_variant {
+                        largest_variant = variant_size;
+                    }
 
+                    (name.clone(), (idx, variant))
+                })
+                .collect();
+
+            TypeMemoryLayout {
+                value: TypeLayoutValue::Union(variants),
+                size: UNION_TAG_SIZE + largest_variant,
+            }
+        }
         // Modules are completely compiled out
         StaticDeclaration::Module(module) => {
             layout_types(&module.exports, layouts);

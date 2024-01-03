@@ -28,6 +28,20 @@ pub enum ExpressionType {
     Nullable(Box<ExpressionType>),
 }
 
+impl ExpressionType {
+    pub fn id(&self) -> Option<&TypeID> {
+        match self {
+            ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id) => Some(id),
+            ExpressionType::Void
+            | ExpressionType::Primitive(_)
+            | ExpressionType::Pointer(_, _)
+            | ExpressionType::Collection(_)
+            | ExpressionType::Null
+            | ExpressionType::Nullable(_) => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CollectionType {
     Array(Box<ExpressionType>),
@@ -722,7 +736,7 @@ fn typecheck_expression<'a>(
 
             func.returns.clone()
         }
-        AstNodeValue::StructLiteral { name, fields } => {
+        AstNodeValue::RecordLiteral { name, fields } => {
             let ExpressionType::ReferenceTo(ty_id) =
                 typecheck_expression(name, outer_scopes, current_scope, context)?
             else {
@@ -897,7 +911,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::Call(_, _)
         | AstNodeValue::TakeUnique(_)
         | AstNodeValue::TakeRef(_)
-        | AstNodeValue::StructLiteral { .. }
+        | AstNodeValue::RecordLiteral { .. }
         | AstNodeValue::DictLiteral(_)
         | AstNodeValue::ArrayLiteral(_)
         | AstNodeValue::ArrayLiteralLength(_, _)
