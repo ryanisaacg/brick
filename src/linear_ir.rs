@@ -38,7 +38,7 @@ pub fn linearize_function(
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LinearNode {
     pub value: LinearNodeValue,
     pub provenance: Option<SourceRange>,
@@ -131,10 +131,17 @@ impl LinearNode {
             provenance: None,
         }
     }
+
+    fn abort() -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::Abort,
+            provenance: None,
+        }
+    }
 }
 
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum LinearNodeValue {
     // TODO: how to handle function parameters?
 
@@ -383,7 +390,32 @@ fn lower_expression(
                 _ => None,
             }) {
                 let (variant_idx, variant_ty) = &ty[&rhs];
-                todo!();
+                let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
+                // TODO: switch from expression type to layout type
+                let variant_ty = match variant_ty {
+                    TypeLayoutField::Primitive(p) => ExpressionType::Primitive(*p),
+                    TypeLayoutField::Referenced(ty) => ExpressionType::InstanceOf(*ty),
+                    TypeLayoutField::Nullable(_) => todo!(),
+                    TypeLayoutField::Pointer => todo!(),
+                };
+                LinearNodeValue::Sequence(vec![LinearNode::if_node(
+                    LinearNode::ptr_op(
+                        HirBinOp::NotEquals,
+                        LinearNode::size(*variant_idx),
+                        LinearNode::read_memory(
+                            location.clone(),
+                            offset,
+                            ExpressionType::Primitive(PrimitiveType::PointerSize),
+                        ),
+                    ),
+                    vec![LinearNode::abort()],
+                    Some(vec![LinearNode::read_memory(
+                        location,
+                        offset + UNION_TAG_SIZE,
+                        variant_ty,
+                    )]),
+                    None,
+                )])
             } else {
                 let (location, offset) = access_location(declarations, stack_entries, *lhs, rhs);
                 LinearNodeValue::ReadMemory {
@@ -797,7 +829,7 @@ fn array_index_location(
                     // length
                     LinearNode::read_temp(2),
                 ),
-                vec![LinearNode::new(LinearNodeValue::Abort)],
+                vec![LinearNode::abort()],
                 None,
                 None,
             ),
