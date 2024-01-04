@@ -11,13 +11,13 @@ use crate::{
 pub struct LinearFunction {
     pub id: FunctionID,
     // TODO: memory layouts instead of expression types?
-    pub params: Vec<ExpressionType>,
-    pub returns: Option<ExpressionType>,
+    pub params: Vec<PhysicalType>,
+    pub returns: Option<PhysicalType>,
     pub body: Vec<LinearNode>,
 }
 
 pub fn linearize_function(
-    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     function: HirFunction,
 ) -> LinearFunction {
     let HirNodeValue::Sequence(block) = function.body.value else {
@@ -104,7 +104,7 @@ impl LinearNode {
         }
     }
 
-    fn read_memory(location: LinearNode, offset: usize, ty: ExpressionType) -> LinearNode {
+    fn read_memory(location: LinearNode, offset: usize, ty: PhysicalType) -> LinearNode {
         LinearNode {
             value: LinearNodeValue::ReadMemory {
                 location: Box::new(location),
@@ -118,7 +118,7 @@ impl LinearNode {
     fn write_memory(
         location: LinearNode,
         offset: usize,
-        ty: ExpressionType,
+        ty: PhysicalType,
         value: LinearNode,
     ) -> LinearNode {
         LinearNode {
@@ -163,12 +163,12 @@ pub enum LinearNodeValue {
     ReadMemory {
         location: Box<LinearNode>,
         offset: usize,
-        ty: ExpressionType,
+        ty: PhysicalType,
     },
     WriteMemory {
         location: Box<LinearNode>,
         offset: usize,
-        ty: ExpressionType,
+        ty: PhysicalType,
         value: Box<LinearNode>,
     },
 
@@ -216,7 +216,7 @@ pub enum LinearNodeValue {
 // TODO: produce a more CFG shaped result?
 
 pub fn linearize_nodes(
-    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &mut HashMap<VariableID, usize>,
     stack_offset: &mut usize,
     //blocks: &mut VecDeque<LinearBlock>,
@@ -247,20 +247,20 @@ pub fn linearize_nodes(
                 values.push(alloc);
 
                 let (location, offset) = variable_location(stack_entries, id);
+                let ty = expr_ty_to_physical(&node.ty);
 
                 values.push(LinearNode {
                     value: LinearNodeValue::WriteMemory {
                         location: Box::new(location),
                         offset,
                         value: Box::new(LinearNode::new(LinearNodeValue::Parameter(idx))),
-                        // TODO: hm
-                        ty: node.ty,
+                        ty,
                     },
                     provenance: node.provenance,
                 });
             }
             HirNodeValue::Assignment(lhs, rhs) => {
-                let ty = lhs.ty.clone();
+                let ty = expr_ty_to_physical(&lhs.ty);
                 let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
                 let rhs = lower_expression(declarations, stack_entries, *rhs);
                 values.push(LinearNode {
@@ -331,7 +331,7 @@ pub fn linearize_nodes(
 }
 
 fn lower_expression(
-    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &HashMap<VariableID, usize>,
     expression: HirNode,
 ) -> LinearNode {
@@ -362,6 +362,7 @@ fn lower_expression(
         }
         HirNodeValue::VariableReference(id) => {
             let (location, offset) = variable_location(stack_entries, id.as_var());
+            let ty = expr_ty_to_physical(&ty);
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
@@ -388,28 +389,17 @@ fn lower_expression(
             }) {
                 let (variant_idx, variant_ty) = &ty[&rhs];
                 let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
-                // TODO: switch from expression type to layout type
-                let variant_ty = match variant_ty {
-                    TypeLayoutField::Primitive(p) => ExpressionType::Primitive(*p),
-                    TypeLayoutField::Referenced(ty) => ExpressionType::InstanceOf(*ty),
-                    TypeLayoutField::Nullable(_) => todo!(),
-                    TypeLayoutField::Pointer => todo!(),
-                };
                 LinearNodeValue::Sequence(vec![LinearNode::if_node(
                     LinearNode::ptr_op(
                         HirBinOp::NotEquals,
                         LinearNode::size(*variant_idx),
-                        LinearNode::read_memory(
-                            location.clone(),
-                            offset,
-                            ExpressionType::Primitive(PrimitiveType::PointerSize),
-                        ),
+                        LinearNode::read_memory(location.clone(), offset, PhysicalType::Pointer),
                     ),
                     vec![LinearNode::abort()],
                     Some(vec![LinearNode::read_memory(
                         location,
                         offset + UNION_TAG_SIZE,
-                        variant_ty,
+                        variant_ty.clone(),
                     )]),
                     None,
                 )])
@@ -418,7 +408,7 @@ fn lower_expression(
                 LinearNodeValue::ReadMemory {
                     location: Box::new(location),
                     offset,
-                    ty,
+                    ty: expr_ty_to_physical(&ty),
                 }
             }
         }
@@ -428,7 +418,7 @@ fn lower_expression(
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
-                ty,
+                ty: expr_ty_to_physical(&ty),
             }
         }
 
@@ -451,11 +441,11 @@ fn lower_expression(
         HirNodeValue::Dereference(inner) => LinearNodeValue::ReadMemory {
             location: Box::new(lower_expression(declarations, stack_entries, *inner)),
             offset: 0,
-            ty,
+            ty: expr_ty_to_physical(&ty),
         },
         HirNodeValue::Sequence(_) => todo!(),
         HirNodeValue::StructLiteral(struct_id, mut values) => {
-            let Some(TypeMemoryLayout {
+            let Some(DeclaredTypeLayout {
                 value: TypeLayoutValue::Structure(layouts),
                 ..
             }) = declarations.get(&struct_id)
@@ -489,7 +479,7 @@ fn lower_expression(
                 LinearNode::new(LinearNodeValue::WriteMemory {
                     location: Box::new(LinearNode::read_temp(0)),
                     offset: size * idx,
-                    ty: inner_ty.clone(),
+                    ty: expr_ty_to_physical(&inner_ty),
                     value: Box::new(lower_expression(declarations, stack_entries, value)),
                 })
             }));
@@ -544,7 +534,7 @@ fn lower_expression(
                                 ),
                             ),
                             0,
-                            inner_ty.clone(),
+                            expr_ty_to_physical(&inner_ty),
                             lower_expression(declarations, stack_entries, *value),
                         ),
                         // idx += 1
@@ -569,14 +559,14 @@ fn lower_expression(
             LinearNodeValue::ReadMemory {
                 location: Box::new(table),
                 offset,
-                ty: ExpressionType::Primitive(PrimitiveType::PointerSize),
+                ty: PhysicalType::Pointer,
             }
         }
         HirNodeValue::VtableCall(table, fn_id, params) => {
             let ExpressionType::InstanceOf(ty_id) = &table.ty else {
                 unreachable!()
             };
-            let Some(TypeMemoryLayout {
+            let Some(DeclaredTypeLayout {
                 value: TypeLayoutValue::Interface(fields),
                 ..
             }) = declarations.get(ty_id)
@@ -606,7 +596,7 @@ fn lower_expression(
                 Box::new(LinearNode::new(LinearNodeValue::ReadMemory {
                     location: Box::new(table),
                     offset,
-                    ty: ExpressionType::Primitive(PrimitiveType::FunctionID),
+                    ty: PhysicalType::FunctionPointer,
                 })),
                 params,
             )
@@ -617,7 +607,7 @@ fn lower_expression(
             let ExpressionType::InstanceOf(ty_id) = &ty else {
                 unreachable!()
             };
-            let Some(TypeMemoryLayout {
+            let Some(DeclaredTypeLayout {
                 value: TypeLayoutValue::Interface(fields),
                 ..
             }) = declarations.get(ty_id)
@@ -644,18 +634,18 @@ fn lower_expression(
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
-                ty,
+                ty: expr_ty_to_physical(&ty),
             }
         }
         HirNodeValue::DictLiteral(entries) => {
             let ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) = ty else {
                 unreachable!()
             };
-            let key_ty = *key_ty;
-            let value_ty = *value_ty;
+            let key_ty = expr_ty_to_physical(&key_ty);
+            let value_ty = expr_ty_to_physical(&value_ty);
 
-            let key_size = expression_type_size(declarations, &key_ty);
-            let value_size = expression_type_size(declarations, &value_ty);
+            let key_size = key_ty.size(declarations);
+            let value_size = value_ty.size(declarations);
             let entry_size = key_size + value_size;
 
             let length = entries.len();
@@ -704,7 +694,7 @@ fn lower_expression(
 }
 
 fn lower_lvalue(
-    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &HashMap<VariableID, usize>,
     lvalue: HirNode,
 ) -> (LinearNode, usize) {
@@ -768,7 +758,7 @@ fn variable_location(
 }
 
 fn access_location(
-    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &HashMap<VariableID, usize>,
     lhs: HirNode,
     rhs: String,
@@ -776,7 +766,7 @@ fn access_location(
     let ExpressionType::InstanceOf(ty_id) = lhs.ty else {
         unreachable!()
     };
-    let TypeMemoryLayout { value, .. } = &declarations[&ty_id];
+    let DeclaredTypeLayout { value, .. } = &declarations[&ty_id];
     let (lhs, mut offset) = lower_lvalue(declarations, stack_entries, lhs);
     offset += match value {
         TypeLayoutValue::Structure(fields) => {
@@ -787,14 +777,13 @@ fn access_location(
         }
         TypeLayoutValue::Union(_) => UNION_TAG_SIZE,
         TypeLayoutValue::Interface(_fields) => todo!(), //*fields.get(&rhs).unwrap(),
-        TypeLayoutValue::FunctionPointer => unreachable!(),
     };
 
     (lhs, offset)
 }
 
 fn array_index_location(
-    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &HashMap<VariableID, usize>,
     arr: HirNode,
     idx: HirNode,
@@ -842,7 +831,7 @@ fn array_index_location(
 }
 
 fn dict_index_location(
-    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &HashMap<VariableID, usize>,
     dict: HirNode,
     idx: HirNode,
@@ -880,7 +869,7 @@ fn dict_index_location(
                         Box::new(LinearNode::read_memory(
                             LinearNode::read_temp(1),
                             0,
-                            ExpressionType::Primitive(idx_ty),
+                            PhysicalType::Primitive(idx_ty),
                         )),
                         // TODO: don't repeatedly call this
                         Box::new(lower_expression(declarations, stack_entries, idx)),
@@ -931,7 +920,7 @@ const POINTER_SIZE: usize = 8;
 const UNION_TAG_SIZE: usize = 8;
 
 fn expression_type_size(
-    declarations: &HashMap<TypeID, TypeMemoryLayout>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     expr: &ExpressionType,
 ) -> usize {
     // TODO: alignment
@@ -961,7 +950,6 @@ fn primitive_type_size(prim: PrimitiveType) -> usize {
         PrimitiveType::Float64 => 8,
         PrimitiveType::Bool => 1,
         PrimitiveType::PointerSize => POINTER_SIZE,
-        PrimitiveType::FunctionID => 4,
     }
 }
 
@@ -969,37 +957,69 @@ fn primitive_type_size(prim: PrimitiveType) -> usize {
 
 // TODO: move to its own module?
 #[derive(Debug)]
-pub struct TypeMemoryLayout {
+pub struct DeclaredTypeLayout {
     pub value: TypeLayoutValue,
     // TODO: remove field?
     pub size: usize,
 }
 
-#[derive(Debug)]
-pub enum TypeLayoutValue {
-    Structure(Vec<(String, usize, TypeLayoutField)>),
-    Interface(Vec<FunctionID>),
-    Union(HashMap<String, (usize, TypeLayoutField)>),
-    FunctionPointer,
-}
-
-#[derive(Debug)]
-pub enum TypeLayoutField {
-    Primitive(PrimitiveType),
-    Referenced(TypeID),
-    Nullable(Box<TypeLayoutField>),
-    Pointer,
-}
-
-impl TypeMemoryLayout {
+impl DeclaredTypeLayout {
     fn size(&self) -> usize {
         self.size
     }
 }
 
+#[derive(Debug)]
+pub enum TypeLayoutValue {
+    Structure(Vec<(String, usize, PhysicalType)>),
+    Interface(Vec<FunctionID>),
+    Union(HashMap<String, (usize, PhysicalType)>),
+}
+
+#[derive(Clone, Debug)]
+pub enum PhysicalType {
+    Primitive(PrimitiveType),
+    Referenced(TypeID),
+    Nullable(Box<PhysicalType>),
+    // TODO: unify with primitive pointer size?
+    Pointer,
+    FunctionPointer,
+    Collection(PhysicalCollection),
+}
+
+#[derive(Clone, Debug)]
+pub enum PhysicalCollection {
+    Array,
+    Dict,
+}
+
+impl PhysicalType {
+    fn size(&self, declarations: &HashMap<TypeID, DeclaredTypeLayout>) -> usize {
+        match self {
+            PhysicalType::Primitive(p) => match p {
+                PrimitiveType::Char => todo!(),
+                PrimitiveType::String => todo!(),
+                PrimitiveType::Int32 => 4,
+                PrimitiveType::Float32 => 4,
+                PrimitiveType::Int64 => 8,
+                PrimitiveType::Float64 => 8,
+                PrimitiveType::Bool => 1,
+                PrimitiveType::PointerSize => POINTER_SIZE,
+            },
+            PhysicalType::Referenced(id) => declarations[id].size(),
+            PhysicalType::Nullable(_) => todo!(),
+            PhysicalType::Pointer | PhysicalType::FunctionPointer => POINTER_SIZE,
+            PhysicalType::Collection(ty) => match ty {
+                PhysicalCollection::Array => POINTER_SIZE * 3,
+                PhysicalCollection::Dict => POINTER_SIZE * 3,
+            },
+        }
+    }
+}
+
 pub fn layout_types(
     declarations: &HashMap<String, StaticDeclaration>,
-    layouts: &mut HashMap<TypeID, TypeMemoryLayout>,
+    layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
 ) {
     let declarations: HashMap<_, _> = declarations
         .iter()
@@ -1012,7 +1032,7 @@ pub fn layout_types(
 
 fn layout_static_decl(
     declarations: &HashMap<TypeID, &StaticDeclaration>,
-    layouts: &mut HashMap<TypeID, TypeMemoryLayout>,
+    layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
     decl: &StaticDeclaration,
 ) -> usize {
     if let Some(layout) = layouts.get(&decl.id()) {
@@ -1032,15 +1052,14 @@ fn layout_static_decl(
                     (name.clone(), offset, field)
                 })
                 .collect();
-            TypeMemoryLayout {
+            DeclaredTypeLayout {
                 value: TypeLayoutValue::Structure(fields),
                 size,
             }
         }
-        StaticDeclaration::Func(_) => TypeMemoryLayout {
-            value: TypeLayoutValue::FunctionPointer,
-            size: 8,
-        },
+        StaticDeclaration::Func(_) => {
+            return POINTER_SIZE;
+        }
         StaticDeclaration::Interface(interface_ty) => {
             let mut size = POINTER_SIZE;
             let fields = interface_ty
@@ -1055,7 +1074,7 @@ fn layout_static_decl(
                     func.func_id
                 })
                 .collect();
-            TypeMemoryLayout {
+            DeclaredTypeLayout {
                 value: TypeLayoutValue::Interface(fields),
                 size,
             }
@@ -1076,7 +1095,7 @@ fn layout_static_decl(
                 })
                 .collect();
 
-            TypeMemoryLayout {
+            DeclaredTypeLayout {
                 value: TypeLayoutValue::Union(variants),
                 size: UNION_TAG_SIZE + largest_variant,
             }
@@ -1095,30 +1114,49 @@ fn layout_static_decl(
 
 fn layout_type(
     declarations: &HashMap<TypeID, &StaticDeclaration>,
-    layouts: &mut HashMap<TypeID, TypeMemoryLayout>,
+    layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
     ty: &ExpressionType,
-) -> (TypeLayoutField, usize) {
+) -> (PhysicalType, usize) {
     match ty {
         ExpressionType::Void => unreachable!(),
         ExpressionType::Null => unreachable!(),
         ExpressionType::Primitive(p) => {
             let size = primitive_type_size(*p);
-            (TypeLayoutField::Primitive(*p), size)
+            (PhysicalType::Primitive(*p), size)
         }
         ExpressionType::InstanceOf(id) => {
             let size = layout_static_decl(declarations, layouts, declarations[id]);
-            (TypeLayoutField::Referenced(*id), size)
+            (PhysicalType::Referenced(*id), size)
         }
-        ExpressionType::Pointer(_, _) => (TypeLayoutField::Pointer, POINTER_SIZE),
+        ExpressionType::Pointer(_, _) => (PhysicalType::Pointer, POINTER_SIZE),
         ExpressionType::Collection(CollectionType::Array(_)) => {
-            (TypeLayoutField::Pointer, POINTER_SIZE)
+            (PhysicalType::Pointer, POINTER_SIZE)
         }
         ExpressionType::Collection(CollectionType::Dict(_, _)) => {
             todo!()
         }
         ExpressionType::Nullable(inner) => {
             let (inner, size) = layout_type(declarations, layouts, inner);
-            (TypeLayoutField::Nullable(Box::new(inner)), size + 1)
+            (PhysicalType::Nullable(Box::new(inner)), size + 1)
+        }
+        ExpressionType::ReferenceTo(_) => todo!(),
+    }
+}
+
+fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
+    match ty {
+        ExpressionType::Void => unreachable!(),
+        ExpressionType::Null => unreachable!(),
+        ExpressionType::Primitive(p) => PhysicalType::Primitive(*p),
+        ExpressionType::InstanceOf(id) => PhysicalType::Referenced(*id),
+        ExpressionType::Collection(c) => PhysicalType::Collection(match c {
+            CollectionType::Array(_) => PhysicalCollection::Array,
+            CollectionType::Dict(_, _) => PhysicalCollection::Dict,
+        }),
+        ExpressionType::Pointer(_, _) => PhysicalType::Pointer,
+        ExpressionType::Nullable(inner) => {
+            let ty = expr_ty_to_physical(inner);
+            PhysicalType::Nullable(Box::new(ty))
         }
         ExpressionType::ReferenceTo(_) => todo!(),
     }

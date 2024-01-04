@@ -6,10 +6,10 @@ use crate::{
     hir::HirBinOp,
     id::{FunctionID, TypeID},
     linear_ir::{
-        LinearFunction, LinearNode, LinearNodeValue, TypeLayoutField, TypeLayoutValue,
-        TypeMemoryLayout,
+        DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
+        PhysicalType, TypeLayoutValue,
     },
-    typecheck::{CollectionType, ExpressionType, PrimitiveType},
+    typecheck::PrimitiveType,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -76,7 +76,7 @@ pub enum Unwind {
 pub struct VM {
     pub memory: [u8; 1024],
     pub temporaries: [usize; 16],
-    pub layouts: HashMap<TypeID, TypeMemoryLayout>,
+    pub layouts: HashMap<TypeID, DeclaredTypeLayout>,
     pub op_stack: Vec<Value>,
     pub base_ptr: usize,
     pub stack_ptr: usize,
@@ -84,7 +84,7 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(layouts: HashMap<TypeID, TypeMemoryLayout>) -> VM {
+    pub fn new(layouts: HashMap<TypeID, DeclaredTypeLayout>) -> VM {
         let memory = [0; 1024];
         VM {
             memory,
@@ -375,10 +375,7 @@ pub async fn evaluate_block(
                     PrimitiveType::Float32 => Value::Float32(val as f32),
                     PrimitiveType::Float64 => Value::Float64(val as f64),
                     PrimitiveType::PointerSize => Value::Size(val as usize),
-                    PrimitiveType::String
-                    | PrimitiveType::Bool
-                    | PrimitiveType::FunctionID
-                    | PrimitiveType::Char => {
+                    PrimitiveType::String | PrimitiveType::Bool | PrimitiveType::Char => {
                         unreachable!()
                     }
                 },
@@ -388,10 +385,7 @@ pub async fn evaluate_block(
                     PrimitiveType::Float32 => Value::Float32(val as f32),
                     PrimitiveType::Float64 => Value::Float64(val as f64),
                     PrimitiveType::PointerSize => Value::Size(val as usize),
-                    PrimitiveType::String
-                    | PrimitiveType::Bool
-                    | PrimitiveType::FunctionID
-                    | PrimitiveType::Char => {
+                    PrimitiveType::String | PrimitiveType::Bool | PrimitiveType::Char => {
                         unreachable!()
                     }
                 },
@@ -401,10 +395,7 @@ pub async fn evaluate_block(
                     PrimitiveType::Float32 => Value::Float32(val),
                     PrimitiveType::Float64 => Value::Float64(val as f64),
                     PrimitiveType::PointerSize => Value::Size(val as usize),
-                    PrimitiveType::String
-                    | PrimitiveType::Bool
-                    | PrimitiveType::FunctionID
-                    | PrimitiveType::Char => {
+                    PrimitiveType::String | PrimitiveType::Bool | PrimitiveType::Char => {
                         unreachable!()
                     }
                 },
@@ -414,10 +405,7 @@ pub async fn evaluate_block(
                     PrimitiveType::Float32 => Value::Float32(val as f32),
                     PrimitiveType::Float64 => Value::Float64(val),
                     PrimitiveType::PointerSize => Value::Size(val as usize),
-                    PrimitiveType::String
-                    | PrimitiveType::Bool
-                    | PrimitiveType::FunctionID
-                    | PrimitiveType::Char => {
+                    PrimitiveType::String | PrimitiveType::Bool | PrimitiveType::Char => {
                         unreachable!()
                     }
                 },
@@ -434,21 +422,20 @@ pub async fn evaluate_block(
 
 fn write(
     op_stack: &mut Vec<Value>,
-    layouts: &HashMap<TypeID, TypeMemoryLayout>,
+    layouts: &HashMap<TypeID, DeclaredTypeLayout>,
     memory: &mut [u8],
     location: usize,
-    ty: &ExpressionType,
+    ty: &PhysicalType,
 ) {
     match ty {
-        ExpressionType::Void => unreachable!(),
-        ExpressionType::Primitive(_) => {
+        PhysicalType::Primitive(_) => {
             write_primitive(op_stack, memory, location);
         }
-        ExpressionType::InstanceOf(id) => match &layouts[id].value {
+        PhysicalType::Referenced(id) => match &layouts[id].value {
             TypeLayoutValue::Structure(fields) => {
                 for (_, offset, ty) in fields.iter() {
                     let location = location + offset;
-                    write_field(op_stack, layouts, memory, location, ty);
+                    write(op_stack, layouts, memory, location, ty);
                 }
             }
             TypeLayoutValue::Interface(fields) => {
@@ -457,7 +444,6 @@ fn write(
                     offset += write_primitive(op_stack, memory, location + offset);
                 }
             }
-            TypeLayoutValue::FunctionPointer => todo!(),
             TypeLayoutValue::Union(variants) => {
                 let Value::Size(variant) = op_stack.pop().unwrap() else {
                     unreachable!()
@@ -468,44 +454,20 @@ fn write(
                     .values()
                     .find_map(|(id, ty)| if *id == variant { Some(ty) } else { None })
                     .unwrap();
-                write_field(op_stack, layouts, memory, location + offset, variant);
+                write(op_stack, layouts, memory, location + offset, variant);
             }
         },
-        ExpressionType::Collection(CollectionType::Dict(_, _))
-        | ExpressionType::Collection(CollectionType::Array(_)) => {
-            write_primitive(op_stack, memory, location);
-            write_primitive(op_stack, memory, location + 8);
-            write_primitive(op_stack, memory, location + 16);
-        }
-        ExpressionType::Pointer(_, _) => {
-            write_primitive(op_stack, memory, location);
-        }
-        ExpressionType::Null => todo!(),
-        ExpressionType::Nullable(_) => todo!(),
-        ExpressionType::ReferenceTo(_) => todo!(),
-    }
-}
-
-fn write_field(
-    op_stack: &mut Vec<Value>,
-    layouts: &HashMap<TypeID, TypeMemoryLayout>,
-    memory: &mut [u8],
-    location: usize,
-    ty: &TypeLayoutField,
-) {
-    match ty {
-        TypeLayoutField::Primitive(_) => {
+        PhysicalType::Collection(ty) => match ty {
+            PhysicalCollection::Array | PhysicalCollection::Dict => {
+                write_primitive(op_stack, memory, location);
+                write_primitive(op_stack, memory, location + 8);
+                write_primitive(op_stack, memory, location + 16);
+            }
+        },
+        PhysicalType::Pointer | PhysicalType::FunctionPointer => {
             write_primitive(op_stack, memory, location);
         }
-        TypeLayoutField::Referenced(id) => write(
-            op_stack,
-            layouts,
-            memory,
-            location,
-            &ExpressionType::InstanceOf(*id),
-        ),
-        TypeLayoutField::Nullable(_) => todo!(),
-        TypeLayoutField::Pointer => todo!(),
+        PhysicalType::Nullable(_) => todo!(),
     }
 }
 
@@ -534,65 +496,56 @@ fn write_primitive(op_stack: &mut Vec<Value>, memory: &mut [u8], location: usize
 
 fn read(
     op_stack: &mut Vec<Value>,
-    layouts: &HashMap<TypeID, TypeMemoryLayout>,
+    layouts: &HashMap<TypeID, DeclaredTypeLayout>,
     memory: &[u8],
     location: usize,
-    ty: &ExpressionType,
+    ty: &PhysicalType,
 ) {
     match ty {
-        ExpressionType::Void | ExpressionType::Null => unreachable!("{:?}", ty),
-        ExpressionType::Primitive(p) => {
+        PhysicalType::Primitive(p) => {
             read_primitive(op_stack, memory, location, *p);
         }
-        ExpressionType::InstanceOf(id) => {
+        PhysicalType::Referenced(id) => {
             let layout = &layouts[id];
             match &layout.value {
                 TypeLayoutValue::Structure(fields) => {
                     for (_, offset, ty) in fields.iter().rev() {
                         let location = location + offset;
-                        match ty {
-                            TypeLayoutField::Primitive(p) => {
-                                read_primitive(op_stack, memory, location, *p)
-                            }
-                            TypeLayoutField::Referenced(id) => read(
-                                op_stack,
-                                layouts,
-                                memory,
-                                location,
-                                &ExpressionType::InstanceOf(*id),
-                            ),
-                            TypeLayoutField::Nullable(_) => todo!(),
-                            TypeLayoutField::Pointer => todo!(),
-                        }
+                        read(op_stack, layouts, memory, location, ty);
                     }
                 }
                 TypeLayoutValue::Interface(fields) => {
                     let mut location = location + layout.size;
                     for _ in fields.iter().rev() {
-                        read_primitive(op_stack, memory, location, PrimitiveType::FunctionID);
+                        read(
+                            op_stack,
+                            layouts,
+                            memory,
+                            location,
+                            &PhysicalType::FunctionPointer,
+                        );
                         location -= 4;
                     }
                     read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
                 }
-                TypeLayoutValue::FunctionPointer => {
-                    let fn_id: FunctionID =
-                        *bytemuck::from_bytes(&memory[location..(location + 4)]);
-                    op_stack.push(Value::FunctionID(fn_id));
-                }
                 TypeLayoutValue::Union(_) => todo!(),
             }
         }
-        ExpressionType::Collection(CollectionType::Dict(_, _))
-        | ExpressionType::Collection(CollectionType::Array(_)) => {
-            read_primitive(op_stack, memory, location + 16, PrimitiveType::PointerSize);
-            read_primitive(op_stack, memory, location + 8, PrimitiveType::PointerSize);
+        PhysicalType::Collection(ty) => match ty {
+            PhysicalCollection::Array | PhysicalCollection::Dict => {
+                read_primitive(op_stack, memory, location + 16, PrimitiveType::PointerSize);
+                read_primitive(op_stack, memory, location + 8, PrimitiveType::PointerSize);
+                read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
+            }
+        },
+        PhysicalType::Pointer => {
             read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
         }
-        ExpressionType::Pointer(_, _) => {
-            read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
+        PhysicalType::Nullable(_) => todo!(),
+        PhysicalType::FunctionPointer => {
+            let fn_id: FunctionID = *bytemuck::from_bytes(&memory[location..(location + 4)]);
+            op_stack.push(Value::FunctionID(fn_id));
         }
-        ExpressionType::Nullable(_) => todo!(),
-        ExpressionType::ReferenceTo(_) => todo!(),
     }
 }
 
@@ -622,9 +575,6 @@ fn read_primitive(
             let base_ptr = &memory[location..(location + 8)];
             let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
             Value::Size(base_ptr)
-        }
-        PrimitiveType::FunctionID => {
-            Value::FunctionID(*bytemuck::from_bytes(&memory[location..(location + 4)]))
         }
     });
 }

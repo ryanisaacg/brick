@@ -176,7 +176,6 @@ pub enum PrimitiveType {
 
     // TODO?
     PointerSize,
-    FunctionID,
 }
 
 // TODO: get the lifetimes out of these typecheck errors
