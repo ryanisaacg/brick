@@ -254,6 +254,7 @@ pub fn resolve_type_expr(
         | AstNodeValue::Block(_)
         | AstNodeValue::StringLiteral(_)
         | AstNodeValue::CharLiteral(_)
+        | AstNodeValue::UnaryExpr(_, _)
         | AstNodeValue::DictLiteral(_) => {
             // TODO: report error
             panic!("Illegal in type name");

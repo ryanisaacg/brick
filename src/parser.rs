@@ -48,6 +48,7 @@ impl<'a> AstNode<'a> {
             | Return(child)
             | Statement(child)
             | Deref(child)
+            | UnaryExpr(_, child)
             | ArrayType(child) => {
                 callback(child);
             }
@@ -235,6 +236,7 @@ pub enum AstNodeValue<'a> {
     CharLiteral(char),
     StringLiteral(String),
     Null,
+    UnaryExpr(UnaryOp, &'a mut AstNode<'a>),
     BinExpr(BinOp, &'a mut AstNode<'a>, &'a mut AstNode<'a>),
     If(IfDeclaration<'a>),
     While(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
@@ -268,6 +270,11 @@ impl<'a> AstNodeValue<'a> {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum UnaryOp {
+    BooleanNot,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BinOp {
     Dot,
     Add,
@@ -287,6 +294,9 @@ pub enum BinOp {
     SubtractAssign,
     MultiplyAssign,
     DivideAssign,
+
+    BooleanAnd,
+    BooleanOr,
 }
 
 #[derive(Debug, Error)]
@@ -991,6 +1001,7 @@ fn expression_pratt<'a>(
                     TokenValue::Ref => AstNodeValue::TakeRef(right),
                     TokenValue::Unique => AstNodeValue::TakeUnique(right),
                     TokenValue::Asterisk => AstNodeValue::Deref(right),
+                    TokenValue::Exclamation => AstNodeValue::UnaryExpr(UnaryOp::BooleanNot, right),
                     other => unreachable!("prefix operator {:?}", other),
                 },
                 SourceRange::new(range.start(), end),
@@ -1169,6 +1180,8 @@ fn expression_pratt<'a>(
                 TokenValue::Period => BinOp::Dot,
                 TokenValue::Asterisk => BinOp::Multiply,
                 TokenValue::ForwardSlash => BinOp::Divide,
+                TokenValue::BooleanAnd => BinOp::BooleanAnd,
+                TokenValue::BooleanOr => BinOp::BooleanOr,
                 token => unreachable!("binary operator {:?}", token),
             };
 
@@ -1189,9 +1202,15 @@ fn expression_pratt<'a>(
 }
 
 const ASSIGNMENT: u8 = 2;
-const COMPARE: u8 = ASSIGNMENT + 2;
+// bools
+const BOOLEAN_OR: u8 = ASSIGNMENT + 2;
+const BOOLEAN_AND: u8 = BOOLEAN_OR + 2;
+const BOOLEAN_NOT: u8 = BOOLEAN_AND + 1;
+const COMPARE: u8 = BOOLEAN_NOT + 2;
+// math
 const SUM: u8 = COMPARE + 2;
 const FACTOR: u8 = SUM + 2;
+// misc
 const REFERENCE: u8 = FACTOR + 1;
 const CALL: u8 = REFERENCE + 2;
 const DOT: u8 = CALL + 1;
@@ -1199,6 +1218,7 @@ const DOT: u8 = CALL + 1;
 fn prefix_binding_power(op: &TokenValue) -> Option<((), u8)> {
     let res = match op {
         TokenValue::Ref | TokenValue::Unique | TokenValue::Asterisk => ((), REFERENCE),
+        TokenValue::Exclamation => ((), BOOLEAN_NOT),
         _ => return None,
     };
     Some(res)
@@ -1228,6 +1248,8 @@ fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
         TokenValue::Plus | TokenValue::Minus => (SUM, SUM - 1),
         TokenValue::Asterisk | TokenValue::ForwardSlash => (FACTOR, FACTOR - 1),
         TokenValue::Period => (DOT - 1, DOT),
+        TokenValue::BooleanAnd => (BOOLEAN_AND, BOOLEAN_AND - 1),
+        TokenValue::BooleanOr => (BOOLEAN_OR, BOOLEAN_OR - 1),
         _ => return None,
     };
     Some(res)

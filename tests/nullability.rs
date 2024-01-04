@@ -29,11 +29,11 @@ x
 async fn basic_non_null_nullable() {
     let result = eval(
         r#"
-let x: i32? = 1;
+let x: i32? = 70;
 x
 "#,
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int32(1)]);
+    assert_matches!(&result[..], [Value::Int32(70)]);
 }

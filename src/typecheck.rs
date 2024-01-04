@@ -6,7 +6,7 @@ use crate::{
     id::{AnyID, FunctionID, NodeID, TypeID},
     parser::{
         AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
-        InterfaceDeclarationValue, StructDeclarationValue,
+        InterfaceDeclarationValue, StructDeclarationValue, UnaryOp,
     },
     provenance::SourceRange,
 };
@@ -576,6 +576,33 @@ fn typecheck_expression<'a>(
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
         }
+        AstNodeValue::BinExpr(BinOp::BooleanAnd | BinOp::BooleanOr, left, right) => {
+            let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
+
+            if !is_assignable_to(
+                &context.id_to_decl,
+                &ExpressionType::Primitive(PrimitiveType::Bool),
+                left,
+            ) {
+                return Err(TypecheckError::TypeMismatch {
+                    received: left.clone(),
+                    expected: ExpressionType::Primitive(PrimitiveType::Bool),
+                });
+            }
+            if !is_assignable_to(
+                &context.id_to_decl,
+                &ExpressionType::Primitive(PrimitiveType::Bool),
+                right,
+            ) {
+                return Err(TypecheckError::TypeMismatch {
+                    received: right.clone(),
+                    expected: ExpressionType::Primitive(PrimitiveType::Bool),
+                });
+            }
+
+            ExpressionType::Primitive(PrimitiveType::Bool)
+        }
         // TODO: non-numeric equality
         AstNodeValue::BinExpr(
             BinOp::LessThan
@@ -875,6 +902,22 @@ fn typecheck_expression<'a>(
             }
             ExpressionType::Collection(CollectionType::Array(Box::new(inner.clone())))
         }
+        AstNodeValue::UnaryExpr(op, child) => match op {
+            UnaryOp::BooleanNot => {
+                let child_ty = typecheck_expression(child, outer_scopes, current_scope, context)?;
+                if !is_assignable_to(
+                    &context.id_to_decl,
+                    child_ty,
+                    &ExpressionType::Primitive(PrimitiveType::Bool),
+                ) {
+                    return Err(TypecheckError::TypeMismatch {
+                        expected: ExpressionType::Primitive(PrimitiveType::Bool),
+                        received: child_ty.clone(),
+                    });
+                }
+                ExpressionType::Primitive(PrimitiveType::Bool)
+            }
+        },
     };
 
     node.ty.set(ty).expect("each node should be visited once");
@@ -924,6 +967,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::UniqueType(_)
         | AstNodeValue::SharedType(_)
         | AstNodeValue::ArrayType(_)
+        | AstNodeValue::UnaryExpr(_, _)
         | AstNodeValue::NullableType(_) => false,
     }
 }

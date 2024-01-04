@@ -162,6 +162,7 @@ fn create_graph_for_node<'a>(
             (node, node)
         }
         BinExpr(_, _, _)
+        | UnaryExpr(_, _)
         | Deref(_)
         | Statement(_)
         | Call(_, _)

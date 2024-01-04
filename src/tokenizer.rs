@@ -40,6 +40,10 @@ pub enum TokenValue {
     EqualTo,
     NotEquals,
 
+    // Boolean operators
+    BooleanAnd,
+    BooleanOr,
+
     // Misc operators
     Period,
 
@@ -49,6 +53,7 @@ pub enum TokenValue {
     Comma,
     Semicolon,
     QuestionMark,
+    Exclamation,
 
     // Braces
     OpenParen,
@@ -110,7 +115,10 @@ impl fmt::Display for TokenValue {
             GreaterEqualThan => write!(f, ">="),
             EqualTo => write!(f, "=="),
             NotEquals => write!(f, "!="),
+            BooleanAnd => write!(f, "and"),
+            BooleanOr => write!(f, "or"),
             QuestionMark => write!(f, "?"),
+            Exclamation => write!(f, "!"),
             Let => write!(f, "keyword let"),
             If => write!(f, "keyword if"),
             While => write!(f, "keyword while"),
@@ -253,6 +261,8 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "null" => TokenValue::Null,
                         "dict" => TokenValue::Dict,
                         "interface" => TokenValue::Interface,
+                        "and" => TokenValue::BooleanAnd,
+                        "or" => TokenValue::BooleanOr,
                         _ => TokenValue::Word(word),
                     }
                 }
@@ -279,7 +289,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::NotEquals
                     } else {
-                        todo!()
+                        TokenValue::Exclamation
                     }
                 }
                 '?' => TokenValue::QuestionMark,

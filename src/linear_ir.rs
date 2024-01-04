@@ -1,7 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::{
-    hir::{HirBinOp, HirFunction, HirNode, HirNodeValue},
+    hir::{
+        ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirFunction, HirNode, HirNodeValue,
+        UnaryLogicalOp,
+    },
     id::{FunctionID, TypeID, VariableID},
     provenance::SourceRange,
     typecheck::{CollectionType, ExpressionType, PrimitiveType, StaticDeclaration},
@@ -64,9 +67,21 @@ impl LinearNode {
         }
     }
 
-    fn ptr_op(op: HirBinOp, lhs: LinearNode, rhs: LinearNode) -> LinearNode {
+    fn ptr_arithmetic(op: ArithmeticOp, lhs: LinearNode, rhs: LinearNode) -> LinearNode {
         LinearNode {
-            value: LinearNodeValue::BinOp(
+            value: LinearNodeValue::Arithmetic(
+                op,
+                PrimitiveType::PointerSize,
+                Box::new(lhs),
+                Box::new(rhs),
+            ),
+            provenance: None,
+        }
+    }
+
+    fn ptr_comparison(op: ComparisonOp, lhs: LinearNode, rhs: LinearNode) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::Comparison(
                 op,
                 PrimitiveType::PointerSize,
                 Box::new(lhs),
@@ -193,7 +208,20 @@ pub enum LinearNodeValue {
     WriteTemporary(u8, Box<LinearNode>),
     ReadTemporary(u8),
 
-    BinOp(HirBinOp, PrimitiveType, Box<LinearNode>, Box<LinearNode>),
+    Arithmetic(
+        ArithmeticOp,
+        PrimitiveType,
+        Box<LinearNode>,
+        Box<LinearNode>,
+    ),
+    Comparison(
+        ComparisonOp,
+        PrimitiveType,
+        Box<LinearNode>,
+        Box<LinearNode>,
+    ),
+    BinaryLogical(BinaryLogicalOp, Box<LinearNode>, Box<LinearNode>),
+    UnaryLogical(UnaryLogicalOp, Box<LinearNode>),
     Cast {
         value: Box<LinearNode>,
         from: PrimitiveType,
@@ -349,17 +377,37 @@ fn lower_expression(
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
         HirNodeValue::StringLiteral(x) => LinearNodeValue::StringLiteral(x),
 
-        HirNodeValue::BinOp(op, lhs, rhs) => {
+        HirNodeValue::Arithmetic(op, lhs, rhs) => {
             let ExpressionType::Primitive(ty) = rhs.ty else {
                 unreachable!("binoperands must be primitive not {:?}", ty)
             };
-            LinearNodeValue::BinOp(
+            LinearNodeValue::Arithmetic(
                 op,
                 ty,
                 Box::new(lower_expression(declarations, stack_entries, *lhs)),
                 Box::new(lower_expression(declarations, stack_entries, *rhs)),
             )
         }
+        HirNodeValue::Comparison(op, lhs, rhs) => {
+            let ExpressionType::Primitive(ty) = rhs.ty else {
+                unreachable!("binoperands must be primitive not {:?}", ty)
+            };
+            LinearNodeValue::Comparison(
+                op,
+                ty,
+                Box::new(lower_expression(declarations, stack_entries, *lhs)),
+                Box::new(lower_expression(declarations, stack_entries, *rhs)),
+            )
+        }
+        HirNodeValue::BinaryLogical(op, lhs, rhs) => LinearNodeValue::BinaryLogical(
+            op,
+            Box::new(lower_expression(declarations, stack_entries, *lhs)),
+            Box::new(lower_expression(declarations, stack_entries, *rhs)),
+        ),
+        HirNodeValue::UnaryLogical(op, child) => LinearNodeValue::UnaryLogical(
+            op,
+            Box::new(lower_expression(declarations, stack_entries, *child)),
+        ),
         HirNodeValue::VariableReference(id) => {
             let (location, offset) = variable_location(stack_entries, id.as_var());
             let ty = expr_ty_to_physical(&ty);
@@ -390,8 +438,8 @@ fn lower_expression(
                 let (variant_idx, variant_ty) = &ty[&rhs];
                 let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
                 LinearNodeValue::Sequence(vec![LinearNode::if_node(
-                    LinearNode::ptr_op(
-                        HirBinOp::NotEquals,
+                    LinearNode::ptr_comparison(
+                        ComparisonOp::NotEquals,
                         LinearNode::size(*variant_idx),
                         LinearNode::read_memory(location.clone(), offset, PhysicalType::Pointer),
                     ),
@@ -431,11 +479,11 @@ fn lower_expression(
         HirNodeValue::Assignment(_, _) => todo!(),
         HirNodeValue::TakeUnique(inner) | HirNodeValue::TakeShared(inner) => {
             let (ptr, offset) = lower_lvalue(declarations, stack_entries, *inner);
-            LinearNodeValue::BinOp(
-                HirBinOp::Add,
+            LinearNodeValue::Arithmetic(
+                ArithmeticOp::Add,
                 PrimitiveType::PointerSize,
                 Box::new(ptr),
-                Box::new(LinearNode::new(LinearNodeValue::Size(offset))),
+                Box::new(LinearNode::size(offset)),
             )
         }
         HirNodeValue::Dereference(inner) => LinearNodeValue::ReadMemory {
@@ -505,18 +553,20 @@ fn lower_expression(
                 // Allocate memory and store the pointer in another temporary
                 LinearNode::write_temp(
                     1,
-                    LinearNode::new(LinearNodeValue::HeapAlloc(Box::new(LinearNode::ptr_op(
-                        HirBinOp::Multiply,
-                        LinearNode::size(size),
-                        LinearNode::read_temp(0),
-                    )))),
+                    LinearNode::new(LinearNodeValue::HeapAlloc(Box::new(
+                        LinearNode::ptr_arithmetic(
+                            ArithmeticOp::Multiply,
+                            LinearNode::size(size),
+                            LinearNode::read_temp(0),
+                        ),
+                    ))),
                 ),
                 // Create a temporary for indexing the array as we fill it in
                 LinearNode::write_temp(2, LinearNode::size(0)),
                 LinearNode::new(LinearNodeValue::Loop(vec![LinearNode::if_node(
                     // idx = length?
-                    LinearNode::ptr_op(
-                        HirBinOp::EqualTo,
+                    LinearNode::ptr_comparison(
+                        ComparisonOp::EqualTo,
                         LinearNode::read_temp(2),
                         LinearNode::read_temp(0),
                     ),
@@ -524,11 +574,11 @@ fn lower_expression(
                     Some(vec![
                         // *(ptr + idx * size) = value
                         LinearNode::write_memory(
-                            LinearNode::ptr_op(
-                                HirBinOp::Add,
+                            LinearNode::ptr_arithmetic(
+                                ArithmeticOp::Add,
                                 LinearNode::read_temp(1),
-                                LinearNode::ptr_op(
-                                    HirBinOp::Multiply,
+                                LinearNode::ptr_arithmetic(
+                                    ArithmeticOp::Add,
                                     LinearNode::size(size),
                                     LinearNode::read_temp(2),
                                 ),
@@ -540,8 +590,8 @@ fn lower_expression(
                         // idx += 1
                         LinearNode::write_temp(
                             2,
-                            LinearNode::ptr_op(
-                                HirBinOp::Add,
+                            LinearNode::ptr_arithmetic(
+                                ArithmeticOp::Add,
                                 LinearNode::read_temp(2),
                                 LinearNode::size(1),
                             ),
@@ -619,7 +669,8 @@ fn lower_expression(
             }
 
             let (pointer, offset) = lower_lvalue(declarations, stack_entries, *value);
-            let pointer = LinearNode::ptr_op(HirBinOp::Add, pointer, LinearNode::size(offset));
+            let pointer =
+                LinearNode::ptr_arithmetic(ArithmeticOp::Add, pointer, LinearNode::size(offset));
             values.push(pointer);
 
             LinearNodeValue::Sequence(values)
@@ -715,7 +766,10 @@ fn lower_lvalue(
         HirNodeValue::Declaration(_) => todo!(),
         HirNodeValue::Call(_, _) => todo!(),
         HirNodeValue::Assignment(_, _) => todo!(),
-        HirNodeValue::BinOp(_, _, _) => todo!(),
+        HirNodeValue::UnaryLogical(_, _) => todo!(),
+        HirNodeValue::Arithmetic(_, _, _) => todo!(),
+        HirNodeValue::Comparison(_, _, _) => todo!(),
+        HirNodeValue::BinaryLogical(_, _, _) => todo!(),
         HirNodeValue::Return(_) => todo!(),
         HirNodeValue::Int(_) => todo!(),
         HirNodeValue::Float(_) => todo!(),
@@ -745,14 +799,11 @@ fn variable_location(
     var_id: VariableID,
 ) -> (LinearNode, usize) {
     (
-        LinearNode::new(LinearNodeValue::BinOp(
-            HirBinOp::Subtract,
-            PrimitiveType::PointerSize,
-            Box::new(LinearNode::new(LinearNodeValue::StackFrame)),
-            Box::new(LinearNode::new(LinearNodeValue::Size(
-                stack_entries[&var_id],
-            ))),
-        )),
+        LinearNode::ptr_arithmetic(
+            ArithmeticOp::Subtract,
+            LinearNode::new(LinearNodeValue::StackFrame),
+            LinearNode::size(stack_entries[&var_id]),
+        ),
         0,
     )
 }
@@ -797,8 +848,8 @@ fn array_index_location(
             LinearNode::write_temp(3, idx),
             LinearNode::write_temp(
                 0,
-                LinearNode::ptr_op(
-                    HirBinOp::Multiply,
+                LinearNode::ptr_arithmetic(
+                    ArithmeticOp::Multiply,
                     LinearNode::size(size),
                     LinearNode::read_temp(3),
                 ),
@@ -808,8 +859,8 @@ fn array_index_location(
             // length
             LinearNode::write_temp(2, LinearNode::new(LinearNodeValue::TopOfStack)),
             LinearNode::if_node(
-                LinearNode::ptr_op(
-                    HirBinOp::GreaterEqualThan,
+                LinearNode::ptr_comparison(
+                    ComparisonOp::GreaterEqualThan,
                     // index
                     LinearNode::read_temp(3),
                     // length
@@ -820,8 +871,8 @@ fn array_index_location(
                 None,
             ),
             LinearNode::new(LinearNodeValue::Discard),
-            LinearNode::ptr_op(
-                HirBinOp::Add,
+            LinearNode::ptr_arithmetic(
+                ArithmeticOp::Add,
                 LinearNode::read_temp(0),
                 LinearNode::read_temp(1),
             ),
@@ -863,8 +914,8 @@ fn dict_index_location(
             LinearNode::new(LinearNodeValue::Loop(vec![
                 // Check if we've found the key
                 LinearNode::if_node(
-                    LinearNode::new(LinearNodeValue::BinOp(
-                        HirBinOp::EqualTo,
+                    LinearNode::new(LinearNodeValue::Comparison(
+                        ComparisonOp::EqualTo,
                         idx_ty,
                         Box::new(LinearNode::read_memory(
                             LinearNode::read_temp(1),
@@ -884,23 +935,23 @@ fn dict_index_location(
                 // Increment the length counter and check if we've overflowed the bounds
                 LinearNode::write_temp(
                     3,
-                    LinearNode::ptr_op(
-                        HirBinOp::Add,
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Add,
                         LinearNode::read_temp(3),
                         LinearNode::size(1),
                     ),
                 ),
                 LinearNode::write_temp(
                     1,
-                    LinearNode::ptr_op(
-                        HirBinOp::Add,
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Add,
                         LinearNode::read_temp(1),
                         LinearNode::size(entry_size),
                     ),
                 ),
                 LinearNode::if_node(
-                    LinearNode::ptr_op(
-                        HirBinOp::EqualTo,
+                    LinearNode::ptr_comparison(
+                        ComparisonOp::EqualTo,
                         LinearNode::read_temp(2),
                         LinearNode::read_temp(3),
                     ),

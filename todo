@@ -123,8 +123,6 @@ unions:
 
 boolean operators:
 - boolean and / or:
-    - they work
-    - they short circuit
     - the borrowchecker knows they short circuit
 - equality / inequality:
     - applicable to nullable values

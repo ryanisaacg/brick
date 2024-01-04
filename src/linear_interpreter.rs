@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Debug, future::Future, pin::Pin, sync::Arc}
 use async_recursion::async_recursion;
 
 use crate::{
-    hir::HirBinOp,
+    hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
     id::{FunctionID, TypeID},
     linear_ir::{
         DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
@@ -246,75 +246,130 @@ pub async fn evaluate_block(
                 }
             }
         },
-        LinearNodeValue::BinOp(op, _ty, lhs, rhs) => {
+        LinearNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, child) => {
+            evaluate_block(fns, params, vm, child).await?;
+            let Value::Bool(val) = vm.op_stack.pop().unwrap() else {
+                unreachable!()
+            };
+            vm.op_stack.push(Value::Bool(!val));
+        }
+        LinearNodeValue::Arithmetic(op, _ty, lhs, rhs) => {
             evaluate_block(fns, params, vm, rhs).await?;
             evaluate_block(fns, params, vm, lhs).await?;
             let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let val = match (left, right) {
                 (Numeric::Int32(left), Numeric::Int32(right)) => match op {
-                    HirBinOp::Add => Value::Int32(left + right),
-                    HirBinOp::Subtract => Value::Int32(left - right),
-                    HirBinOp::Multiply => Value::Int32(left * right),
-                    HirBinOp::Divide => Value::Int32(left / right),
-                    HirBinOp::LessThan => Value::Bool(left < right),
-                    HirBinOp::GreaterThan => Value::Bool(left > right),
-                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
-                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
-                    HirBinOp::EqualTo => Value::Bool(left == right),
-                    HirBinOp::NotEquals => Value::Bool(left != right),
+                    ArithmeticOp::Add => Value::Int32(left + right),
+                    ArithmeticOp::Subtract => Value::Int32(left - right),
+                    ArithmeticOp::Multiply => Value::Int32(left * right),
+                    ArithmeticOp::Divide => Value::Int32(left / right),
                 },
                 (Numeric::Float32(left), Numeric::Float32(right)) => match op {
-                    HirBinOp::Add => Value::Float32(left + right),
-                    HirBinOp::Subtract => Value::Float32(left - right),
-                    HirBinOp::Multiply => Value::Float32(left * right),
-                    HirBinOp::Divide => Value::Float32(left / right),
-                    HirBinOp::LessThan => Value::Bool(left < right),
-                    HirBinOp::GreaterThan => Value::Bool(left > right),
-                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
-                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
-                    HirBinOp::EqualTo => Value::Bool(left == right),
-                    HirBinOp::NotEquals => Value::Bool(left != right),
+                    ArithmeticOp::Add => Value::Float32(left + right),
+                    ArithmeticOp::Subtract => Value::Float32(left - right),
+                    ArithmeticOp::Multiply => Value::Float32(left * right),
+                    ArithmeticOp::Divide => Value::Float32(left / right),
                 },
                 (Numeric::Int64(left), Numeric::Int64(right)) => match op {
-                    HirBinOp::Add => Value::Int64(left + right),
-                    HirBinOp::Subtract => Value::Int64(left - right),
-                    HirBinOp::Multiply => Value::Int64(left * right),
-                    HirBinOp::Divide => Value::Int64(left / right),
-                    HirBinOp::LessThan => Value::Bool(left < right),
-                    HirBinOp::GreaterThan => Value::Bool(left > right),
-                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
-                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
-                    HirBinOp::EqualTo => Value::Bool(left == right),
-                    HirBinOp::NotEquals => Value::Bool(left != right),
+                    ArithmeticOp::Add => Value::Int64(left + right),
+                    ArithmeticOp::Subtract => Value::Int64(left - right),
+                    ArithmeticOp::Multiply => Value::Int64(left * right),
+                    ArithmeticOp::Divide => Value::Int64(left / right),
                 },
                 (Numeric::Float64(left), Numeric::Float64(right)) => match op {
-                    HirBinOp::Add => Value::Float64(left + right),
-                    HirBinOp::Subtract => Value::Float64(left - right),
-                    HirBinOp::Multiply => Value::Float64(left * right),
-                    HirBinOp::Divide => Value::Float64(left / right),
-                    HirBinOp::LessThan => Value::Bool(left < right),
-                    HirBinOp::GreaterThan => Value::Bool(left > right),
-                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
-                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
-                    HirBinOp::EqualTo => Value::Bool(left == right),
-                    HirBinOp::NotEquals => Value::Bool(left != right),
+                    ArithmeticOp::Add => Value::Float64(left + right),
+                    ArithmeticOp::Subtract => Value::Float64(left - right),
+                    ArithmeticOp::Multiply => Value::Float64(left * right),
+                    ArithmeticOp::Divide => Value::Float64(left / right),
                 },
                 (Numeric::Size(left), Numeric::Size(right)) => match op {
-                    HirBinOp::Add => Value::Size(left + right),
-                    HirBinOp::Subtract => Value::Size(left - right),
-                    HirBinOp::Multiply => Value::Size(left * right),
-                    HirBinOp::Divide => Value::Size(left / right),
-                    HirBinOp::LessThan => Value::Bool(left < right),
-                    HirBinOp::GreaterThan => Value::Bool(left > right),
-                    HirBinOp::LessEqualThan => Value::Bool(left <= right),
-                    HirBinOp::GreaterEqualThan => Value::Bool(left >= right),
-                    HirBinOp::EqualTo => Value::Bool(left == right),
-                    HirBinOp::NotEquals => Value::Bool(left != right),
+                    ArithmeticOp::Add => Value::Size(left + right),
+                    ArithmeticOp::Subtract => Value::Size(left - right),
+                    ArithmeticOp::Multiply => Value::Size(left * right),
+                    ArithmeticOp::Divide => Value::Size(left / right),
                 },
                 (_, _) => unreachable!(),
             };
             vm.op_stack.push(val);
+        }
+        LinearNodeValue::Comparison(op, _ty, lhs, rhs) => {
+            evaluate_block(fns, params, vm, rhs).await?;
+            evaluate_block(fns, params, vm, lhs).await?;
+            let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
+            let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
+            let val = match (left, right) {
+                (Numeric::Int32(left), Numeric::Int32(right)) => match op {
+                    ComparisonOp::LessThan => Value::Bool(left < right),
+                    ComparisonOp::GreaterThan => Value::Bool(left > right),
+                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
+                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::EqualTo => Value::Bool(left == right),
+                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                },
+                (Numeric::Float32(left), Numeric::Float32(right)) => match op {
+                    ComparisonOp::LessThan => Value::Bool(left < right),
+                    ComparisonOp::GreaterThan => Value::Bool(left > right),
+                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
+                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::EqualTo => Value::Bool(left == right),
+                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                },
+                (Numeric::Int64(left), Numeric::Int64(right)) => match op {
+                    ComparisonOp::LessThan => Value::Bool(left < right),
+                    ComparisonOp::GreaterThan => Value::Bool(left > right),
+                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
+                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::EqualTo => Value::Bool(left == right),
+                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                },
+                (Numeric::Float64(left), Numeric::Float64(right)) => match op {
+                    ComparisonOp::LessThan => Value::Bool(left < right),
+                    ComparisonOp::GreaterThan => Value::Bool(left > right),
+                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
+                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::EqualTo => Value::Bool(left == right),
+                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                },
+                (Numeric::Size(left), Numeric::Size(right)) => match op {
+                    ComparisonOp::LessThan => Value::Bool(left < right),
+                    ComparisonOp::GreaterThan => Value::Bool(left > right),
+                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
+                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::EqualTo => Value::Bool(left == right),
+                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                },
+                (_, _) => unreachable!(),
+            };
+            vm.op_stack.push(val);
+        }
+        LinearNodeValue::BinaryLogical(op, lhs, rhs) => {
+            evaluate_block(fns, params, vm, lhs).await?;
+            let Value::Bool(left) = vm.op_stack.pop().unwrap() else {
+                unreachable!();
+            };
+            let result = match op {
+                BinaryLogicalOp::BooleanAnd => {
+                    left && {
+                        evaluate_block(fns, params, vm, rhs).await?;
+                        let Value::Bool(right) = vm.op_stack.pop().unwrap() else {
+                            unreachable!();
+                        };
+                        right
+                    }
+                }
+                BinaryLogicalOp::BooleanOr => {
+                    left || {
+                        evaluate_block(fns, params, vm, rhs).await?;
+                        let Value::Bool(right) = vm.op_stack.pop().unwrap() else {
+                            unreachable!();
+                        };
+                        right
+                    }
+                }
+            };
+
+            vm.op_stack.push(Value::Bool(result));
         }
         LinearNodeValue::Size(size) => {
             vm.op_stack.push(Value::Size(*size));

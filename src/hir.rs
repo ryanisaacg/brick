@@ -151,6 +151,7 @@ impl HirNode {
                 }
             }
             HirNodeValue::Access(child, _)
+            | HirNodeValue::UnaryLogical(_, child)
             | HirNodeValue::UnionLiteral(_, _, child)
             | HirNodeValue::InterfaceAddress(child)
             | HirNodeValue::TakeUnique(child)
@@ -172,7 +173,9 @@ impl HirNode {
             | HirNodeValue::ArrayIndex(lhs, rhs)
             | HirNodeValue::DictIndex(lhs, rhs)
             | HirNodeValue::While(lhs, rhs)
-            | HirNodeValue::BinOp(_, lhs, rhs) => {
+            | HirNodeValue::Arithmetic(_, lhs, rhs)
+            | HirNodeValue::Comparison(_, lhs, rhs)
+            | HirNodeValue::BinaryLogical(_, lhs, rhs) => {
                 callback(lhs);
                 callback(rhs);
             }
@@ -238,6 +241,7 @@ impl HirNode {
             | HirNodeValue::TakeUnique(child)
             | HirNodeValue::TakeShared(child)
             | HirNodeValue::Dereference(child)
+            | HirNodeValue::UnaryLogical(_, child)
             | HirNodeValue::ArrayLiteralLength(child, _)
             | HirNodeValue::Return(child)
             | HirNodeValue::NumericCast { value: child, .. }
@@ -248,7 +252,9 @@ impl HirNode {
             | HirNodeValue::ArrayIndex(lhs, rhs)
             | HirNodeValue::DictIndex(lhs, rhs)
             | HirNodeValue::While(lhs, rhs)
-            | HirNodeValue::BinOp(_, lhs, rhs) => {
+            | HirNodeValue::Arithmetic(_, lhs, rhs)
+            | HirNodeValue::Comparison(_, lhs, rhs)
+            | HirNodeValue::BinaryLogical(_, lhs, rhs) => {
                 callback(lhs);
                 callback(rhs);
             }
@@ -312,12 +318,19 @@ impl HirNode {
                 let variant_ty = &ty.variants[variant];
                 callback(variant_ty, child);
             }
-            HirNodeValue::BinOp(_, lhs, rhs) => {
+            HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
                 if is_assignable_to(declarations, &lhs.ty, &rhs.ty) {
                     callback(&lhs.ty, rhs);
                 } else {
                     callback(&rhs.ty, lhs);
                 }
+            }
+            HirNodeValue::BinaryLogical(_, lhs, rhs) => {
+                callback(&ExpressionType::Primitive(PrimitiveType::Bool), lhs);
+                callback(&ExpressionType::Primitive(PrimitiveType::Bool), rhs);
+            }
+            HirNodeValue::UnaryLogical(_, child) => {
+                callback(&ExpressionType::Primitive(PrimitiveType::Bool), child)
             }
             HirNodeValue::VtableCall(_, fn_id, params) => {
                 let func = find_func(declarations, *fn_id).unwrap();
@@ -386,21 +399,28 @@ impl HirNode {
             | HirNodeValue::NumericCast { .. }
             | HirNodeValue::StructToInterface { .. }
             | HirNodeValue::Declaration(_) => {}
+            HirNodeValue::ArrayIndex(_, idx) => {
+                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), idx);
+            }
             HirNodeValue::DictIndex(dict, idx) => {
                 let ExpressionType::Collection(CollectionType::Dict(key_ty, _)) = &dict.ty else {
                     unreachable!()
                 };
                 callback(key_ty, idx);
             }
-            HirNodeValue::ArrayIndex(_, idx) => {
-                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), idx);
-            }
-            HirNodeValue::BinOp(_, lhs, rhs) => {
+            HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
                 if is_assignable_to(declarations, &lhs.ty, &rhs.ty) {
                     callback(&lhs.ty, rhs);
                 } else {
                     callback(&rhs.ty, lhs);
                 }
+            }
+            HirNodeValue::BinaryLogical(_, lhs, rhs) => {
+                callback(&ExpressionType::Primitive(PrimitiveType::Bool), lhs);
+                callback(&ExpressionType::Primitive(PrimitiveType::Bool), rhs);
+            }
+            HirNodeValue::UnaryLogical(_, child) => {
+                callback(&ExpressionType::Primitive(PrimitiveType::Bool), child)
             }
             HirNodeValue::UnionLiteral(ty, variant, child) => {
                 let StaticDeclaration::Union(ty) = declarations[ty] else {
@@ -474,7 +494,10 @@ pub enum HirNodeValue {
     Assignment(Box<HirNode>, Box<HirNode>),
     ArrayIndex(Box<HirNode>, Box<HirNode>),
     DictIndex(Box<HirNode>, Box<HirNode>),
-    BinOp(HirBinOp, Box<HirNode>, Box<HirNode>),
+    Arithmetic(ArithmeticOp, Box<HirNode>, Box<HirNode>),
+    Comparison(ComparisonOp, Box<HirNode>, Box<HirNode>),
+    BinaryLogical(BinaryLogicalOp, Box<HirNode>, Box<HirNode>),
+    UnaryLogical(UnaryLogicalOp, Box<HirNode>),
 
     Return(Box<HirNode>),
 
@@ -517,15 +540,30 @@ pub enum HirNodeValue {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum HirBinOp {
+pub enum ArithmeticOp {
     Add,
     Subtract,
     Multiply,
     Divide,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ComparisonOp {
     LessThan,
     GreaterThan,
     LessEqualThan,
     GreaterEqualThan,
     EqualTo,
     NotEquals,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum BinaryLogicalOp {
+    BooleanAnd,
+    BooleanOr,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum UnaryLogicalOp {
+    BooleanNot,
 }

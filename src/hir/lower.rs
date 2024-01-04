@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
-use super::{HirBinOp, HirFunction, HirModule, HirNode, HirNodeValue};
+use super::{
+    ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirFunction, HirModule, HirNode, HirNodeValue,
+    UnaryLogicalOp,
+};
 
 use crate::{
     id::{NodeID, TypeID},
-    parser::{AstNode, AstNodeValue, BinOp, IfDeclaration},
+    parser::{AstNode, AstNodeValue, BinOp, IfDeclaration, UnaryOp},
     typecheck::{
         find_func, fully_dereference, CollectionType, ExpressionType, StaticDeclaration,
         TypecheckedFile, TypecheckedFunction,
@@ -179,6 +182,15 @@ fn lower_node<'ast>(
                 _ => unreachable!(),
             }
         }
+        AstNodeValue::UnaryExpr(op, child) => {
+            let child = lower_node_alloc(decls, child);
+            HirNodeValue::UnaryLogical(
+                match op {
+                    UnaryOp::BooleanNot => UnaryLogicalOp::BooleanNot,
+                },
+                child,
+            )
+        }
         AstNodeValue::BinExpr(op, left, right) => {
             let left = lower_node_alloc(decls, left);
             let right = lower_node_alloc(decls, right);
@@ -188,44 +200,54 @@ fn lower_node<'ast>(
                     left.clone(),
                     Box::new(HirNode::from_ast_void(
                         node,
-                        HirNodeValue::BinOp(HirBinOp::Add, left, right),
+                        HirNodeValue::Arithmetic(ArithmeticOp::Add, left, right),
                     )),
                 ),
                 BinOp::SubtractAssign => HirNodeValue::Assignment(
                     left.clone(),
                     Box::new(HirNode::from_ast_void(
                         node,
-                        HirNodeValue::BinOp(HirBinOp::Subtract, left, right),
+                        HirNodeValue::Arithmetic(ArithmeticOp::Subtract, left, right),
                     )),
                 ),
                 BinOp::MultiplyAssign => HirNodeValue::Assignment(
                     left.clone(),
                     Box::new(HirNode::from_ast_void(
                         node,
-                        HirNodeValue::BinOp(HirBinOp::Multiply, left, right),
+                        HirNodeValue::Arithmetic(ArithmeticOp::Multiply, left, right),
                     )),
                 ),
                 BinOp::DivideAssign => HirNodeValue::Assignment(
                     left.clone(),
                     Box::new(HirNode::from_ast_void(
                         node,
-                        HirNodeValue::BinOp(HirBinOp::Divide, left, right),
+                        HirNodeValue::Arithmetic(ArithmeticOp::Divide, left, right),
                     )),
                 ),
                 BinOp::Assignment => HirNodeValue::Assignment(left, right),
 
-                BinOp::Add => HirNodeValue::BinOp(HirBinOp::Add, left, right),
-                BinOp::Subtract => HirNodeValue::BinOp(HirBinOp::Subtract, left, right),
-                BinOp::Multiply => HirNodeValue::BinOp(HirBinOp::Multiply, left, right),
-                BinOp::Divide => HirNodeValue::BinOp(HirBinOp::Divide, left, right),
-                BinOp::LessThan => HirNodeValue::BinOp(HirBinOp::LessThan, left, right),
-                BinOp::GreaterThan => HirNodeValue::BinOp(HirBinOp::GreaterThan, left, right),
-                BinOp::LessEqualThan => HirNodeValue::BinOp(HirBinOp::LessEqualThan, left, right),
-                BinOp::GreaterEqualThan => {
-                    HirNodeValue::BinOp(HirBinOp::GreaterEqualThan, left, right)
+                BinOp::Add => HirNodeValue::Arithmetic(ArithmeticOp::Add, left, right),
+                BinOp::Subtract => HirNodeValue::Arithmetic(ArithmeticOp::Subtract, left, right),
+                BinOp::Multiply => HirNodeValue::Arithmetic(ArithmeticOp::Multiply, left, right),
+                BinOp::Divide => HirNodeValue::Arithmetic(ArithmeticOp::Divide, left, right),
+                BinOp::LessThan => HirNodeValue::Comparison(ComparisonOp::LessThan, left, right),
+                BinOp::GreaterThan => {
+                    HirNodeValue::Comparison(ComparisonOp::GreaterThan, left, right)
                 }
-                BinOp::EqualTo => HirNodeValue::BinOp(HirBinOp::EqualTo, left, right),
-                BinOp::NotEquals => HirNodeValue::BinOp(HirBinOp::NotEquals, left, right),
+                BinOp::LessEqualThan => {
+                    HirNodeValue::Comparison(ComparisonOp::LessEqualThan, left, right)
+                }
+                BinOp::GreaterEqualThan => {
+                    HirNodeValue::Comparison(ComparisonOp::GreaterEqualThan, left, right)
+                }
+                BinOp::EqualTo => HirNodeValue::Comparison(ComparisonOp::EqualTo, left, right),
+                BinOp::NotEquals => HirNodeValue::Comparison(ComparisonOp::NotEquals, left, right),
+                BinOp::BooleanAnd => {
+                    HirNodeValue::BinaryLogical(BinaryLogicalOp::BooleanAnd, left, right)
+                }
+                BinOp::BooleanOr => {
+                    HirNodeValue::BinaryLogical(BinaryLogicalOp::BooleanOr, left, right)
+                }
                 BinOp::Index | BinOp::Dot => unreachable!(),
             }
         }
