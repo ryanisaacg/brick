@@ -22,7 +22,7 @@ x
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Null]);
+    assert_matches!(&result[..], [Value::Bool(false)]);
 }
 
 #[tokio::test]
@@ -35,5 +35,21 @@ x
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int32(70)]);
+    assert_matches!(&result[..], [Value::Int32(70), Value::Bool(true)]);
+}
+
+#[tokio::test]
+async fn null_coalesce() {
+    let result = eval(
+        r#"
+let x: i32? = 18;
+let y = x ?? 8;
+x = null;
+let z = x ?? 13;
+y + z
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(31)]);
 }

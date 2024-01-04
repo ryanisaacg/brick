@@ -160,6 +160,7 @@ impl HirNode {
             | HirNodeValue::ArrayLiteralLength(child, _)
             | HirNodeValue::Return(child)
             | HirNodeValue::NumericCast { value: child, .. }
+            | HirNodeValue::MakeNullable(child)
             | HirNodeValue::StructToInterface { value: child, .. } => {
                 callback(child);
             }
@@ -175,7 +176,8 @@ impl HirNode {
             | HirNodeValue::While(lhs, rhs)
             | HirNodeValue::Arithmetic(_, lhs, rhs)
             | HirNodeValue::Comparison(_, lhs, rhs)
-            | HirNodeValue::BinaryLogical(_, lhs, rhs) => {
+            | HirNodeValue::BinaryLogical(_, lhs, rhs)
+            | HirNodeValue::NullCoalesce(lhs, rhs) => {
                 callback(lhs);
                 callback(rhs);
             }
@@ -245,6 +247,7 @@ impl HirNode {
             | HirNodeValue::ArrayLiteralLength(child, _)
             | HirNodeValue::Return(child)
             | HirNodeValue::NumericCast { value: child, .. }
+            | HirNodeValue::MakeNullable(child)
             | HirNodeValue::StructToInterface { value: child, .. } => {
                 callback(child);
             }
@@ -254,7 +257,8 @@ impl HirNode {
             | HirNodeValue::While(lhs, rhs)
             | HirNodeValue::Arithmetic(_, lhs, rhs)
             | HirNodeValue::Comparison(_, lhs, rhs)
-            | HirNodeValue::BinaryLogical(_, lhs, rhs) => {
+            | HirNodeValue::BinaryLogical(_, lhs, rhs)
+            | HirNodeValue::NullCoalesce(lhs, rhs) => {
                 callback(lhs);
                 callback(rhs);
             }
@@ -306,6 +310,7 @@ impl HirNode {
             | HirNodeValue::Dereference(_)
             | HirNodeValue::InterfaceAddress(_)
             | HirNodeValue::NumericCast { .. }
+            | HirNodeValue::MakeNullable(_)
             | HirNodeValue::StructToInterface { .. }
             | HirNodeValue::Declaration(_) => {}
             HirNodeValue::ArrayIndex(_, idx) => {
@@ -324,6 +329,10 @@ impl HirNode {
                 } else {
                     callback(&rhs.ty, lhs);
                 }
+            }
+            HirNodeValue::NullCoalesce(lhs, rhs) => {
+                callback(&self.ty, rhs);
+                callback(&ExpressionType::Nullable(Box::new(self.ty.clone())), lhs);
             }
             HirNodeValue::BinaryLogical(_, lhs, rhs) => {
                 callback(&ExpressionType::Primitive(PrimitiveType::Bool), lhs);
@@ -397,6 +406,7 @@ impl HirNode {
             | HirNodeValue::Dereference(_)
             | HirNodeValue::InterfaceAddress(_)
             | HirNodeValue::NumericCast { .. }
+            | HirNodeValue::MakeNullable(_)
             | HirNodeValue::StructToInterface { .. }
             | HirNodeValue::Declaration(_) => {}
             HirNodeValue::ArrayIndex(_, idx) => {
@@ -414,6 +424,10 @@ impl HirNode {
                 } else {
                     callback(&rhs.ty, lhs);
                 }
+            }
+            HirNodeValue::NullCoalesce(lhs, rhs) => {
+                callback(&self.ty, rhs);
+                callback(&ExpressionType::Nullable(Box::new(self.ty.clone())), lhs);
             }
             HirNodeValue::BinaryLogical(_, lhs, rhs) => {
                 callback(&ExpressionType::Primitive(PrimitiveType::Bool), lhs);
@@ -497,6 +511,7 @@ pub enum HirNodeValue {
     Arithmetic(ArithmeticOp, Box<HirNode>, Box<HirNode>),
     Comparison(ComparisonOp, Box<HirNode>, Box<HirNode>),
     BinaryLogical(BinaryLogicalOp, Box<HirNode>, Box<HirNode>),
+    NullCoalesce(Box<HirNode>, Box<HirNode>),
     UnaryLogical(UnaryLogicalOp, Box<HirNode>),
 
     Return(Box<HirNode>),
@@ -537,6 +552,7 @@ pub enum HirNodeValue {
         value: Box<HirNode>,
         vtable: HashMap<FunctionID, FunctionID>,
     },
+    MakeNullable(Box<HirNode>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

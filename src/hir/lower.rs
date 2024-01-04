@@ -248,6 +248,7 @@ fn lower_node<'ast>(
                 BinOp::BooleanOr => {
                     HirNodeValue::BinaryLogical(BinaryLogicalOp::BooleanOr, left, right)
                 }
+                BinOp::NullCoalesce => HirNodeValue::NullCoalesce(left, right),
                 BinOp::Index | BinOp::Dot => unreachable!(),
             }
         }

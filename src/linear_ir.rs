@@ -231,7 +231,6 @@ pub enum LinearNodeValue {
     Int(i64),
     Float(f64),
     Bool(bool),
-    Null,
     CharLiteral(char),
     StringLiteral(String),
     FunctionID(FunctionID),
@@ -373,7 +372,7 @@ fn lower_expression(
         HirNodeValue::Int(x) => LinearNodeValue::Int(x),
         HirNodeValue::Float(x) => LinearNodeValue::Float(x),
         HirNodeValue::Bool(x) => LinearNodeValue::Bool(x),
-        HirNodeValue::Null => LinearNodeValue::Null,
+        HirNodeValue::Null => LinearNodeValue::Bool(false),
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
         HirNodeValue::StringLiteral(x) => LinearNodeValue::StringLiteral(x),
 
@@ -739,6 +738,18 @@ fn lower_expression(
                 LinearNode::new(LinearNodeValue::Size(ty[&variant].0)),
             ])
         }
+        HirNodeValue::NullCoalesce(lhs, rhs) => LinearNodeValue::If(
+            Box::new(LinearNode::new(LinearNodeValue::UnaryLogical(
+                UnaryLogicalOp::BooleanNot,
+                Box::new(lower_expression(declarations, stack_entries, *lhs)),
+            ))),
+            vec![lower_expression(declarations, stack_entries, *rhs)],
+            None,
+        ),
+        HirNodeValue::MakeNullable(value) => LinearNodeValue::Sequence(vec![
+            lower_expression(declarations, stack_entries, *value),
+            LinearNode::new(LinearNodeValue::Bool(true)),
+        ]),
     };
 
     LinearNode { value, provenance }
@@ -791,6 +802,8 @@ fn lower_lvalue(
         HirNodeValue::NumericCast { .. } => todo!(),
         HirNodeValue::DictLiteral(_) => todo!(),
         HirNodeValue::UnionLiteral(_, _, _) => todo!(),
+        HirNodeValue::NullCoalesce(_, _) => todo!(),
+        HirNodeValue::MakeNullable(_) => todo!(),
     }
 }
 
@@ -969,6 +982,8 @@ fn dict_index_location(
 const POINTER_SIZE: usize = 8;
 // TODO: is this a good idea
 const UNION_TAG_SIZE: usize = 8;
+// TODO: alignment
+pub const NULL_TAG_SIZE: usize = 4;
 
 fn expression_type_size(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
@@ -984,8 +999,7 @@ fn expression_type_size(
         ExpressionType::Collection(CollectionType::Dict(..)) => POINTER_SIZE * 3,
         ExpressionType::Null => 1,
         ExpressionType::Nullable(inner) => {
-            // TODO: would this be an alignment issue?
-            1 + expression_type_size(declarations, inner)
+            NULL_TAG_SIZE + expression_type_size(declarations, inner)
         }
         ExpressionType::ReferenceTo(_) => todo!(),
     }
@@ -1188,7 +1202,10 @@ fn layout_type(
         }
         ExpressionType::Nullable(inner) => {
             let (inner, size) = layout_type(declarations, layouts, inner);
-            (PhysicalType::Nullable(Box::new(inner)), size + 1)
+            (
+                PhysicalType::Nullable(Box::new(inner)),
+                size + NULL_TAG_SIZE,
+            )
         }
         ExpressionType::ReferenceTo(_) => todo!(),
     }

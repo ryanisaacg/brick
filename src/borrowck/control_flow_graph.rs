@@ -211,7 +211,9 @@ fn create_graph_for_node<'a>(
         | UnaryLogical(_, _)
         | Arithmetic(_, _, _)
         | Comparison(_, _, _)
+        // TODO: binary logical and null coalescing short-circuit
         | BinaryLogical(_, _, _)
+        | NullCoalesce(_, _)
         | Dereference(_)
         | Call(_, _)
         | VtableCall(_, _, _)
@@ -228,6 +230,7 @@ fn create_graph_for_node<'a>(
         | ArrayIndex(_, _)
         | DictIndex(_, _)
         | DictLiteral(_)
+        | MakeNullable(_)
         | UnionLiteral(_, _, _)
         | InterfaceAddress(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));

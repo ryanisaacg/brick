@@ -177,13 +177,16 @@ fn find_moves_in_node(
                 find_moves_in_node(liveness, errors, declarations, value);
             }
         }
-        HirNodeValue::UnaryLogical(_, value) | HirNodeValue::NumericCast { value, .. } => {
+        HirNodeValue::UnaryLogical(_, value)
+        | HirNodeValue::NumericCast { value, .. }
+        | HirNodeValue::MakeNullable(value) => {
             find_moves_in_node(liveness, errors, declarations, value);
         }
         HirNodeValue::ArrayLiteralLength(lhs, rhs)
         | HirNodeValue::Arithmetic(_, lhs, rhs)
         | HirNodeValue::Comparison(_, lhs, rhs)
-        | HirNodeValue::BinaryLogical(_, lhs, rhs) => {
+        | HirNodeValue::BinaryLogical(_, lhs, rhs)
+        | HirNodeValue::NullCoalesce(lhs, rhs) => {
             find_moves_in_node(liveness, errors, declarations, lhs);
             find_moves_in_node(liveness, errors, declarations, rhs);
         }

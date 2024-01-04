@@ -277,17 +277,21 @@ pub enum UnaryOp {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum BinOp {
     Dot,
+    Index,
+
+    NullCoalesce,
+
     Add,
     Subtract,
     Multiply,
     Divide,
+
     LessThan,
     GreaterThan,
     LessEqualThan,
     GreaterEqualThan,
     EqualTo,
     NotEquals,
-    Index,
 
     Assignment,
     AddAssign,
@@ -1182,6 +1186,7 @@ fn expression_pratt<'a>(
                 TokenValue::ForwardSlash => BinOp::Divide,
                 TokenValue::BooleanAnd => BinOp::BooleanAnd,
                 TokenValue::BooleanOr => BinOp::BooleanOr,
+                TokenValue::NullCoalesce => BinOp::NullCoalesce,
                 token => unreachable!("binary operator {:?}", token),
             };
 
@@ -1202,8 +1207,9 @@ fn expression_pratt<'a>(
 }
 
 const ASSIGNMENT: u8 = 2;
+const NULL_COALESCE: u8 = ASSIGNMENT + 2;
 // bools
-const BOOLEAN_OR: u8 = ASSIGNMENT + 2;
+const BOOLEAN_OR: u8 = NULL_COALESCE + 2;
 const BOOLEAN_AND: u8 = BOOLEAN_OR + 2;
 const BOOLEAN_NOT: u8 = BOOLEAN_AND + 1;
 const COMPARE: u8 = BOOLEAN_NOT + 2;
@@ -1250,6 +1256,7 @@ fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
         TokenValue::Period => (DOT - 1, DOT),
         TokenValue::BooleanAnd => (BOOLEAN_AND, BOOLEAN_AND - 1),
         TokenValue::BooleanOr => (BOOLEAN_OR, BOOLEAN_OR - 1),
+        TokenValue::NullCoalesce => (NULL_COALESCE, NULL_COALESCE - 1),
         _ => return None,
     };
     Some(res)

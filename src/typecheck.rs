@@ -199,6 +199,9 @@ pub enum TypecheckError {
     MissingField(SourceRange),
     #[error("insufficient type info: null variables must have a type annotation")]
     NoNullDeclarations(SourceRange),
+    // TODO: "unknown type" for type errors?
+    #[error("expected nullable left-hand-side to ?? operator")]
+    ExpectedNullableLHS(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -664,6 +667,23 @@ fn typecheck_expression<'a>(
             }
 
             ExpressionType::Void
+        }
+        AstNodeValue::BinExpr(BinOp::NullCoalesce, left, right) => {
+            let left_ty = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            let right_ty = typecheck_expression(right, outer_scopes, current_scope, context)?;
+            let ExpressionType::Nullable(ty) = left_ty else {
+                return Err(TypecheckError::ExpectedNullableLHS(left.provenance.clone()));
+            };
+            let ty = *ty.clone();
+
+            if !is_assignable_to(&context.id_to_decl, &ty, right_ty) {
+                return Err(TypecheckError::TypeMismatch {
+                    received: right_ty.clone(),
+                    expected: ty.clone(),
+                });
+            }
+
+            ty.clone()
         }
         AstNodeValue::While(condition, body) => {
             let condition = typecheck_expression(condition, outer_scopes, current_scope, context)?;

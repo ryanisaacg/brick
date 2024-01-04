@@ -7,14 +7,13 @@ use crate::{
     id::{FunctionID, TypeID},
     linear_ir::{
         DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
-        PhysicalType, TypeLayoutValue,
+        PhysicalType, TypeLayoutValue, NULL_TAG_SIZE,
     },
     typecheck::PrimitiveType,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
-    Null,
     FunctionID(FunctionID),
     Size(usize),
     Int32(i32),
@@ -171,7 +170,7 @@ pub async fn evaluate_block(
             vm.heap_ptr += amount;
         }
         LinearNodeValue::Parameter(idx) => {
-            let mut temp = Value::Null;
+            let mut temp = Value::Bool(false);
             std::mem::swap(&mut temp, &mut params[*idx]);
             vm.op_stack.push(temp);
         }
@@ -293,6 +292,22 @@ pub async fn evaluate_block(
             };
             vm.op_stack.push(val);
         }
+        LinearNodeValue::Comparison(
+            op @ (ComparisonOp::EqualTo | ComparisonOp::NotEquals),
+            _ty,
+            lhs,
+            rhs,
+        ) => {
+            evaluate_block(fns, params, vm, rhs).await?;
+            evaluate_block(fns, params, vm, lhs).await?;
+            let left = vm.op_stack.pop().unwrap();
+            let right = vm.op_stack.pop().unwrap();
+            if *op == ComparisonOp::EqualTo {
+                vm.op_stack.push(Value::Bool(left == right));
+            } else {
+                vm.op_stack.push(Value::Bool(left != right));
+            }
+        }
         LinearNodeValue::Comparison(op, _ty, lhs, rhs) => {
             evaluate_block(fns, params, vm, rhs).await?;
             evaluate_block(fns, params, vm, lhs).await?;
@@ -304,40 +319,35 @@ pub async fn evaluate_block(
                     ComparisonOp::GreaterThan => Value::Bool(left > right),
                     ComparisonOp::LessEqualThan => Value::Bool(left <= right),
                     ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
-                    ComparisonOp::EqualTo => Value::Bool(left == right),
-                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (Numeric::Float32(left), Numeric::Float32(right)) => match op {
                     ComparisonOp::LessThan => Value::Bool(left < right),
                     ComparisonOp::GreaterThan => Value::Bool(left > right),
                     ComparisonOp::LessEqualThan => Value::Bool(left <= right),
                     ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
-                    ComparisonOp::EqualTo => Value::Bool(left == right),
-                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (Numeric::Int64(left), Numeric::Int64(right)) => match op {
                     ComparisonOp::LessThan => Value::Bool(left < right),
                     ComparisonOp::GreaterThan => Value::Bool(left > right),
                     ComparisonOp::LessEqualThan => Value::Bool(left <= right),
                     ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
-                    ComparisonOp::EqualTo => Value::Bool(left == right),
-                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (Numeric::Float64(left), Numeric::Float64(right)) => match op {
                     ComparisonOp::LessThan => Value::Bool(left < right),
                     ComparisonOp::GreaterThan => Value::Bool(left > right),
                     ComparisonOp::LessEqualThan => Value::Bool(left <= right),
                     ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
-                    ComparisonOp::EqualTo => Value::Bool(left == right),
-                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (Numeric::Size(left), Numeric::Size(right)) => match op {
                     ComparisonOp::LessThan => Value::Bool(left < right),
                     ComparisonOp::GreaterThan => Value::Bool(left > right),
                     ComparisonOp::LessEqualThan => Value::Bool(left <= right),
                     ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
-                    ComparisonOp::EqualTo => Value::Bool(left == right),
-                    ComparisonOp::NotEquals => Value::Bool(left != right),
+                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (_, _) => unreachable!(),
             };
@@ -383,9 +393,6 @@ pub async fn evaluate_block(
         LinearNodeValue::Bool(x) => {
             vm.op_stack.push(Value::Bool(*x));
         }
-        LinearNodeValue::Null => {
-            vm.op_stack.push(Value::Null);
-        }
         LinearNodeValue::CharLiteral(x) => {
             vm.op_stack.push(Value::Char(*x));
         }
@@ -416,11 +423,7 @@ pub async fn evaluate_block(
             evaluate_block(fns, params, vm, value).await?;
             let val = vm.op_stack.pop().unwrap();
             vm.op_stack.push(match val {
-                Value::Null
-                | Value::String(_)
-                | Value::Bool(_)
-                | Value::Char(_)
-                | Value::FunctionID(_) => {
+                Value::String(_) | Value::Bool(_) | Value::Char(_) | Value::FunctionID(_) => {
                     unreachable!()
                 }
                 Value::Size(_) => todo!(),
@@ -522,15 +525,15 @@ fn write(
         PhysicalType::Pointer | PhysicalType::FunctionPointer => {
             write_primitive(op_stack, memory, location);
         }
-        PhysicalType::Nullable(ty) => match op_stack.last().unwrap() {
-            Value::Null => {
-                op_stack.pop().unwrap();
+        PhysicalType::Nullable(ty) => match op_stack.pop().unwrap() {
+            Value::Bool(false) => {
                 memory[location] = 0;
             }
-            _ => {
+            Value::Bool(true) => {
                 memory[location] = 1;
-                write(op_stack, layouts, memory, location + 1, ty);
+                write(op_stack, layouts, memory, location + NULL_TAG_SIZE, ty);
             }
+            _ => unreachable!(),
         },
     }
 }
@@ -538,7 +541,6 @@ fn write(
 fn write_primitive(op_stack: &mut Vec<Value>, memory: &mut [u8], location: usize) -> usize {
     let value = op_stack.pop().unwrap();
     let bytes = match &value {
-        Value::Null => todo!(),
         Value::FunctionID(id) => bytemuck::bytes_of(id),
         Value::Size(x) => {
             // lifetime issues
@@ -608,9 +610,10 @@ fn read(
         PhysicalType::Nullable(ty) => {
             let null_flag = memory[location];
             if null_flag == 0 {
-                op_stack.push(Value::Null);
+                op_stack.push(Value::Bool(false));
             } else {
-                read(op_stack, layouts, memory, location + 1, ty);
+                read(op_stack, layouts, memory, location + NULL_TAG_SIZE, ty);
+                op_stack.push(Value::Bool(true));
             }
         }
         PhysicalType::FunctionPointer => {
