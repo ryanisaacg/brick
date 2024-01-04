@@ -504,6 +504,7 @@ pub enum HirNodeValue {
     Declaration(VariableID),
 
     Call(Box<HirNode>, Vec<HirNode>),
+    // TODO: break this up into Union Access and Struct Access?
     Access(Box<HirNode>, String),
     Assignment(Box<HirNode>, Box<HirNode>),
     ArrayIndex(Box<HirNode>, Box<HirNode>),

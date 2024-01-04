@@ -11,10 +11,28 @@ union Number {
 }
 
 let num = Number { int: 12 };
-num.int
+num.int ?? 0
 "#,
     )
     .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(12)]);
+}
+
+#[tokio::test]
+async fn incorrect_access() {
+    let result = eval(
+        r#"
+union Number {
+    a(i32),
+    b(i32),
+}
+
+let num = Number { a: 12 };
+num.b ?? -50
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(-50)]);
 }

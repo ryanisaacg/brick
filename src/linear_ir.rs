@@ -442,12 +442,15 @@ fn lower_expression(
                         LinearNode::size(*variant_idx),
                         LinearNode::read_memory(location.clone(), offset, PhysicalType::Pointer),
                     ),
-                    vec![LinearNode::abort()],
-                    Some(vec![LinearNode::read_memory(
-                        location,
-                        offset + UNION_TAG_SIZE,
-                        variant_ty.clone(),
-                    )]),
+                    vec![LinearNode::new(LinearNodeValue::Bool(false))],
+                    Some(vec![
+                        LinearNode::read_memory(
+                            location,
+                            offset + UNION_TAG_SIZE,
+                            variant_ty.clone(),
+                        ),
+                        LinearNode::new(LinearNodeValue::Bool(true)),
+                    ]),
                     None,
                 )])
             } else {
