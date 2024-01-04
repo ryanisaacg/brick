@@ -113,7 +113,6 @@ anonymous types:
 unions:
 - they work:
     - union variants can be assigned to
-    - incorrect variants return null instead of aborting on invalid access
 - union literal syntax that makes sense
 - unions can extend unions (refer to fields with nested access?)
 - unions can have empty variants
