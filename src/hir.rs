@@ -16,6 +16,7 @@ mod interface_conversion_pass;
 mod lower;
 mod rewrite_associated_functions;
 mod simplify_sequence_expressions;
+mod widen_null;
 
 pub fn lower_module<'ast>(
     module: TypecheckedFile<'ast>,
@@ -24,6 +25,7 @@ pub fn lower_module<'ast>(
     let mut module = lower::lower_module(module, declarations);
 
     module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
+    widen_null::widen_null(&mut module, declarations);
     interface_conversion_pass::rewrite(&mut module, declarations);
     auto_deref_dot::auto_deref_dot(&mut module);
     auto_numeric_cast::auto_numeric_cast(&mut module, declarations);

@@ -467,7 +467,16 @@ fn write(
         PhysicalType::Pointer | PhysicalType::FunctionPointer => {
             write_primitive(op_stack, memory, location);
         }
-        PhysicalType::Nullable(_) => todo!(),
+        PhysicalType::Nullable(ty) => match op_stack.last().unwrap() {
+            Value::Null => {
+                op_stack.pop().unwrap();
+                memory[location] = 0;
+            }
+            _ => {
+                memory[location] = 1;
+                write(op_stack, layouts, memory, location + 1, ty);
+            }
+        },
     }
 }
 
@@ -541,7 +550,14 @@ fn read(
         PhysicalType::Pointer => {
             read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
         }
-        PhysicalType::Nullable(_) => todo!(),
+        PhysicalType::Nullable(ty) => {
+            let null_flag = memory[location];
+            if null_flag == 0 {
+                op_stack.push(Value::Null);
+            } else {
+                read(op_stack, layouts, memory, location + 1, ty);
+            }
+        }
         PhysicalType::FunctionPointer => {
             let fn_id: FunctionID = *bytemuck::from_bytes(&memory[location..(location + 4)]);
             op_stack.push(Value::FunctionID(fn_id));

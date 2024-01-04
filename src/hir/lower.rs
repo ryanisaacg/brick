@@ -117,20 +117,20 @@ fn lower_node<'ast>(
         // has what really counts
         AstNodeValue::Statement(inner) => return lower_node(decls, inner),
 
-        AstNodeValue::Declaration(_lvalue, _type_hint, rvalue) => {
+        AstNodeValue::Declaration(_lvalue, type_hint, rvalue) => {
+            let ty = type_hint
+                .as_ref()
+                .map(|node| node.ty.get().unwrap().clone())
+                .unwrap_or_else(|| rvalue.ty.get().unwrap().clone());
             let lvalue = Box::new(HirNode {
                 id: NodeID::new(),
                 value: HirNodeValue::VariableReference(node.id.into()),
-                ty: rvalue.ty.get().expect("type filled in").clone(),
+                ty: ty.clone(),
                 provenance: Some(node.provenance.clone()),
             });
             let rvalue = lower_node_alloc(decls, rvalue);
             let statements = vec![
-                HirNode::from_ast(
-                    node,
-                    HirNodeValue::Declaration(node.id.as_variable()),
-                    rvalue.ty.clone(),
-                ),
+                HirNode::from_ast(node, HirNodeValue::Declaration(node.id.as_variable()), ty),
                 HirNode {
                     id: NodeID::new(),
                     value: HirNodeValue::Assignment(lvalue, rvalue),

@@ -11,3 +11,29 @@ let x = null;
     )
     .unwrap();
 }
+
+#[tokio::test]
+async fn basic_null() {
+    let result = eval(
+        r#"
+let x: i32? = null;
+x
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Null]);
+}
+
+#[tokio::test]
+async fn basic_non_null_nullable() {
+    let result = eval(
+        r#"
+let x: i32? = 1;
+x
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(1)]);
+}

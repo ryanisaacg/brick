@@ -428,6 +428,7 @@ fn typecheck_expression<'a>(
                 let ty = resolve_type_expr(&context.name_to_type_id, type_hint)?;
                 // TODO: generate type error
                 assert!(is_assignable_to(&context.id_to_decl, &ty, value_ty));
+                type_hint.ty.set(ty.clone()).unwrap();
                 current_scope.insert(name.clone(), (node.id.into(), ty));
             } else {
                 if value_ty == &ExpressionType::Null {
