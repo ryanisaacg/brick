@@ -121,11 +121,19 @@ unions:
 - are unions the right choice?? not 100% sure
 - rename to enum? variant?
 
+boolean operators:
+- boolean and / or:
+    - they work
+    - they short circuit
+    - the borrowchecker knows they short circuit
+- equality / inequality:
+    - applicable to nullable values
+
 null:
-- basic null flow analysis - maybe a special operation to de-null stuff
 - ?. operator
 - ?? operator
-- ! operator, which throws if the value is an error
+- ! operator, which throws if the value is an error (requires errors)
+- basic null flow analysis - maybe a special operation to de-null stuff
 
 errors:
 - functions can define `throws`
