@@ -197,6 +197,8 @@ pub enum TypecheckError {
     WrongArgsCount(SourceRange),
     #[error("missing field")]
     MissingField(SourceRange),
+    #[error("insufficient type info: null variables must have a type annotation")]
+    NoNullDeclarations(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -421,14 +423,17 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::Declaration(name, type_hint, value) => {
             // TODO: do I want shadowing? currently this shadows
-            let value = typecheck_expression(value, outer_scopes, current_scope, context)?;
+            let value_ty = typecheck_expression(value, outer_scopes, current_scope, context)?;
             if let Some(type_hint) = type_hint {
                 let ty = resolve_type_expr(&context.name_to_type_id, type_hint)?;
                 // TODO: generate type error
-                assert!(is_assignable_to(&context.id_to_decl, &ty, value));
+                assert!(is_assignable_to(&context.id_to_decl, &ty, value_ty));
                 current_scope.insert(name.clone(), (node.id.into(), ty));
             } else {
-                current_scope.insert(name.clone(), (node.id.into(), value.clone()));
+                if value_ty == &ExpressionType::Null {
+                    return Err(TypecheckError::NoNullDeclarations(node.provenance.clone()));
+                }
+                current_scope.insert(name.clone(), (node.id.into(), value_ty.clone()));
             }
 
             ExpressionType::Void

@@ -131,6 +131,10 @@ pub struct CompilationResults {
     pub declarations: HashMap<String, StaticDeclaration>,
 }
 
+pub fn eval_types(source: &str) -> Result<CompilationResults, CompileError> {
+    typecheck_module("main", "eval", source.to_string())
+}
+
 pub fn typecheck_module(
     module_name: &str,
     source_name: &'static str,
