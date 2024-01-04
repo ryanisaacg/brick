@@ -128,8 +128,9 @@ boolean operators:
     - applicable to nullable values
 
 null:
-- ?. operator
+- auto-widen non-null types to nullable
 - ?? operator
+- ?. operator
 - ! operator, which throws if the value is an error (requires errors)
 - basic null flow analysis - maybe a special operation to de-null stuff
 
