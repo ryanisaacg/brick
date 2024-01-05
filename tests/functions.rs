@@ -145,3 +145,20 @@ x
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(11)]);
 }
+
+#[tokio::test]
+#[should_panic]
+async fn illegal_return() {
+    eval(
+        r#"
+fn add(a: i32, b: i32): i32 {
+    if a > b {
+        return 0.0;
+    }
+    a + b
+}
+"#,
+    )
+    .await
+    .unwrap();
+}

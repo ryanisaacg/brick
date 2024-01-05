@@ -362,7 +362,6 @@ fn typecheck_node<'ast>(
     Ok(())
 }
 
-// TODO: some sort of data structure to store the results?
 fn typecheck_function<'a>(
     function: &'a FunctionDeclarationValue<'a>,
     context: &Declarations,
@@ -383,7 +382,6 @@ fn typecheck_function<'a>(
         context,
     )?;
     let _cfg = build_control_flow_graph(function.body);
-    // TODO: check all the return values for matching
     // TODO: check to see reachability
 
     if !is_assignable_to(&context.id_to_decl, &function_type.returns, return_value) {
@@ -392,6 +390,8 @@ fn typecheck_function<'a>(
             received: return_value.clone(),
         });
     }
+    typecheck_returns(context, &function_type.returns, function.body)
+        .expect("TODO: typechecker error reporting");
 
     Ok(())
 }
@@ -943,6 +943,35 @@ fn typecheck_expression<'a>(
     node.ty.set(ty).expect("each node should be visited once");
 
     Ok(node.ty.get().expect("just set"))
+}
+
+fn typecheck_returns<'a>(
+    context: &Declarations,
+    expected_ty: &ExpressionType,
+    current: &'a AstNode<'a>,
+) -> Result<(), Vec<TypecheckError>> {
+    let mut errors = Vec::new();
+    if let AstNodeValue::Return(child) = &current.value {
+        let return_ty = child.ty.get().unwrap();
+        if !is_assignable_to(&context.id_to_decl, expected_ty, return_ty) {
+            errors.push(TypecheckError::TypeMismatch {
+                expected: expected_ty.clone(),
+                received: return_ty.clone(),
+            });
+        }
+    }
+    current.children(
+        |child| match typecheck_returns(context, expected_ty, child) {
+            Ok(()) => {}
+            Err(mut errs) => errors.append(&mut errs),
+        },
+    );
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {

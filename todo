@@ -56,15 +56,12 @@ modules:
 - modules can be declared explicitly
 
 returns:
-- typecheck returns
 - allow void returns
-
-references:
-- allow calls to associated functions through references (checking correct reference type)
 
 static function vs method:
     - struct associated functions support "self"
         - self can be declared as a typeless parameter syntactically
+        - allow calls to associated functions through references (checking correct reference type)
         - self typechecks correctly
         - IR transforms code properly to pass self into the function
     - union associated functions support "self"
