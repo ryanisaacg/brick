@@ -193,7 +193,7 @@ pub enum LinearNodeValue {
 
     // Control flow
     Call(Box<LinearNode>, Vec<LinearNode>),
-    Return(Box<LinearNode>),
+    Return(Option<Box<LinearNode>>),
     If(Box<LinearNode>, Vec<LinearNode>, Option<Vec<LinearNode>>),
     // TODO: labelled breaks?
     Break,
@@ -302,9 +302,10 @@ pub fn linearize_nodes(
             }
 
             HirNodeValue::Return(expr) => {
-                let expr = lower_expression(declarations, stack_entries, *expr);
+                let expr =
+                    expr.map(|expr| Box::new(lower_expression(declarations, stack_entries, *expr)));
                 values.push(LinearNode {
-                    value: LinearNodeValue::Return(Box::new(expr)),
+                    value: LinearNodeValue::Return(expr),
                     provenance: node.provenance,
                 });
                 // TODO: is this a legal optimization?

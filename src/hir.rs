@@ -143,7 +143,8 @@ impl HirNode {
             | HirNodeValue::Bool(_)
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
-            | HirNodeValue::Null => {}
+            | HirNodeValue::Null
+            | HirNodeValue::Return(None) => {}
             HirNodeValue::Call(lhs, params) | HirNodeValue::VtableCall(lhs, _, params) => {
                 callback(lhs);
                 for param in params.iter_mut() {
@@ -158,7 +159,7 @@ impl HirNode {
             | HirNodeValue::TakeShared(child)
             | HirNodeValue::Dereference(child)
             | HirNodeValue::ArrayLiteralLength(child, _)
-            | HirNodeValue::Return(child)
+            | HirNodeValue::Return(Some(child))
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
             | HirNodeValue::StructToInterface { value: child, .. } => {
@@ -230,7 +231,8 @@ impl HirNode {
             | HirNodeValue::Bool(_)
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
-            | HirNodeValue::Null => {}
+            | HirNodeValue::Null
+            | HirNodeValue::Return(None) => {}
             HirNodeValue::Call(lhs, params) | HirNodeValue::VtableCall(lhs, _, params) => {
                 callback(lhs);
                 for param in params.iter() {
@@ -245,7 +247,7 @@ impl HirNode {
             | HirNodeValue::Dereference(child)
             | HirNodeValue::UnaryLogical(_, child)
             | HirNodeValue::ArrayLiteralLength(child, _)
-            | HirNodeValue::Return(child)
+            | HirNodeValue::Return(Some(child))
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
             | HirNodeValue::StructToInterface { value: child, .. } => {
@@ -515,7 +517,7 @@ pub enum HirNodeValue {
     NullCoalesce(Box<HirNode>, Box<HirNode>),
     UnaryLogical(UnaryLogicalOp, Box<HirNode>),
 
-    Return(Box<HirNode>),
+    Return(Option<Box<HirNode>>),
 
     Int(i64),
     Float(f64),

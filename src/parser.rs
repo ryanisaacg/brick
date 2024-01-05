@@ -39,13 +39,13 @@ impl<'a> AstNode<'a> {
         use AstNodeValue::*;
 
         match &self.value {
-            TakeRef(child)
+            Return(Some(child))
+            | TakeRef(child)
             | TakeUnique(child)
             | ArrayLiteralLength(child, _)
             | UniqueType(child)
             | SharedType(child)
             | NullableType(child)
-            | Return(child)
             | Statement(child)
             | Deref(child)
             | UnaryExpr(_, child)
@@ -156,7 +156,8 @@ impl<'a> AstNode<'a> {
             | Bool(_)
             | Null
             | CharLiteral(_)
-            | StringLiteral(_) => {}
+            | StringLiteral(_)
+            | Return(None) => {}
         }
     }
 }
@@ -220,7 +221,7 @@ pub enum AstNodeValue<'a> {
     RequiredFunction(FunctionHeaderValue<'a>),
     Declaration(String, Option<&'a mut AstNode<'a>>, &'a mut AstNode<'a>),
     Import(String),
-    Return(&'a mut AstNode<'a>),
+    Return(Option<&'a mut AstNode<'a>>),
     // Any non-specific expression that ends in ; is a statement
     Statement(&'a mut AstNode<'a>),
 
@@ -390,12 +391,13 @@ fn statement<'a>(
                     TokenValue::Interface => interface_declaration(source, context, cursor)?,
                     TokenValue::Return => {
                         let statement = return_declaration(source, context, cursor)?;
-                        assert_next_lexeme_eq(
-                            source.next(),
-                            TokenValue::Semicolon,
-                            statement.provenance.end(),
-                            "expected ; after 'import' statement",
-                        )?;
+                        if let Some(Token {
+                            value: TokenValue::Semicolon,
+                            ..
+                        }) = peek_token_optional(source)?
+                        {
+                            already_peeked_token(source)?;
+                        }
 
                         statement
                     }
@@ -426,11 +428,22 @@ fn return_declaration<'a>(
     context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
+    if let Some(Token {
+        value: TokenValue::Semicolon,
+        ..
+    }) = peek_token_optional(source)?
+    {
+        let token = already_peeked_token(source)?;
+        return Ok(AstNode::new(
+            AstNodeValue::Return(None),
+            SourceRange::new(cursor, token.range.end()),
+        ));
+    }
     let value = expression(source, context, cursor, true)?;
     let provenance = value.provenance.clone();
     let value = add_node(context, value);
 
-    Ok(AstNode::new(AstNodeValue::Return(value), provenance))
+    Ok(AstNode::new(AstNodeValue::Return(Some(value)), provenance))
 }
 
 fn struct_declaration<'a>(

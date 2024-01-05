@@ -67,7 +67,7 @@ impl Debug for Function {
 
 #[derive(Debug)]
 pub enum Unwind {
-    Return(Value),
+    Return(Option<Value>),
     Break,
     Aborted,
 }
@@ -115,7 +115,9 @@ pub async fn evaluate_function(
             for node in function.body.iter() {
                 let result = evaluate_block(fns, params, vm, node).await;
                 if let Err(Unwind::Return(val)) = result {
-                    vm.op_stack.push(val);
+                    if let Some(val) = val {
+                        vm.op_stack.push(val);
+                    }
                     break;
                 } else {
                     result?;
@@ -216,9 +218,14 @@ pub async fn evaluate_block(
             evaluate_function(fns, &mut parameters[..], vm, fn_id).await?;
         }
         LinearNodeValue::Return(expr) => {
-            evaluate_block(fns, params, vm, expr).await?;
-            let val = vm.op_stack.pop().unwrap();
-            return Err(Unwind::Return(val));
+            if let Some(expr) = expr {
+                evaluate_block(fns, params, vm, expr).await?;
+                // TODO: support wide returns
+                let val = vm.op_stack.pop().unwrap();
+                return Err(Unwind::Return(Some(val)));
+            } else {
+                return Err(Unwind::Return(None));
+            }
         }
         LinearNodeValue::If(cond, if_branch, else_branch) => {
             evaluate_block(fns, params, vm, cond).await?;

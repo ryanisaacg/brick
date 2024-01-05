@@ -446,7 +446,9 @@ fn typecheck_expression<'a>(
         }
         // TODO: You can only from within a function
         AstNodeValue::Return(returned) => {
-            typecheck_expression(returned, outer_scopes, current_scope, context)?;
+            if let Some(returned) = returned {
+                typecheck_expression(returned, outer_scopes, current_scope, context)?;
+            }
 
             ExpressionType::Unreachable
         }
@@ -565,6 +567,7 @@ fn typecheck_expression<'a>(
             left,
             right,
         ) => {
+            dbg!(left, right);
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
             let ExpressionType::Primitive(_) = fully_dereference(left) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
@@ -960,7 +963,10 @@ fn typecheck_returns<'a>(
 ) -> Result<(), Vec<TypecheckError>> {
     let mut errors = Vec::new();
     if let AstNodeValue::Return(child) = &current.value {
-        let return_ty = child.ty.get().unwrap();
+        let return_ty = child
+            .as_ref()
+            .map(|child| child.ty.get().unwrap())
+            .unwrap_or(&ExpressionType::Void);
         if !is_assignable_to(&context.id_to_decl, expected_ty, return_ty) {
             errors.push(TypecheckError::TypeMismatch {
                 expected: expected_ty.clone(),

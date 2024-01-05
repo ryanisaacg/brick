@@ -183,3 +183,24 @@ fn cmp(a: i32, b: i32): i32 {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn void_return() {
+    let result = eval(
+        r#"
+fn incr_if_positive(a: unique i32) {
+    if *a <= 0 {
+        return;
+    };
+    *a += 1;
+}
+
+let x = -3;
+incr_if_positive(unique x);
+x
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(-3)]);
+}

@@ -147,7 +147,9 @@ fn lower_node<'ast>(
             *referenced_id.get().expect("referenced ID to be filled in"),
         ),
 
-        AstNodeValue::Return(inner) => HirNodeValue::Return(lower_node_alloc(decls, inner)),
+        AstNodeValue::Return(inner) => {
+            HirNodeValue::Return(inner.as_ref().map(|inner| lower_node_alloc(decls, inner)))
+        }
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let ExpressionType::InstanceOf(expr_ty) = fully_dereference(left.ty.get().unwrap())
             else {
