@@ -11,14 +11,14 @@ use crate::{
     provenance::SourceRange,
 };
 
-use self::{control_flow_graph::build_control_flow_graph, resolve::resolve_type_expr};
+use self::resolve::resolve_type_expr;
 
-mod control_flow_graph;
 pub mod resolve;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpressionType {
     Void,
+    Unreachable,
     Primitive(PrimitiveType),
     InstanceOf(TypeID),
     ReferenceTo(TypeID),
@@ -33,6 +33,7 @@ impl ExpressionType {
         match self {
             ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id) => Some(id),
             ExpressionType::Void
+            | ExpressionType::Unreachable
             | ExpressionType::Primitive(_)
             | ExpressionType::Pointer(_, _)
             | ExpressionType::Collection(_)
@@ -381,8 +382,6 @@ fn typecheck_function<'a>(
         &mut HashMap::new(),
         context,
     )?;
-    let _cfg = build_control_flow_graph(function.body);
-    // TODO: check to see reachability
 
     if !is_assignable_to(&context.id_to_decl, &function_type.returns, return_value) {
         return Err(TypecheckError::TypeMismatch {
@@ -434,7 +433,10 @@ fn typecheck_expression<'a>(
                 type_hint.ty.set(ty.clone()).unwrap();
                 current_scope.insert(name.clone(), (node.id.into(), ty));
             } else {
-                if value_ty == &ExpressionType::Null {
+                if value_ty == &ExpressionType::Null
+                    || value_ty == &ExpressionType::Unreachable
+                    || value_ty == &ExpressionType::Void
+                {
                     return Err(TypecheckError::NoNullDeclarations(node.provenance.clone()));
                 }
                 current_scope.insert(name.clone(), (node.id.into(), value_ty.clone()));
@@ -446,7 +448,7 @@ fn typecheck_expression<'a>(
         AstNodeValue::Return(returned) => {
             typecheck_expression(returned, outer_scopes, current_scope, context)?;
 
-            ExpressionType::Void
+            ExpressionType::Unreachable
         }
         AstNodeValue::Name {
             value: name,
@@ -729,10 +731,11 @@ fn typecheck_expression<'a>(
 
             match else_branch {
                 Some(else_branch) => {
-                    if if_branch == else_branch {
+                    if is_assignable_to(&context.id_to_decl, if_branch, else_branch) {
                         if_branch.clone()
+                    } else if is_assignable_to(&context.id_to_decl, else_branch, if_branch) {
+                        else_branch.clone()
                     } else {
-                        // TODO: typecheck error here UNLESS there's a break/return
                         panic!("if and else don't match");
                     }
                 }
@@ -747,9 +750,14 @@ fn typecheck_expression<'a>(
             let mut child_scope = HashMap::new();
             let mut expr_ty = ExpressionType::Void;
             for (index, child) in children.iter().enumerate() {
-                expr_ty =
-                    typecheck_expression(child, &scopes[..], &mut child_scope, context)?.clone();
-                if index != children.len() - 1 && expr_ty != ExpressionType::Void {
+                let new_ty = typecheck_expression(child, &scopes[..], &mut child_scope, context)?;
+
+                if expr_ty != ExpressionType::Unreachable {
+                    expr_ty = new_ty.clone();
+                }
+                if index != children.len() - 1
+                    && !(expr_ty == ExpressionType::Void || expr_ty == ExpressionType::Unreachable)
+                {
                     return Err(TypecheckError::TypeMismatch {
                         expected: ExpressionType::Void,
                         received: expr_ty,
@@ -1041,6 +1049,9 @@ pub fn is_assignable_to(
     use PrimitiveType::*;
 
     match (left, right) {
+        (Unreachable, Unreachable) => true,
+        (Unreachable, _) => todo!("I don't think you can ever have an unreachable lvalue?"),
+        (_, Unreachable) => true,
         // Kinda a special case, but a function that returns void should accept a void block
         (Void, Void) => true,
         // Void can never be assigned to or be assigned from

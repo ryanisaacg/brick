@@ -995,6 +995,7 @@ fn expression_type_size(
     // TODO: alignment
     match expr {
         ExpressionType::Void => 0,
+        ExpressionType::Unreachable => unreachable!(),
         ExpressionType::Primitive(prim) => primitive_type_size(*prim),
         ExpressionType::InstanceOf(id) => declarations[id].size(),
         ExpressionType::Pointer(_, _) => POINTER_SIZE,
@@ -1186,8 +1187,7 @@ fn layout_type(
     ty: &ExpressionType,
 ) -> (PhysicalType, usize) {
     match ty {
-        ExpressionType::Void => unreachable!(),
-        ExpressionType::Null => unreachable!(),
+        ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
         ExpressionType::Primitive(p) => {
             let size = primitive_type_size(*p);
             (PhysicalType::Primitive(*p), size)
@@ -1216,8 +1216,7 @@ fn layout_type(
 
 fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
     match ty {
-        ExpressionType::Void => unreachable!(),
-        ExpressionType::Null => unreachable!(),
+        ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
         ExpressionType::Primitive(p) => PhysicalType::Primitive(*p),
         ExpressionType::InstanceOf(id) => PhysicalType::Referenced(*id),
         ExpressionType::Collection(c) => PhysicalType::Collection(match c {

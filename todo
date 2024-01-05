@@ -42,6 +42,7 @@ allocator:
 - support dealloc
 
 syntax:
+- else if
 - remove ; and , requirements?
 - keyword arguments
 - maybe separate syntax for i64 / f64 literals

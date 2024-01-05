@@ -162,3 +162,24 @@ fn add(a: i32, b: i32): i32 {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn doesnt_converge() {
+    eval(
+        r#"
+fn cmp(a: i32, b: i32): i32 {
+    if a > b {
+        return 1;
+    } else {
+        if a < b {
+            return -1;
+        } else {
+            return 0;
+        }
+    }
+}
+"#,
+    )
+    .await
+    .unwrap();
+}

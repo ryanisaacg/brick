@@ -258,7 +258,7 @@ fn find_references_in_node(
 // TODO
 fn is_affine(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &ExpressionType) -> bool {
     match ty {
-        ExpressionType::Void => unreachable!(),
+        ExpressionType::Void | ExpressionType::Unreachable => unreachable!(),
         ExpressionType::Primitive(_) => false,
         ExpressionType::InstanceOf(ty) => match declarations[ty] {
             StaticDeclaration::Func(_) => false,
