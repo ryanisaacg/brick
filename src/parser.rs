@@ -1422,7 +1422,7 @@ fn dict_literal<'a>(
 fn if_or_while<'a>(
     source: &mut TokenIter,
     context: &'a Arena<AstNode<'a>>,
-    if_or_while: TokenValue,
+    is_if_or_while: TokenValue,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let predicate = expression(source, context, cursor, false)?;
@@ -1439,20 +1439,37 @@ fn if_or_while<'a>(
     let provenance = SourceRange::new(cursor, if_block.provenance.end());
     let block_ptr = add_node(context, if_block);
 
-    Ok(if if_or_while == TokenValue::If {
+    Ok(if is_if_or_while == TokenValue::If {
         match peek_token_optional(source)? {
             Some(Token {
                 value: TokenValue::Word(word),
                 ..
             }) if word == "else" => {
                 let else_token = already_peeked_token(source)?;
-                let token = assert_next_lexeme_eq(
-                    source.next(),
-                    TokenValue::OpenBracket,
+                let next_token = peek_token(
+                    source,
                     else_token.range.end(),
-                    "expected { after else",
+                    "expected { or if after else",
                 )?;
-                let else_block = block(source, context, token.range.end())?;
+                let else_block = match next_token.value {
+                    TokenValue::OpenBracket => {
+                        let token = already_peeked_token(source)?;
+                        block(source, context, token.range.end())?
+                    }
+                    TokenValue::If => {
+                        let token = already_peeked_token(source)?;
+                        let if_node =
+                            if_or_while(source, context, TokenValue::If, token.range.end())?;
+                        let provenance = if_node.provenance.clone();
+                        AstNode::new(AstNodeValue::Block(vec![if_node]), provenance)
+                    }
+                    _ => {
+                        return Err(ParseError::UnexpectedToken(
+                            Box::new(already_peeked_token(source)?),
+                            "expected { or if after else",
+                        ))
+                    }
+                };
                 let provenance = SourceRange::new(cursor, else_block.provenance.end());
                 let else_ptr = add_node(context, else_block);
                 AstNode::new(
