@@ -14,11 +14,9 @@ linear IR:
 collections:
 - arrays:
     - array push to end
-    - type syntax
     - allow empty arrays to typecheck
     - length() method on arrays
 - dicts:
-    - dict type syntax
     - insert new entries into dictionaries
     - use a hash table
 - slices
@@ -150,6 +148,7 @@ generic programming:
 - interfaces can constrain generic parameters
 
 extern:
+- opaque extern pointers
 - extern functions are unsafe
 - externs can only do C FFI stuff, for ease of wasm backend
 

@@ -416,6 +416,7 @@ fn typecheck_expression<'a>(
         AstNodeValue::UniqueType(_)
         | AstNodeValue::SharedType(_)
         | AstNodeValue::ArrayType(_)
+        | AstNodeValue::DictType(_, _)
         | AstNodeValue::NullableType(_) => {
             panic!("illegal type expression in function body");
         }
@@ -1030,6 +1031,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::UniqueType(_)
         | AstNodeValue::SharedType(_)
         | AstNodeValue::ArrayType(_)
+        | AstNodeValue::DictType(_, _)
         | AstNodeValue::UnaryExpr(_, _)
         | AstNodeValue::NullableType(_) => false,
     }

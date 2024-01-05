@@ -52,7 +52,7 @@ impl<'a> AstNode<'a> {
             | ArrayType(child) => {
                 callback(child);
             }
-            BinExpr(_, left, right) | While(left, right) => {
+            DictType(left, right) | BinExpr(_, left, right) | While(left, right) => {
                 callback(right);
                 callback(left);
             }
@@ -258,6 +258,7 @@ pub enum AstNodeValue<'a> {
     UniqueType(&'a mut AstNode<'a>),
     SharedType(&'a mut AstNode<'a>),
     ArrayType(&'a mut AstNode<'a>),
+    DictType(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
     NullableType(&'a mut AstNode<'a>),
 }
 
@@ -910,22 +911,68 @@ fn type_expression<'a>(
                 SourceRange::new(next.range.start(), end),
             )
         }
-        TokenValue::OpenSquare => {
-            let subtype = type_expression(source, context, next.range.end())?;
-            let end = subtype.provenance.end();
-            assert_next_lexeme_eq(
+        TokenValue::Dict => {
+            let token = assert_next_lexeme_eq(
+                source.next(),
+                TokenValue::OpenSquare,
+                next.range.end(),
+                "expected [ after dict type",
+            )?;
+            let key = type_expression(source, context, token.range.end())?;
+            let end = key.provenance.end();
+            let key = add_node(context, key);
+
+            let token = assert_next_lexeme_eq(
+                source.next(),
+                TokenValue::Comma,
+                end,
+                "expected , after dict key type",
+            )?;
+
+            let value = type_expression(source, context, token.range.end())?;
+            let end = value.provenance.end();
+            let value = add_node(context, value);
+
+            let token = assert_next_lexeme_eq(
                 source.next(),
                 TokenValue::CloseSquare,
                 end,
-                "expected ] after array type",
+                "expected ] after dict type",
             )?;
-            let subtype = add_node(context, subtype);
+
             AstNode::new(
-                AstNodeValue::ArrayType(subtype),
-                SourceRange::new(next.range.start(), end),
+                AstNodeValue::DictType(key, value),
+                SourceRange::new(next.range.start(), token.range.end()),
             )
         }
-        TokenValue::Word(name) => AstNode::new(AstNodeValue::name(name), next.range),
+        // TODO: reserve array word
+        TokenValue::Word(name) => match name.as_str() {
+            "array" => {
+                let token = assert_next_lexeme_eq(
+                    source.next(),
+                    TokenValue::OpenSquare,
+                    next.range.end(),
+                    "expected [ after array type",
+                )?;
+
+                let value = type_expression(source, context, token.range.end())?;
+                let end = value.provenance.end();
+                let value = add_node(context, value);
+
+                let token = assert_next_lexeme_eq(
+                    source.next(),
+                    TokenValue::CloseSquare,
+                    end,
+                    "expected ] after array type",
+                )?;
+
+                AstNode::new(
+                    AstNodeValue::ArrayType(value),
+                    SourceRange::new(next.range.start(), token.range.end()),
+                )
+            }
+            _ => AstNode::new(AstNodeValue::name(name), next.range),
+        },
         _ => {
             return Err(ParseError::UnexpectedToken(
                 Box::new(next),

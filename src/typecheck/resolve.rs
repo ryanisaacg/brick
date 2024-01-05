@@ -224,6 +224,10 @@ pub fn resolve_type_expr(
         AstNodeValue::ArrayType(inner) => ExpressionType::Collection(CollectionType::Array(
             Box::new(resolve_type_expr(name_to_type_id, inner)?),
         )),
+        AstNodeValue::DictType(key, value) => ExpressionType::Collection(CollectionType::Dict(
+            Box::new(resolve_type_expr(name_to_type_id, key)?),
+            Box::new(resolve_type_expr(name_to_type_id, value)?),
+        )),
         AstNodeValue::NullableType(inner) => {
             ExpressionType::Nullable(Box::new(resolve_type_expr(name_to_type_id, inner)?))
         }

@@ -312,6 +312,7 @@ fn lower_node<'ast>(
         | AstNodeValue::SharedType(_)
         | AstNodeValue::NullableType(_)
         | AstNodeValue::RequiredFunction(_)
+        | AstNodeValue::DictType(_, _)
         | AstNodeValue::ArrayType(_) => unreachable!("Can't have these in a function body"),
     };
 
