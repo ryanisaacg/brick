@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    hir::{HirNode, HirNodeValue},
+    hir::{BinaryLogicalOp, HirNode, HirNodeValue},
     id::{NodeID, VariableID},
 };
 
@@ -195,7 +195,7 @@ impl CfgEdge {
 fn create_graph_for_node<'a>(
     current: &'a HirNode,
     graph: &mut IntermediateCFG<'a>,
-    exit: NodeIndex,
+    function_exit: NodeIndex,
 ) -> (NodeIndex, NodeIndex) {
     use HirNodeValue::*;
 
@@ -211,9 +211,6 @@ fn create_graph_for_node<'a>(
         | UnaryLogical(_, _)
         | Arithmetic(_, _, _)
         | Comparison(_, _, _)
-        // TODO: binary logical and null coalescing short-circuit
-        | BinaryLogical(_, _, _)
-        | NullCoalesce(_, _)
         | Dereference(_)
         | Call(_, _)
         | VtableCall(_, _, _)
@@ -242,7 +239,7 @@ fn create_graph_for_node<'a>(
             let mut current_node = start;
 
             for child in children.iter() {
-                let (start_child, end_child) = create_graph_for_node(child, graph, exit);
+                let (start_child, end_child) = create_graph_for_node(child, graph, function_exit);
                 graph.add_edge(current_node, start_child, CfgEdge::Flow);
                 current_node = end_child;
             }
@@ -251,26 +248,56 @@ fn create_graph_for_node<'a>(
         }
         Return(_) => {
             let node = graph.add_node(IntermediateNode::Expression(current));
-            graph.add_edge(node, exit, CfgEdge::Goto);
+            graph.add_edge(node, function_exit, CfgEdge::Goto);
 
             // TODO: what should the exit be?
             (node, node)
         }
-        If(condition, if_branch, _else_branch) => {
-            // TODO: else branch
-            let (start_condition, end_condition) = create_graph_for_node(condition, graph, exit);
-            let (start_body, end_body) = create_graph_for_node(if_branch, graph, exit);
+        BinaryLogical(BinaryLogicalOp::BooleanAnd, lhs, rhs) => {
+            let (start_lhs, end_lhs) = create_graph_for_node(lhs, graph, function_exit);
+            let (start_rhs, end_rhs) = create_graph_for_node(rhs, graph, function_exit);
+
+            let virtual_next = graph.add_node(IntermediateNode::Empty);
+            graph.add_edge(end_lhs, virtual_next, CfgEdge::Else);
+            graph.add_edge(end_lhs, start_rhs, CfgEdge::If);
+            graph.add_edge(end_rhs, virtual_next, CfgEdge::Flow);
+
+            (start_lhs, virtual_next)
+        }
+        BinaryLogical(BinaryLogicalOp::BooleanOr, lhs, rhs) | NullCoalesce(lhs, rhs) => {
+            let (start_lhs, end_lhs) = create_graph_for_node(lhs, graph, function_exit);
+            let (start_rhs, end_rhs) = create_graph_for_node(rhs, graph, function_exit);
+
+            let virtual_next = graph.add_node(IntermediateNode::Empty);
+            graph.add_edge(end_lhs, virtual_next, CfgEdge::If);
+            graph.add_edge(end_lhs, start_rhs, CfgEdge::Else);
+            graph.add_edge(end_rhs, virtual_next, CfgEdge::Flow);
+
+            (start_lhs, virtual_next)
+        }
+        If(condition, if_branch, else_branch) => {
+            let (start_condition, end_condition) =
+                create_graph_for_node(condition, graph, function_exit);
+            let (start_body, end_body) = create_graph_for_node(if_branch, graph, function_exit);
             graph.add_edge(end_condition, start_body, CfgEdge::If);
 
             let virtual_next = graph.add_node(IntermediateNode::Empty);
-            graph.add_edge(end_condition, virtual_next, CfgEdge::Else);
-            graph.add_edge(end_body, virtual_next, CfgEdge::Flow);
+            if let Some(else_branch) = else_branch {
+                let (start_else, end_else) =
+                    create_graph_for_node(else_branch, graph, function_exit);
+                graph.add_edge(end_condition, start_else, CfgEdge::Else);
+                graph.add_edge(end_else, virtual_next, CfgEdge::Flow);
+            } else {
+                graph.add_edge(end_condition, virtual_next, CfgEdge::Else);
+                graph.add_edge(end_body, virtual_next, CfgEdge::Flow);
+            }
 
             (start_condition, virtual_next)
         }
         While(condition, body) => {
-            let (start_condition, end_condition) = create_graph_for_node(condition, graph, exit);
-            let (start_body, end_body) = create_graph_for_node(body, graph, exit);
+            let (start_condition, end_condition) =
+                create_graph_for_node(condition, graph, function_exit);
+            let (start_body, end_body) = create_graph_for_node(body, graph, function_exit);
             graph.add_edge(end_condition, start_body, CfgEdge::If);
 
             let virtual_next = graph.add_node(IntermediateNode::Empty);

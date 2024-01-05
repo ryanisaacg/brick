@@ -121,8 +121,6 @@ unions:
 - rename to enum? variant?
 
 boolean operators:
-- boolean and / or:
-    - the borrowchecker knows they short circuit
 - equality / inequality:
     - applicable to nullable values
 
