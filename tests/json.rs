@@ -2,16 +2,20 @@ use std::collections::HashMap;
 
 use brick::{eval_with_bindings, Value};
 
+// Requirements
 // TODO: string support
-// TODO: Zero-variant unions
-// TODO: type syntax for array and dictionary
-// TODO: for loops / ranges
-// TODO: push to arrays
 // TODO: push to dictionaries
 // TODO: string keys for dictionaries
+// TODO: collection assignments
+// TODO: null checks OR ?. for unions
+
+// Ergonomics
+// TODO: Zero-variant unions
+// TODO: push to arrays
+// TODO: for loops / ranges
 // TODO: empty dict operator
 // TODO: don't close quotes with escaped quotes
-// TODO: collection assignments
+// TODO: comments
 
 #[tokio::test]
 #[should_panic] // TODO
