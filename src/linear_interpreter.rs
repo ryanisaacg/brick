@@ -163,6 +163,9 @@ pub async fn evaluate_block(
         LinearNodeValue::StackAlloc(amount) => {
             vm.stack_ptr -= amount;
         }
+        LinearNodeValue::StackDealloc(amount) => {
+            vm.stack_ptr += amount;
+        }
         LinearNodeValue::HeapAlloc(amount) => {
             evaluate_block(fns, params, vm, amount).await?;
             let Some(Value::Size(amount)) = vm.op_stack.pop() else {

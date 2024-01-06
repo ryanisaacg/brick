@@ -171,6 +171,7 @@ pub enum LinearNodeValue {
     // Memory
     StackFrame,
     StackAlloc(usize),
+    StackDealloc(usize),
     /// Returns the heap pointer
     HeapAlloc(Box<LinearNode>),
     /// Each parameter may only appear once in a given method body
@@ -260,22 +261,10 @@ pub fn linearize_nodes(
                 }
             }
             HirNodeValue::Declaration(id) => {
-                values.push(stack_alloc(
-                    declarations,
-                    stack_entries,
-                    stack_offset,
-                    &node.ty,
-                    id,
-                ));
+                values.push(stack_alloc(declarations, stack_entries, stack_offset, &node.ty, id).0);
             }
             HirNodeValue::Parameter(idx, id) => {
-                values.push(stack_alloc(
-                    declarations,
-                    stack_entries,
-                    stack_offset,
-                    &node.ty,
-                    id,
-                ));
+                values.push(stack_alloc(declarations, stack_entries, stack_offset, &node.ty, id).0);
 
                 let (location, offset) = variable_location(stack_entries, id);
                 let ty = expr_ty_to_physical(&node.ty);
@@ -516,9 +505,11 @@ fn lower_expression(
         }
         HirNodeValue::NullableTraverse(lhs, rhs) => {
             let temp_id = VariableID::new();
-            let alloc = stack_alloc(declarations, stack_entries, stack_offset, &lhs.ty, temp_id);
-
+            let (alloc, alloc_size) =
+                stack_alloc(declarations, stack_entries, stack_offset, &lhs.ty, temp_id);
             let (location, initial_offset) = variable_location(stack_entries, temp_id);
+            stack_entries.remove(&temp_id);
+
             let PhysicalType::Nullable(ty) = expr_ty_to_physical(&lhs.ty) else {
                 unreachable!();
             };
@@ -548,7 +539,6 @@ fn lower_expression(
             }
 
             // TODO: union RHS
-            // TODO: dealloc / remove the temp variable
 
             let lhs_ty = expr_ty_to_physical(&lhs.ty);
 
@@ -573,6 +563,7 @@ fn lower_expression(
                     Some(vec![LinearNode::new(LinearNodeValue::Bool(false))]),
                     provenance.clone(),
                 ),
+                LinearNode::new(LinearNodeValue::StackDealloc(alloc_size)),
             ])
         }
         HirNodeValue::ArrayIndex(arr, idx) => {
@@ -914,11 +905,14 @@ fn stack_alloc(
     stack_offset: &mut usize,
     ty: &ExpressionType,
     id: VariableID,
-) -> LinearNode {
+) -> (LinearNode, usize) {
     let alloc_size = expression_type_size(declarations, ty);
     *stack_offset += alloc_size;
     stack_entries.insert(id, *stack_offset);
-    LinearNode::new(LinearNodeValue::StackAlloc(alloc_size))
+    (
+        LinearNode::new(LinearNodeValue::StackAlloc(alloc_size)),
+        alloc_size,
+    )
 }
 
 fn lower_lvalue(
