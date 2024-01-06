@@ -224,6 +224,7 @@ fn create_graph_for_node<'a>(
         | NumericCast { .. }
         | Parameter(_, _)
         | Access(_, _)
+        | NullableTraverse(_, _)
         | ArrayIndex(_, _)
         | DictIndex(_, _)
         | DictLiteral(_)

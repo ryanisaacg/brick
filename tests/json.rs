@@ -9,9 +9,9 @@ use brick::{eval_with_bindings, Value};
 // TODO: push to arrays
 // TODO: push to dictionaries
 // TODO: string keys for dictionaries
-// TODO: ?. operator
 // TODO: empty dict operator
 // TODO: don't close quotes with escaped quotes
+// TODO: collection assignments
 
 #[tokio::test]
 #[should_panic] // TODO
@@ -32,8 +32,8 @@ union JsonValue {
     Bool(bool),
     Number(f64),
     String(string),
-    Array(array[Value]),
-    Object(dict[string, Value]),
+    Array(array[JsonValue]),
+    Object(dict[string, JsonValue]),
 }
 
 fn parse_json(val: string): JsonValue {
@@ -53,7 +53,7 @@ fn parse_json_node(): JsonValue {
         return JsonValue { String: value_as_string() };
     } else if tag == 4 {
         let length = value_as_array_items();
-        let items = [JsonValue { Null: false }, length];
+        let items = [JsonValue { Null: false }; length];
         let idx = 0; 
         while idx < length {
             items[idx] = parse_json_node();

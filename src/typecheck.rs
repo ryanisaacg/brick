@@ -119,6 +119,45 @@ impl StaticDeclaration {
             StaticDeclaration::Func(_) | StaticDeclaration::Union(_) => {}
         }
     }
+
+    // TODO: Result<T, E> with error reporting if the field isn't found
+    pub fn field_access(&self, field: &str) -> ExpressionType {
+        match self {
+            StaticDeclaration::Struct(StructType {
+                fields,
+                associated_functions,
+                ..
+            }) => fields
+                .get(field)
+                .cloned()
+                .or_else(|| {
+                    associated_functions
+                        .get(field)
+                        .map(|decl| ExpressionType::InstanceOf(decl.id()))
+                })
+                .expect("TODO: field is present"),
+            StaticDeclaration::Interface(InterfaceType {
+                associated_functions,
+                ..
+            }) => associated_functions
+                .get(field)
+                .map(|decl| ExpressionType::InstanceOf(decl.id()))
+                .expect("TODO: field is present"),
+            StaticDeclaration::Union(lhs_type) => ExpressionType::Nullable(Box::new(
+                lhs_type
+                    .variants
+                    .get(field)
+                    .expect("TODO: variant is present")
+                    .clone(),
+            )),
+            StaticDeclaration::Module(lhs_type) => lhs_type
+                .exports
+                .get(field)
+                .expect("TODO: export is present")
+                .ref_to(),
+            _ => todo!("illegal lhs type"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -491,42 +530,23 @@ fn typecheck_expression<'a>(
                 panic!("TODO: right side of dot operator");
             };
             // TODO: fallible
-            let lhs_type = context.decl(id);
-            match lhs_type {
-                Some(StaticDeclaration::Struct(StructType {
-                    fields,
-                    associated_functions,
-                    ..
-                })) => fields
-                    .get(name)
-                    .cloned()
-                    .or_else(|| {
-                        associated_functions
-                            .get(name)
-                            .map(|decl| ExpressionType::InstanceOf(decl.id()))
-                    })
-                    .expect("TODO: field is present"),
-                Some(StaticDeclaration::Interface(InterfaceType {
-                    associated_functions,
-                    ..
-                })) => associated_functions
-                    .get(name)
-                    .map(|decl| ExpressionType::InstanceOf(decl.id()))
-                    .expect("TODO: field is present"),
-                Some(StaticDeclaration::Union(lhs_type)) => ExpressionType::Nullable(Box::new(
-                    lhs_type
-                        .variants
-                        .get(name)
-                        .expect("TODO: variant is present")
-                        .clone(),
-                )),
-                Some(StaticDeclaration::Module(lhs_type)) => lhs_type
-                    .exports
-                    .get(name)
-                    .expect("TODO: export is present")
-                    .ref_to(),
-                _ => todo!("illegal lhs type"),
-            }
+            let ty = context.decl(id).unwrap().field_access(name);
+            ty
+        }
+        AstNodeValue::BinExpr(BinOp::NullChaining, left, right) => {
+            let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
+            let ExpressionType::Nullable(ty) = fully_dereference(left) else {
+                panic!("TODO: left side of nullable dot operator");
+            };
+            let mut ty = *ty.clone();
+            // TODO: fallible
+            traverse_dots(right, |name| {
+                let ExpressionType::InstanceOf(id) = ty else {
+                    unreachable!()
+                };
+                ty = context.decl(&id).unwrap().field_access(name);
+            });
+            ExpressionType::Nullable(Box::new(ty))
         }
         AstNodeValue::BinExpr(BinOp::Index, collection, index) => {
             let collection_ty =
@@ -568,7 +588,6 @@ fn typecheck_expression<'a>(
             left,
             right,
         ) => {
-            dbg!(left, right);
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
             let ExpressionType::Primitive(_) = fully_dereference(left) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
@@ -955,6 +974,24 @@ fn typecheck_expression<'a>(
     node.ty.set(ty).expect("each node should be visited once");
 
     Ok(node.ty.get().expect("just set"))
+}
+
+// TODO: fallible, report errors
+pub fn traverse_dots(node: &AstNode, mut callback: impl FnMut(&str)) {
+    traverse_dots_recursive(node, &mut callback);
+}
+
+fn traverse_dots_recursive(node: &AstNode, callback: &mut impl FnMut(&str)) {
+    match &node.value {
+        AstNodeValue::BinExpr(BinOp::Dot, lhs, rhs) => {
+            traverse_dots_recursive(lhs, callback);
+            traverse_dots_recursive(rhs, callback);
+        }
+        AstNodeValue::Name { value, .. } => {
+            callback(value);
+        }
+        _ => todo!(),
+    }
 }
 
 fn typecheck_returns<'a>(

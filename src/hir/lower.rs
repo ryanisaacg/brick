@@ -9,8 +9,8 @@ use crate::{
     id::{NodeID, TypeID},
     parser::{AstNode, AstNodeValue, BinOp, IfDeclaration, UnaryOp},
     typecheck::{
-        find_func, fully_dereference, CollectionType, ExpressionType, StaticDeclaration,
-        TypecheckedFile, TypecheckedFunction,
+        find_func, fully_dereference, traverse_dots, CollectionType, ExpressionType,
+        StaticDeclaration, TypecheckedFile, TypecheckedFunction,
     },
 };
 
@@ -151,14 +151,13 @@ fn lower_node<'ast>(
             HirNodeValue::Return(inner.as_ref().map(|inner| lower_node_alloc(decls, inner)))
         }
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
-            let ExpressionType::InstanceOf(expr_ty) = fully_dereference(left.ty.get().unwrap())
-            else {
-                panic!("expected left side of dot to be declared type");
-            };
+            let expr_ty = fully_dereference(left.ty.get().unwrap());
             let AstNodeValue::Name { value: name, .. } = &right.value else {
                 unreachable!()
             };
-            if let Some(StaticDeclaration::Module(module)) = decls.get(expr_ty) {
+            if let Some(StaticDeclaration::Module(module)) =
+                expr_ty.id().and_then(|id| decls.get(id))
+            {
                 HirNodeValue::VariableReference(
                     module
                         .exports
@@ -170,6 +169,31 @@ fn lower_node<'ast>(
             } else {
                 let left = lower_node_alloc(decls, left);
                 HirNodeValue::Access(left, name.clone())
+            }
+        }
+        AstNodeValue::BinExpr(BinOp::NullChaining, left, right) => {
+            let expr_ty = fully_dereference(left.ty.get().unwrap());
+            let AstNodeValue::Name { value: name, .. } = &right.value else {
+                unreachable!()
+            };
+            if let Some(StaticDeclaration::Module(module)) =
+                expr_ty.id().and_then(|id| decls.get(id))
+            {
+                HirNodeValue::VariableReference(
+                    module
+                        .exports
+                        .get(name)
+                        .expect("module export to exist")
+                        .id()
+                        .into(),
+                )
+            } else {
+                let left = lower_node_alloc(decls, left);
+                let mut name_list = Vec::new();
+                traverse_dots(right, |name| {
+                    name_list.push(name.to_string());
+                });
+                HirNodeValue::NullableTraverse(left, name_list)
             }
         }
         AstNodeValue::BinExpr(BinOp::Index, left, right) => {
@@ -251,7 +275,7 @@ fn lower_node<'ast>(
                     HirNodeValue::BinaryLogical(BinaryLogicalOp::BooleanOr, left, right)
                 }
                 BinOp::NullCoalesce => HirNodeValue::NullCoalesce(left, right),
-                BinOp::Index | BinOp::Dot => unreachable!(),
+                BinOp::Index | BinOp::Dot | BinOp::NullChaining => unreachable!(),
             }
         }
         AstNodeValue::Call(func, params) => {

@@ -260,36 +260,38 @@ pub fn linearize_nodes(
                 }
             }
             HirNodeValue::Declaration(id) => {
-                let alloc_size = expression_type_size(declarations, &node.ty);
-                *stack_offset += alloc_size;
-                stack_entries.insert(id, *stack_offset);
-                let alloc = LinearNode::new(LinearNodeValue::StackAlloc(alloc_size));
-                values.push(alloc);
+                values.push(stack_alloc(
+                    declarations,
+                    stack_entries,
+                    stack_offset,
+                    &node.ty,
+                    id,
+                ));
             }
             HirNodeValue::Parameter(idx, id) => {
-                let alloc_size = expression_type_size(declarations, &node.ty);
-                *stack_offset += alloc_size;
-                stack_entries.insert(id, *stack_offset);
-                let alloc = LinearNode::new(LinearNodeValue::StackAlloc(alloc_size));
-                values.push(alloc);
+                values.push(stack_alloc(
+                    declarations,
+                    stack_entries,
+                    stack_offset,
+                    &node.ty,
+                    id,
+                ));
 
                 let (location, offset) = variable_location(stack_entries, id);
                 let ty = expr_ty_to_physical(&node.ty);
 
-                values.push(LinearNode {
-                    value: LinearNodeValue::WriteMemory {
-                        location: Box::new(location),
-                        offset,
-                        value: Box::new(LinearNode::new(LinearNodeValue::Parameter(idx))),
-                        ty,
-                    },
-                    provenance: node.provenance,
-                });
+                values.push(LinearNode::write_memory(
+                    location,
+                    offset,
+                    ty,
+                    LinearNode::new(LinearNodeValue::Parameter(idx)),
+                ));
             }
             HirNodeValue::Assignment(lhs, rhs) => {
                 let ty = expr_ty_to_physical(&lhs.ty);
-                let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
-                let rhs = lower_expression(declarations, stack_entries, *rhs);
+                let (location, offset) =
+                    lower_lvalue(declarations, stack_entries, stack_offset, *lhs);
+                let rhs = lower_expression(declarations, stack_entries, stack_offset, *rhs);
                 values.push(LinearNode {
                     value: LinearNodeValue::WriteMemory {
                         location: Box::new(location),
@@ -302,8 +304,14 @@ pub fn linearize_nodes(
             }
 
             HirNodeValue::Return(expr) => {
-                let expr =
-                    expr.map(|expr| Box::new(lower_expression(declarations, stack_entries, *expr)));
+                let expr = expr.map(|expr| {
+                    Box::new(lower_expression(
+                        declarations,
+                        stack_entries,
+                        stack_offset,
+                        *expr,
+                    ))
+                });
                 values.push(LinearNode {
                     value: LinearNodeValue::Return(expr),
                     provenance: node.provenance,
@@ -313,7 +321,7 @@ pub fn linearize_nodes(
             }
             // TODO: should If be an expression in linear IR?
             HirNodeValue::If(cond, if_block, else_block) => {
-                let cond = lower_expression(declarations, stack_entries, *cond);
+                let cond = lower_expression(declarations, stack_entries, stack_offset, *cond);
                 let HirNodeValue::Sequence(if_block) = if_block.value else {
                     unreachable!()
                 };
@@ -333,7 +341,7 @@ pub fn linearize_nodes(
                 ));
             }
             HirNodeValue::While(cond, block) => {
-                let cond = lower_expression(declarations, stack_entries, *cond);
+                let cond = lower_expression(declarations, stack_entries, stack_offset, *cond);
                 let mut vec_deque = VecDeque::new();
                 vec_deque.push_back(*block);
                 let block = linearize_nodes(declarations, stack_entries, stack_offset, vec_deque);
@@ -350,7 +358,12 @@ pub fn linearize_nodes(
 
             // TODO: auto-returns?
             _ => {
-                values.push(lower_expression(declarations, stack_entries, node));
+                values.push(lower_expression(
+                    declarations,
+                    stack_entries,
+                    stack_offset,
+                    node,
+                ));
             }
         }
     }
@@ -360,7 +373,8 @@ pub fn linearize_nodes(
 
 fn lower_expression(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
-    stack_entries: &HashMap<VariableID, usize>,
+    stack_entries: &mut HashMap<VariableID, usize>,
+    stack_offset: &mut usize,
     expression: HirNode,
 ) -> LinearNode {
     let HirNode {
@@ -384,8 +398,18 @@ fn lower_expression(
             LinearNodeValue::Arithmetic(
                 op,
                 ty,
-                Box::new(lower_expression(declarations, stack_entries, *lhs)),
-                Box::new(lower_expression(declarations, stack_entries, *rhs)),
+                Box::new(lower_expression(
+                    declarations,
+                    stack_entries,
+                    stack_offset,
+                    *lhs,
+                )),
+                Box::new(lower_expression(
+                    declarations,
+                    stack_entries,
+                    stack_offset,
+                    *rhs,
+                )),
             )
         }
         HirNodeValue::Comparison(op, lhs, rhs) => {
@@ -395,18 +419,43 @@ fn lower_expression(
             LinearNodeValue::Comparison(
                 op,
                 ty,
-                Box::new(lower_expression(declarations, stack_entries, *lhs)),
-                Box::new(lower_expression(declarations, stack_entries, *rhs)),
+                Box::new(lower_expression(
+                    declarations,
+                    stack_entries,
+                    stack_offset,
+                    *lhs,
+                )),
+                Box::new(lower_expression(
+                    declarations,
+                    stack_entries,
+                    stack_offset,
+                    *rhs,
+                )),
             )
         }
         HirNodeValue::BinaryLogical(op, lhs, rhs) => LinearNodeValue::BinaryLogical(
             op,
-            Box::new(lower_expression(declarations, stack_entries, *lhs)),
-            Box::new(lower_expression(declarations, stack_entries, *rhs)),
+            Box::new(lower_expression(
+                declarations,
+                stack_entries,
+                stack_offset,
+                *lhs,
+            )),
+            Box::new(lower_expression(
+                declarations,
+                stack_entries,
+                stack_offset,
+                *rhs,
+            )),
         ),
         HirNodeValue::UnaryLogical(op, child) => LinearNodeValue::UnaryLogical(
             op,
-            Box::new(lower_expression(declarations, stack_entries, *child)),
+            Box::new(lower_expression(
+                declarations,
+                stack_entries,
+                stack_offset,
+                *child,
+            )),
         ),
         HirNodeValue::VariableReference(id) => {
             let (location, offset) = variable_location(stack_entries, id.as_var());
@@ -423,7 +472,7 @@ fn lower_expression(
             };
             let params = params
                 .into_iter()
-                .map(|param| lower_expression(declarations, stack_entries, param))
+                .map(|param| lower_expression(declarations, stack_entries, stack_offset, param))
                 .collect();
             LinearNodeValue::Call(
                 Box::new(LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))),
@@ -436,7 +485,8 @@ fn lower_expression(
                 _ => None,
             }) {
                 let (variant_idx, variant_ty) = &ty[&rhs];
-                let (location, offset) = lower_lvalue(declarations, stack_entries, *lhs);
+                let (location, offset) =
+                    lower_lvalue(declarations, stack_entries, stack_offset, *lhs);
                 LinearNodeValue::Sequence(vec![LinearNode::if_node(
                     LinearNode::ptr_comparison(
                         ComparisonOp::NotEquals,
@@ -455,7 +505,8 @@ fn lower_expression(
                     None,
                 )])
             } else {
-                let (location, offset) = access_location(declarations, stack_entries, *lhs, rhs);
+                let (location, offset) =
+                    access_location(declarations, stack_entries, stack_offset, *lhs, rhs);
                 LinearNodeValue::ReadMemory {
                     location: Box::new(location),
                     offset,
@@ -463,9 +514,70 @@ fn lower_expression(
                 }
             }
         }
+        HirNodeValue::NullableTraverse(lhs, rhs) => {
+            let temp_id = VariableID::new();
+            let alloc = stack_alloc(declarations, stack_entries, stack_offset, &lhs.ty, temp_id);
+
+            let (location, initial_offset) = variable_location(stack_entries, temp_id);
+            let PhysicalType::Nullable(ty) = expr_ty_to_physical(&lhs.ty) else {
+                unreachable!();
+            };
+            let mut ty = *ty;
+
+            let mut read_offset = initial_offset + NULL_TAG_SIZE;
+            for name in rhs {
+                let PhysicalType::Referenced(id) = ty else {
+                    unreachable!()
+                };
+                let decl = &declarations[&id];
+                let TypeLayoutValue::Structure(fields) = &decl.value else {
+                    todo!()
+                };
+                let (field_offset, field_ty) = fields
+                    .iter()
+                    .find_map(|(field_name, offset, ty)| {
+                        if field_name == &name {
+                            Some((offset, ty))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                read_offset += field_offset;
+                ty = field_ty.clone();
+            }
+
+            // TODO: union RHS
+            // TODO: dealloc / remove the temp variable
+
+            let lhs_ty = expr_ty_to_physical(&lhs.ty);
+
+            LinearNodeValue::Sequence(vec![
+                alloc,
+                LinearNode::write_memory(
+                    location.clone(),
+                    initial_offset,
+                    lhs_ty,
+                    lower_expression(declarations, stack_entries, stack_offset, *lhs),
+                ),
+                LinearNode::if_node(
+                    LinearNode::read_memory(
+                        location.clone(),
+                        initial_offset,
+                        PhysicalType::Primitive(PrimitiveType::Bool),
+                    ),
+                    vec![
+                        LinearNode::debug(LinearNode::read_memory(location, read_offset, ty)),
+                        LinearNode::new(LinearNodeValue::Bool(true)),
+                    ],
+                    Some(vec![LinearNode::new(LinearNodeValue::Bool(false))]),
+                    provenance.clone(),
+                ),
+            ])
+        }
         HirNodeValue::ArrayIndex(arr, idx) => {
             let (location, offset) =
-                array_index_location(declarations, stack_entries, *arr, *idx, &ty);
+                array_index_location(declarations, stack_entries, stack_offset, *arr, *idx, &ty);
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
@@ -481,7 +593,7 @@ fn lower_expression(
         HirNodeValue::Declaration(_) => todo!(),
         HirNodeValue::Assignment(_, _) => todo!(),
         HirNodeValue::TakeUnique(inner) | HirNodeValue::TakeShared(inner) => {
-            let (ptr, offset) = lower_lvalue(declarations, stack_entries, *inner);
+            let (ptr, offset) = lower_lvalue(declarations, stack_entries, stack_offset, *inner);
             LinearNodeValue::Arithmetic(
                 ArithmeticOp::Add,
                 PrimitiveType::PointerSize,
@@ -490,7 +602,12 @@ fn lower_expression(
             )
         }
         HirNodeValue::Dereference(inner) => LinearNodeValue::ReadMemory {
-            location: Box::new(lower_expression(declarations, stack_entries, *inner)),
+            location: Box::new(lower_expression(
+                declarations,
+                stack_entries,
+                stack_offset,
+                *inner,
+            )),
             offset: 0,
             ty: expr_ty_to_physical(&ty),
         },
@@ -509,7 +626,7 @@ fn lower_expression(
                     .iter()
                     .rev()
                     .map(|(key, _, _)| values.remove(key).unwrap())
-                    .map(|value| lower_expression(declarations, stack_entries, value))
+                    .map(|value| lower_expression(declarations, stack_entries, stack_offset, value))
                     .collect(),
             )
         }
@@ -531,7 +648,12 @@ fn lower_expression(
                     location: Box::new(LinearNode::read_temp(0)),
                     offset: size * idx,
                     ty: expr_ty_to_physical(&inner_ty),
-                    value: Box::new(lower_expression(declarations, stack_entries, value)),
+                    value: Box::new(lower_expression(
+                        declarations,
+                        stack_entries,
+                        stack_offset,
+                        value,
+                    )),
                 })
             }));
             // capacity
@@ -547,7 +669,7 @@ fn lower_expression(
                 unreachable!()
             };
             let size = expression_type_size(declarations, &inner_ty);
-            let length = lower_expression(declarations, stack_entries, *length);
+            let length = lower_expression(declarations, stack_entries, stack_offset, *length);
             let inner_ty = *inner_ty;
 
             LinearNodeValue::Sequence(vec![
@@ -588,7 +710,7 @@ fn lower_expression(
                             ),
                             0,
                             expr_ty_to_physical(&inner_ty),
-                            lower_expression(declarations, stack_entries, *value),
+                            lower_expression(declarations, stack_entries, stack_offset, *value),
                         ),
                         // idx += 1
                         LinearNode::write_temp(
@@ -608,7 +730,7 @@ fn lower_expression(
             ])
         }
         HirNodeValue::InterfaceAddress(table) => {
-            let (table, offset) = lower_lvalue(declarations, stack_entries, *table);
+            let (table, offset) = lower_lvalue(declarations, stack_entries, stack_offset, *table);
             LinearNodeValue::ReadMemory {
                 location: Box::new(table),
                 offset,
@@ -626,7 +748,8 @@ fn lower_expression(
             else {
                 unreachable!()
             };
-            let (table, mut offset) = lower_lvalue(declarations, stack_entries, *table);
+            let (table, mut offset) =
+                lower_lvalue(declarations, stack_entries, stack_offset, *table);
             offset += POINTER_SIZE;
             offset += fields
                 .iter()
@@ -642,7 +765,7 @@ fn lower_expression(
                 .unwrap();
             let params = params
                 .into_iter()
-                .map(|param| lower_expression(declarations, stack_entries, param))
+                .map(|param| lower_expression(declarations, stack_entries, stack_offset, param))
                 .collect();
 
             LinearNodeValue::Call(
@@ -671,7 +794,7 @@ fn lower_expression(
                 values.push(LinearNode::new(LinearNodeValue::FunctionID(vtable[field])));
             }
 
-            let (pointer, offset) = lower_lvalue(declarations, stack_entries, *value);
+            let (pointer, offset) = lower_lvalue(declarations, stack_entries, stack_offset, *value);
             let pointer =
                 LinearNode::ptr_arithmetic(ArithmeticOp::Add, pointer, LinearNode::size(offset));
             values.push(pointer);
@@ -679,12 +802,18 @@ fn lower_expression(
             LinearNodeValue::Sequence(values)
         }
         HirNodeValue::NumericCast { value, from, to } => LinearNodeValue::Cast {
-            value: Box::new(lower_expression(declarations, stack_entries, *value)),
+            value: Box::new(lower_expression(
+                declarations,
+                stack_entries,
+                stack_offset,
+                *value,
+            )),
             from,
             to,
         },
         HirNodeValue::DictIndex(dict, idx) => {
-            let (location, offset) = dict_index_location(declarations, stack_entries, *dict, *idx);
+            let (location, offset) =
+                dict_index_location(declarations, stack_entries, stack_offset, *dict, *idx);
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
@@ -714,7 +843,12 @@ fn lower_expression(
                     location: Box::new(LinearNode::read_temp(0)),
                     offset: entry_size * idx,
                     ty: key_ty.clone(),
-                    value: Box::new(lower_expression(declarations, stack_entries, value)),
+                    value: Box::new(lower_expression(
+                        declarations,
+                        stack_entries,
+                        stack_offset,
+                        value,
+                    )),
                 })
             }));
             instrs.extend(values.into_iter().enumerate().map(|(idx, value)| {
@@ -722,7 +856,12 @@ fn lower_expression(
                     location: Box::new(LinearNode::read_temp(0)),
                     offset: entry_size * idx + key_size,
                     ty: value_ty.clone(),
-                    value: Box::new(lower_expression(declarations, stack_entries, value)),
+                    value: Box::new(lower_expression(
+                        declarations,
+                        stack_entries,
+                        stack_offset,
+                        value,
+                    )),
                 })
             }));
             // capacity
@@ -738,20 +877,30 @@ fn lower_expression(
                 unreachable!()
             };
             LinearNodeValue::Sequence(vec![
-                lower_expression(declarations, stack_entries, *value),
+                lower_expression(declarations, stack_entries, stack_offset, *value),
                 LinearNode::new(LinearNodeValue::Size(ty[&variant].0)),
             ])
         }
         HirNodeValue::NullCoalesce(lhs, rhs) => LinearNodeValue::If(
             Box::new(LinearNode::new(LinearNodeValue::UnaryLogical(
                 UnaryLogicalOp::BooleanNot,
-                Box::new(lower_expression(declarations, stack_entries, *lhs)),
+                Box::new(lower_expression(
+                    declarations,
+                    stack_entries,
+                    stack_offset,
+                    *lhs,
+                )),
             ))),
-            vec![lower_expression(declarations, stack_entries, *rhs)],
+            vec![lower_expression(
+                declarations,
+                stack_entries,
+                stack_offset,
+                *rhs,
+            )],
             None,
         ),
         HirNodeValue::MakeNullable(value) => LinearNodeValue::Sequence(vec![
-            lower_expression(declarations, stack_entries, *value),
+            lower_expression(declarations, stack_entries, stack_offset, *value),
             LinearNode::new(LinearNodeValue::Bool(true)),
         ]),
     };
@@ -759,22 +908,44 @@ fn lower_expression(
     LinearNode { value, provenance }
 }
 
+fn stack_alloc(
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
+    stack_entries: &mut HashMap<VariableID, usize>,
+    stack_offset: &mut usize,
+    ty: &ExpressionType,
+    id: VariableID,
+) -> LinearNode {
+    let alloc_size = expression_type_size(declarations, ty);
+    *stack_offset += alloc_size;
+    stack_entries.insert(id, *stack_offset);
+    LinearNode::new(LinearNodeValue::StackAlloc(alloc_size))
+}
+
 fn lower_lvalue(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
-    stack_entries: &HashMap<VariableID, usize>,
+    stack_entries: &mut HashMap<VariableID, usize>,
+    stack_offset: &mut usize,
     lvalue: HirNode,
 ) -> (LinearNode, usize) {
     match lvalue.value {
         HirNodeValue::VariableReference(id) => variable_location(stack_entries, id.as_var()),
-        HirNodeValue::Access(lhs, rhs) => access_location(declarations, stack_entries, *lhs, rhs),
-        HirNodeValue::Dereference(inner) => {
-            (lower_expression(declarations, stack_entries, *inner), 0)
+        HirNodeValue::Access(lhs, rhs) => {
+            access_location(declarations, stack_entries, stack_offset, *lhs, rhs)
         }
-        HirNodeValue::ArrayIndex(arr, idx) => {
-            array_index_location(declarations, stack_entries, *arr, *idx, &lvalue.ty)
-        }
+        HirNodeValue::Dereference(inner) => (
+            lower_expression(declarations, stack_entries, stack_offset, *inner),
+            0,
+        ),
+        HirNodeValue::ArrayIndex(arr, idx) => array_index_location(
+            declarations,
+            stack_entries,
+            stack_offset,
+            *arr,
+            *idx,
+            &lvalue.ty,
+        ),
         HirNodeValue::DictIndex(dict, idx) => {
-            dict_index_location(declarations, stack_entries, *dict, *idx)
+            dict_index_location(declarations, stack_entries, stack_offset, *dict, *idx)
         }
 
         HirNodeValue::Parameter(_, _) => todo!(),
@@ -808,6 +979,7 @@ fn lower_lvalue(
         HirNodeValue::UnionLiteral(_, _, _) => todo!(),
         HirNodeValue::NullCoalesce(_, _) => todo!(),
         HirNodeValue::MakeNullable(_) => todo!(),
+        HirNodeValue::NullableTraverse(_, _) => todo!(),
     }
 }
 
@@ -827,15 +999,21 @@ fn variable_location(
 
 fn access_location(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
-    stack_entries: &HashMap<VariableID, usize>,
+    stack_entries: &mut HashMap<VariableID, usize>,
+    stack_offset: &mut usize,
     lhs: HirNode,
     rhs: String,
 ) -> (LinearNode, usize) {
-    let ExpressionType::InstanceOf(ty_id) = lhs.ty else {
-        unreachable!()
+    let ty_id = match &lhs.ty {
+        ExpressionType::InstanceOf(ty) => ty,
+        ExpressionType::Nullable(ty) => match ty as &ExpressionType {
+            ExpressionType::InstanceOf(ty) => ty,
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
     };
-    let DeclaredTypeLayout { value, .. } = &declarations[&ty_id];
-    let (lhs, mut offset) = lower_lvalue(declarations, stack_entries, lhs);
+    let DeclaredTypeLayout { value, .. } = &declarations[ty_id];
+    let (lhs, mut offset) = lower_lvalue(declarations, stack_entries, stack_offset, lhs);
     offset += match value {
         TypeLayoutValue::Structure(fields) => {
             *(fields
@@ -852,14 +1030,15 @@ fn access_location(
 
 fn array_index_location(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
-    stack_entries: &HashMap<VariableID, usize>,
+    stack_entries: &mut HashMap<VariableID, usize>,
+    stack_offset: &mut usize,
     arr: HirNode,
     idx: HirNode,
     ty: &ExpressionType,
 ) -> (LinearNode, usize) {
     let size = expression_type_size(declarations, ty);
-    let idx = lower_expression(declarations, stack_entries, idx);
-    let arr = lower_expression(declarations, stack_entries, arr);
+    let idx = lower_expression(declarations, stack_entries, stack_offset, idx);
+    let arr = lower_expression(declarations, stack_entries, stack_offset, arr);
     (
         LinearNode::new(LinearNodeValue::Sequence(vec![
             LinearNode::write_temp(3, idx),
@@ -900,7 +1079,8 @@ fn array_index_location(
 
 fn dict_index_location(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
-    stack_entries: &HashMap<VariableID, usize>,
+    stack_entries: &mut HashMap<VariableID, usize>,
+    stack_offset: &mut usize,
     dict: HirNode,
     idx: HirNode,
 ) -> (LinearNode, usize) {
@@ -916,7 +1096,7 @@ fn dict_index_location(
     let value_size = expression_type_size(declarations, value_ty);
     let entry_size = key_size + value_size;
 
-    let dict = lower_expression(declarations, stack_entries, dict);
+    let dict = lower_expression(declarations, stack_entries, stack_offset, dict);
 
     (
         LinearNode::new(LinearNodeValue::Sequence(vec![
@@ -940,7 +1120,12 @@ fn dict_index_location(
                             PhysicalType::Primitive(idx_ty),
                         )),
                         // TODO: don't repeatedly call this
-                        Box::new(lower_expression(declarations, stack_entries, idx)),
+                        Box::new(lower_expression(
+                            declarations,
+                            stack_entries,
+                            stack_offset,
+                            idx,
+                        )),
                     )),
                     vec![
                         LinearNode::read_temp(1),

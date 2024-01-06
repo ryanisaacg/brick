@@ -229,6 +229,7 @@ pub async fn evaluate_block(
         }
         LinearNodeValue::If(cond, if_branch, else_branch) => {
             evaluate_block(fns, params, vm, cond).await?;
+            dbg!(&vm.op_stack);
             let Some(Value::Bool(cond)) = vm.op_stack.pop() else {
                 unreachable!()
             };
@@ -651,7 +652,7 @@ fn read_primitive(
         PrimitiveType::Float64 => {
             Value::Float64(*bytemuck::from_bytes(&memory[location..(location + 8)]))
         }
-        PrimitiveType::Bool => todo!(), //Value::Bool(*bytemuck::from_bytes(memory)),
+        PrimitiveType::Bool => Value::Bool(memory[location] != 0),
         PrimitiveType::PointerSize => {
             let base_ptr = &memory[location..(location + 8)];
             let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());

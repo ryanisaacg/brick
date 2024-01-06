@@ -152,6 +152,7 @@ impl HirNode {
                 }
             }
             HirNodeValue::Access(child, _)
+            | HirNodeValue::NullableTraverse(child, _)
             | HirNodeValue::UnaryLogical(_, child)
             | HirNodeValue::UnionLiteral(_, _, child)
             | HirNodeValue::InterfaceAddress(child)
@@ -240,6 +241,7 @@ impl HirNode {
                 }
             }
             HirNodeValue::Access(child, _)
+            | HirNodeValue::NullableTraverse(child, _)
             | HirNodeValue::UnionLiteral(_, _, child)
             | HirNodeValue::InterfaceAddress(child)
             | HirNodeValue::TakeUnique(child)
@@ -305,6 +307,7 @@ impl HirNode {
             | HirNodeValue::Parameter(_, _)
             | HirNodeValue::VariableReference(_)
             | HirNodeValue::Access(_, _)
+            | HirNodeValue::NullableTraverse(_, _)
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
             | HirNodeValue::TakeUnique(_)
@@ -401,6 +404,7 @@ impl HirNode {
             | HirNodeValue::Parameter(_, _)
             | HirNodeValue::VariableReference(_)
             | HirNodeValue::Access(_, _)
+            | HirNodeValue::NullableTraverse(_, _)
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
             | HirNodeValue::TakeUnique(_)
@@ -508,6 +512,7 @@ pub enum HirNodeValue {
     Call(Box<HirNode>, Vec<HirNode>),
     // TODO: break this up into Union Access and Struct Access?
     Access(Box<HirNode>, String),
+    NullableTraverse(Box<HirNode>, Vec<String>),
     Assignment(Box<HirNode>, Box<HirNode>),
     ArrayIndex(Box<HirNode>, Box<HirNode>),
     DictIndex(Box<HirNode>, Box<HirNode>),

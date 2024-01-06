@@ -53,3 +53,65 @@ y + z
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(31)]);
 }
+
+#[tokio::test]
+async fn null_traverse_is_null() {
+    let result = eval(
+        r#"
+struct Square {
+    side: i32
+}
+
+
+let square: Square? = null;
+square?.side ?? 5
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(5)]);
+}
+
+#[tokio::test]
+async fn null_traverse_is_not_null() {
+    let result = eval(
+        r#"
+struct Square {
+    side: i32
+}
+
+
+let square: Square? = Square { side: 13 };
+square?.side ?? 5
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(13)]);
+}
+
+#[tokio::test]
+async fn null_traverse_union() {
+    let result = eval(
+        r#"
+union Shape {
+    bouba(Circle),
+    keke(Square)
+}
+
+struct Square {
+    side: i32
+}
+
+struct Circle {
+    radius: i32,
+}
+
+let shape = Shape { keke: Square { side: 10 } };
+(shape.bouba?.radius ?? 0) + (shape.keke?.side ?? 0)
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(10)]);
+}

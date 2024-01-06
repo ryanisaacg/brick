@@ -124,7 +124,7 @@ boolean operators:
     - applicable to nullable values
 
 null:
-- ?. operator
+- ?. operator on union lvalues
 - ! operator, which throws if the value is an error (requires errors)
 - basic null flow analysis - maybe a special operation to de-null stuff
 

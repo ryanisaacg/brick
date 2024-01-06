@@ -282,6 +282,7 @@ pub enum BinOp {
     Index,
 
     NullCoalesce,
+    NullChaining,
 
     Add,
     Subtract,
@@ -1247,6 +1248,7 @@ fn expression_pratt<'a>(
                 TokenValue::BooleanAnd => BinOp::BooleanAnd,
                 TokenValue::BooleanOr => BinOp::BooleanOr,
                 TokenValue::NullCoalesce => BinOp::NullCoalesce,
+                TokenValue::NullChaining => BinOp::NullChaining,
                 token => unreachable!("binary operator {:?}", token),
             };
 
@@ -1279,7 +1281,8 @@ const FACTOR: u8 = SUM + 2;
 // misc
 const REFERENCE: u8 = FACTOR + 1;
 const CALL: u8 = REFERENCE + 2;
-const DOT: u8 = CALL + 1;
+const NULL_CHAINING: u8 = CALL + 1;
+const DOT: u8 = NULL_CHAINING + 1;
 
 fn prefix_binding_power(op: &TokenValue) -> Option<((), u8)> {
     let res = match op {
@@ -1314,6 +1317,7 @@ fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
         TokenValue::Plus | TokenValue::Minus => (SUM, SUM - 1),
         TokenValue::Asterisk | TokenValue::ForwardSlash => (FACTOR, FACTOR - 1),
         TokenValue::Period => (DOT - 1, DOT),
+        TokenValue::NullChaining => (NULL_CHAINING - 1, NULL_CHAINING),
         TokenValue::BooleanAnd => (BOOLEAN_AND, BOOLEAN_AND - 1),
         TokenValue::BooleanOr => (BOOLEAN_OR, BOOLEAN_OR - 1),
         TokenValue::NullCoalesce => (NULL_COALESCE, NULL_COALESCE - 1),

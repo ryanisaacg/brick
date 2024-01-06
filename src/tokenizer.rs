@@ -49,6 +49,7 @@ pub enum TokenValue {
 
     // Nullability
     NullCoalesce,
+    NullChaining,
 
     // Markers
     Assign,
@@ -122,6 +123,7 @@ impl fmt::Display for TokenValue {
             BooleanOr => write!(f, "or"),
             QuestionMark => write!(f, "?"),
             NullCoalesce => write!(f, "??"),
+            NullChaining => write!(f, "?."),
             Exclamation => write!(f, "!"),
             Let => write!(f, "keyword let"),
             If => write!(f, "keyword if"),
@@ -296,14 +298,17 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         TokenValue::Exclamation
                     }
                 }
-                '?' => {
-                    if let Some('?') = self.source.peek() {
+                '?' => match self.source.peek() {
+                    Some('?') => {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::NullCoalesce
-                    } else {
-                        TokenValue::QuestionMark
                     }
-                }
+                    Some('.') => {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::NullChaining
+                    }
+                    _ => TokenValue::QuestionMark,
+                },
                 '=' => {
                     if let Some('=') = self.source.peek() {
                         end = Some(self.next_char().unwrap().1);

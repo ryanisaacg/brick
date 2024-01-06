@@ -207,7 +207,9 @@ fn find_moves_in_node(
             }
             find_moves_in_node(liveness, errors, declarations, idx);
         }
-        HirNodeValue::Access(val, _) | HirNodeValue::Dereference(val) => {
+        HirNodeValue::NullableTraverse(val, _)
+        | HirNodeValue::Access(val, _)
+        | HirNodeValue::Dereference(val) => {
             if is_affine(declarations, &expr.ty) {
                 find_moves_in_node(liveness, errors, declarations, val);
             } else {
