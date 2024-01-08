@@ -10,8 +10,8 @@ use std::{
 
 use borrowck::BorrowError;
 use hir::HirModule;
-pub use linear_interpreter::Value;
-use linear_interpreter::{evaluate_block, ExternBinding, VM};
+pub use interpreter::Value;
+use interpreter::{evaluate_block, ExternBinding, VM};
 use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
@@ -19,10 +19,11 @@ use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
 mod borrowck;
 mod hir;
 mod id;
-mod linear_interpreter;
+mod interpreter;
 mod linear_ir;
 mod parser;
 mod provenance;
+mod runtime;
 mod tokenizer;
 mod typecheck;
 
@@ -89,7 +90,7 @@ pub async fn interpret_code(
         }
         for function in module.functions {
             let function = linearize_function(&ty_declarations, function);
-            functions.insert(function.id, linear_interpreter::Function::Ir(function));
+            functions.insert(function.id, interpreter::Function::Ir(function));
         }
     }
     let module = StaticDeclaration::Module(ModuleType {
@@ -101,7 +102,7 @@ pub async fn interpret_code(
             for (name, decl) in exports.iter() {
                 if let Some(implementation) = bindings.remove(name) {
                     let id = decl.unwrap_fn_id();
-                    functions.insert(id, linear_interpreter::Function::Extern(implementation));
+                    functions.insert(id, interpreter::Function::Extern(implementation));
                 }
             }
         }
