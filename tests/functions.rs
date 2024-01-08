@@ -7,6 +7,8 @@ use brick::{bind_fn, eval, eval_with_bindings, interpret_code, Value};
 async fn add() {
     let result = eval(
         r#"
+// test test test
+
 fn add(a: i32, b: i32): i32 {
     a + b
 }

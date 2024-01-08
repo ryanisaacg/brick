@@ -15,15 +15,14 @@ use brick::{eval_with_bindings, Value};
 // TODO: for loops / ranges
 // TODO: empty dict operator
 // TODO: don't close quotes with escaped quotes
-// TODO: comments
 
 #[tokio::test]
 #[should_panic] // TODO
 async fn json_parse() {
-    // Null -> 0, Bool -> 1, Number -> 2, String -> 3, Array -> 4, Object -> 5
     let result = eval_with_bindings(
         r#"
 extern fn ext_parse_json(val: string);
+// Null -> 0, Bool -> 1, Number -> 2, String -> 3, Array -> 4, Object -> 5
 extern fn value_tag(): i32;
 extern fn value_as_bool(): bool;
 extern fn value_as_number(): f64;

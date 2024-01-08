@@ -1,5 +1,4 @@
 grammar:
-- comments
 - there's an ambiguity between dereference / multiplication in if { body } * a += 1;
 
 error reporting:

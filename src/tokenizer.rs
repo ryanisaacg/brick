@@ -84,6 +84,9 @@ pub enum TokenValue {
     Null,
     Dict,
     Interface,
+
+    // Comments
+    LineComment(String),
 }
 
 impl fmt::Display for TokenValue {
@@ -141,6 +144,7 @@ impl fmt::Display for TokenValue {
             Null => write!(f, "keyword null"),
             Dict => write!(f, "keyword dict"),
             Interface => write!(f, "keyword interface"),
+            LineComment(comment) => write!(f, "// {}", comment),
         }
     }
 }
@@ -357,14 +361,36 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         TokenValue::Asterisk
                     }
                 }
-                '/' => {
-                    if let Some('=') = self.source.peek() {
+                '/' => match self.source.peek() {
+                    Some('=') => {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::ForwardSlashEquals
-                    } else {
-                        TokenValue::ForwardSlash
                     }
-                }
+                    Some('/') => {
+                        let mut comment = String::new();
+                        loop {
+                            match self.source.next() {
+                                Some('\n') | None => {
+                                    end = Some(SourceMarker::new(
+                                        self.source_name,
+                                        self.source_text,
+                                        self.line,
+                                        self.offset,
+                                    ));
+                                    self.line += 1;
+                                    self.offset = 0;
+                                    break;
+                                }
+                                Some(ch) => {
+                                    comment.push(ch);
+                                    self.offset += 1;
+                                }
+                            }
+                        }
+                        TokenValue::LineComment(comment)
+                    }
+                    _ => TokenValue::ForwardSlash,
+                },
                 ',' => TokenValue::Comma,
                 ';' => TokenValue::Semicolon,
                 ':' => TokenValue::Colon,

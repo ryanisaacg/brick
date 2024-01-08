@@ -1642,17 +1642,6 @@ fn try_decimal<'a>(
     }
 }
 
-fn token(
-    source: &mut TokenIter,
-    cursor: SourceMarker,
-    reason: &'static str,
-) -> Result<Token, ParseError> {
-    let lex = source
-        .next()
-        .ok_or(ParseError::UnexpectedEndOfInput(cursor, reason))??;
-    Ok(lex)
-}
-
 fn word(
     source: &mut TokenIter,
     cursor: SourceMarker,
@@ -1669,25 +1658,6 @@ fn word(
 
 fn already_peeked_token(source: &mut TokenIter) -> Result<Token, ParseError> {
     Ok(source.next().expect("already peeked that token exists")?)
-}
-
-fn peek_token<'a>(
-    source: &'a mut TokenIter,
-    cursor: SourceMarker,
-    reason: &'static str,
-) -> Result<&'a Token, ParseError> {
-    Ok(source
-        .peek()
-        .ok_or(ParseError::UnexpectedEndOfInput(cursor, reason))?
-        .as_ref()
-        .map_err(|e| e.clone())?)
-}
-
-fn peek_token_optional<'a>(source: &'a mut TokenIter) -> Result<Option<&'a Token>, ParseError> {
-    Ok(source
-        .peek()
-        .map(|result| result.as_ref().map_err(|e| e.clone()))
-        .transpose()?)
 }
 
 fn assert_next_lexeme_eq(
@@ -1753,4 +1723,47 @@ fn peek_for_closed(
     }
 
     Ok(closed)
+}
+
+fn token(
+    source: &mut TokenIter,
+    cursor: SourceMarker,
+    reason: &'static str,
+) -> Result<Token, ParseError> {
+    skim_off_comments(source);
+    let lex = source
+        .next()
+        .ok_or(ParseError::UnexpectedEndOfInput(cursor, reason))??;
+    Ok(lex)
+}
+
+fn peek_token<'a>(
+    source: &'a mut TokenIter,
+    cursor: SourceMarker,
+    reason: &'static str,
+) -> Result<&'a Token, ParseError> {
+    skim_off_comments(source);
+    Ok(source
+        .peek()
+        .ok_or(ParseError::UnexpectedEndOfInput(cursor, reason))?
+        .as_ref()
+        .map_err(|e| e.clone())?)
+}
+
+fn peek_token_optional<'a>(source: &'a mut TokenIter) -> Result<Option<&'a Token>, ParseError> {
+    skim_off_comments(source);
+    Ok(source
+        .peek()
+        .map(|result| result.as_ref().map_err(|e| e.clone()))
+        .transpose()?)
+}
+
+fn skim_off_comments(source: &mut TokenIter) {
+    while let Some(Ok(Token {
+        value: TokenValue::LineComment(_),
+        ..
+    })) = source.peek()
+    {
+        dbg!(source.next().unwrap().unwrap());
+    }
 }
