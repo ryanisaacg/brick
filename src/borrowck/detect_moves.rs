@@ -41,16 +41,29 @@ pub fn detect_moves(
 
         while let Some((_edge, child)) = outgoing_neighbors.next(&cfg.cfg) {
             let mut changes_for_child = Vec::new();
-            let child_liveness = cfg.cfg.node_weight(child).unwrap().liveness();
+            let child_weight = cfg.cfg.node_weight(child).unwrap();
+            let child_liveness = child_weight.liveness();
 
             for (var_id, parent_liveness) in parent_liveness.iter() {
                 if let Some(child_liveness) = child_liveness.get(var_id) {
                     match (parent_liveness, child_liveness) {
                         (
                             Liveness::Moved(_) | Liveness::MovedInParents(_),
-                            Liveness::Referenced(_) | Liveness::Moved(_),
+                            Liveness::Referenced(node_id) | Liveness::Moved(node_id),
                         ) => {
-                            errors.push(BorrowError::UseAfterMove);
+                            let CfgNode::Block { expressions, .. } = child_weight else {
+                                unreachable!()
+                            };
+                            let provenance = expressions.iter().find_map(|expr| {
+                                let mut provenenace = None;
+                                expr.children(|child| {
+                                    if child.id == *node_id {
+                                        provenenace = expr.provenance.clone();
+                                    }
+                                });
+                                provenenace
+                            });
+                            errors.push(BorrowError::UseAfterMove(provenance));
                         }
                         (
                             Liveness::Moved(_) | Liveness::MovedInParents(_),
@@ -138,7 +151,7 @@ fn find_moves_in_node(
                 let id = id.as_var();
                 match liveness.get(&id) {
                     Some(Liveness::Moved(_) | Liveness::MovedInParents(_)) => {
-                        errors.push(BorrowError::UseAfterMove);
+                        errors.push(BorrowError::UseAfterMove(expr.provenance.clone()));
                     }
                     Some(Liveness::Referenced(_) | Liveness::ParentReferenced) | None => {
                         liveness.insert(id, Liveness::Moved(expr.id));
@@ -167,6 +180,7 @@ fn find_moves_in_node(
         }
         HirNodeValue::VtableCall(_, _, params)
         | HirNodeValue::Call(_, params)
+        | HirNodeValue::RuntimeCall(_, params)
         | HirNodeValue::ArrayLiteral(params) => {
             for param in params.iter() {
                 find_moves_in_node(liveness, errors, declarations, param);
@@ -247,7 +261,7 @@ fn find_references_in_node(
             if is_affine(declarations, &expr.ty) {
                 match liveness.get(&id) {
                     Some(Liveness::Moved(_) | Liveness::MovedInParents(_)) => {
-                        errors.push(BorrowError::UseAfterMove);
+                        errors.push(BorrowError::UseAfterMove(expr.provenance.clone()));
                     }
                     Some(Liveness::Referenced(_) | Liveness::ParentReferenced) | None => {
                         liveness.insert(id, Liveness::Referenced(expr.id));

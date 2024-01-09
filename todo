@@ -10,20 +10,35 @@ linear IR:
 - (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
 - (maybe) AST rewrite the HIR to disambiguate between variable references and function references
 
+misc:
+- auto-dereference dot operator
+
+generic programming:
+- functions can take type parameters and typecheck properly
+- types can be parameterized
+- structs and unions can have associated functions
+- there are interfaces which can require specific associated functions
+- structs and unions can be passed in place of an interface
+- interfaces can constrain generic parameters
+
+runtime:
+- runtime functions on collections can be either shared or unique pointers
+- possible exploration: runtime functions written in Rust or Zig?
+
 collections:
 - arrays:
     - array push to end
     - allow empty arrays to typecheck
-    - length() method on arrays
 - dicts:
     - insert new entries into dictionaries
     - use a hash table
-- slices
-- boxes (maybe not - maybe just RC?)
+    - allow empty dicts to type check
 - rc's:
     - basic RCs
     - can take RC'ed references to collections? maybe even RC'ed subreferences to user-defined collections?
 - cells
+- slices
+- boxes (maybe not - maybe just RC?)
 
 borrow checker and lifetimes:
 - check borrows for function calls
@@ -137,14 +152,6 @@ errors:
 coroutines:
 - decide on some coroutine facility
 - coroutines hold parameter borrows for their lifetime
-
-generic programming:
-- functions can take type parameters and typecheck properly
-- types can be parameterized
-- structs and unions can have associated functions
-- there are interfaces which can require specific associated functions
-- structs and unions can be passed in place of an interface
-- interfaces can constrain generic parameters
 
 extern:
 - opaque extern pointers

@@ -9,6 +9,7 @@ use crate::{
         InterfaceDeclarationValue, StructDeclarationValue, UnaryOp,
     },
     provenance::SourceRange,
+    runtime::{add_runtime_functions, array_runtime_functions},
 };
 
 use self::resolve::resolve_type_expr;
@@ -289,6 +290,7 @@ pub fn typecheck<'a>(
     let mut name_to_context_entry = HashMap::new();
     let mut name_to_type_id = HashMap::new();
     let mut id_to_decl = HashMap::new();
+    add_runtime_functions(&mut id_to_decl);
 
     for (name, value) in declarations {
         match value {
@@ -523,15 +525,25 @@ fn typecheck_expression<'a>(
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;
-            let ExpressionType::InstanceOf(id) = fully_dereference(left) else {
-                panic!("TODO: left side of dot operator");
-            };
             let AstNodeValue::Name { value: name, .. } = &right.value else {
                 panic!("TODO: right side of dot operator");
             };
-            // TODO: fallible
-            let ty = context.decl(id).unwrap().field_access(name);
-            ty
+            match fully_dereference(left) {
+                ExpressionType::InstanceOf(id) => {
+                    // TODO: fallible
+                    let ty = context.decl(id).unwrap().field_access(name);
+                    ty
+                }
+                ExpressionType::Collection(CollectionType::Array(_item_ty)) => {
+                    let runtime = array_runtime_functions();
+                    if let Some(ty) = runtime.get(name) {
+                        ExpressionType::ReferenceTo(ty.decl.id())
+                    } else {
+                        todo!("array methods")
+                    }
+                }
+                _ => todo!("lhs hand of dot operator"),
+            }
         }
         AstNodeValue::BinExpr(BinOp::NullChaining, left, right) => {
             let left = typecheck_expression(left, outer_scopes, current_scope, context)?;

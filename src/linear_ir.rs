@@ -7,6 +7,7 @@ use crate::{
     },
     id::{FunctionID, TypeID, VariableID},
     provenance::SourceRange,
+    runtime::RuntimeFunction,
     typecheck::{CollectionType, ExpressionType, PrimitiveType, StaticDeclaration},
 };
 
@@ -894,6 +895,17 @@ fn lower_expression(
             lower_expression(declarations, stack_entries, stack_offset, *value),
             LinearNode::new(LinearNodeValue::Bool(true)),
         ]),
+        HirNodeValue::RuntimeCall(RuntimeFunction::ArrayLength, mut args) => {
+            let HirNodeValue::TakeShared(arr) = args.remove(0).value else {
+                unreachable!()
+            };
+            let (location, offset) = lower_lvalue(declarations, stack_entries, stack_offset, *arr);
+            LinearNodeValue::ReadMemory {
+                location: Box::new(location),
+                offset: offset + POINTER_SIZE,
+                ty: PhysicalType::Pointer,
+            }
+        }
     };
 
     LinearNode { value, provenance }
@@ -974,6 +986,7 @@ fn lower_lvalue(
         HirNodeValue::NullCoalesce(_, _) => todo!(),
         HirNodeValue::MakeNullable(_) => todo!(),
         HirNodeValue::NullableTraverse(_, _) => todo!(),
+        HirNodeValue::RuntimeCall(_, _) => todo!(),
     }
 }
 

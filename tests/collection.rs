@@ -21,7 +21,7 @@ async fn arrays() {
 let array = [1, 2, 3, 4];
 let index = 0;
 let total = 0;
-while index < 4 {
+while index < array.len() {
     total += array[index];
     index += 1;
 }
@@ -39,7 +39,7 @@ async fn array_assignments() {
         r#"
 let array = [0, 0, 0, 0];
 let index = 0;
-while index < 4 {
+while index < array.len() {
     array[index] = index;
     index += 1;
 }
@@ -58,7 +58,7 @@ async fn array_assignments_length() {
 let length = 30;
 let array = [0; length];
 let index = 0;
-while index < length {
+while index < array.len() {
     array[index] = index;
     index += 1;
 }

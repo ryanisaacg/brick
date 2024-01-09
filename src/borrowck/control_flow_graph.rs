@@ -214,6 +214,7 @@ fn create_graph_for_node<'a>(
         | Dereference(_)
         | Call(_, _)
         | VtableCall(_, _, _)
+        | RuntimeCall(_, _)
         | TakeUnique(_)
         | TakeShared(_)
         | StructLiteral { .. }

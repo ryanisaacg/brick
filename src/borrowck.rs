@@ -5,6 +5,7 @@ use thiserror::Error;
 use crate::{
     hir::{HirModule, HirNode},
     id::TypeID,
+    provenance::SourceRange,
     typecheck::StaticDeclaration,
 };
 
@@ -18,8 +19,8 @@ use self::control_flow_graph::build_control_flow_graph;
 #[derive(Debug, Error)]
 pub enum BorrowError {
     // TODO: where
-    #[error("use after move")]
-    UseAfterMove,
+    #[error("use after move: {0:?}")]
+    UseAfterMove(Option<SourceRange>),
     #[error("use while borrowed")]
     UseWhileBorrowed,
     #[error("already borrowed")]
