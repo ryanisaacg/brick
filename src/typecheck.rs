@@ -595,7 +595,7 @@ fn typecheck_expression<'a>(
 
                     *value_ty.clone()
                 }
-                _ => todo!("can't index that"),
+                ty => todo!("can't index {:?}", ty),
             }
         }
         AstNodeValue::BinExpr(
@@ -1130,7 +1130,7 @@ pub fn is_assignable_to(
             todo!("can you ever end up here?")
         }
         (Unreachable, Unreachable) => true,
-        (Unreachable, _) => todo!("I don't think you can ever have an unreachable lvalue?"),
+        (Unreachable, _) => false,
         (_, Unreachable) => true,
         // Kinda a special case, but a function that returns void should accept a void block
         (Void, Void) => true,
@@ -1228,12 +1228,19 @@ pub fn is_assignable_to(
         }
 
         // TODO: could these ever be valid?
-        (InstanceOf(_), Primitive(_)) | (InstanceOf(_), Collection(_)) => false,
+        (InstanceOf(_), Primitive(_))
+        | (InstanceOf(_), Collection(_))
+        | (Collection(_), Primitive(_))
+        | (Collection(_), InstanceOf(_)) => false,
 
-        // TODO: arrays
-        (Collection(_), Primitive(_))
-        | (Collection(_), InstanceOf(_))
-        | (Collection(_), Collection(_)) => todo!(),
+        (Collection(CollectionType::Array(left)), Collection(CollectionType::Array(right))) => {
+            left == right
+        }
+        (
+            Collection(CollectionType::Dict(left_key, left_value)),
+            Collection(CollectionType::Dict(right_key, right_value)),
+        ) => left_key == right_key && left_value == right_value,
+        (Collection(_), Collection(_)) => false,
 
         // TODO: type references can't ever be in assignments right
         (ReferenceTo(_), _) | (_, ReferenceTo(_)) => todo!("{:?} = {:?}", left, right),

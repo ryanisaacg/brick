@@ -3,21 +3,20 @@ use std::collections::HashMap;
 use brick::{eval_with_bindings, Value};
 
 // Requirements
+// TODO: nullable index operator
 // TODO: string support
 // TODO: push to dictionaries
 // TODO: string keys for dictionaries
-// TODO: collection assignments
 // TODO: null checks OR ?. for unions
 
 // Ergonomics
 // TODO: Zero-variant unions
-// TODO: push to arrays
 // TODO: for loops / ranges
-// TODO: empty dict operator
+// TODO: empty array, dict operator
 // TODO: don't close quotes with escaped quotes
 
 #[tokio::test]
-#[should_panic] // TODO
+#[should_panic]
 async fn json_parse() {
     let result = eval_with_bindings(
         r#"
@@ -35,7 +34,7 @@ union JsonValue {
     Bool(bool),
     Number(f64),
     String(string),
-    Array(array[JsonValue]),
+    Array(list[JsonValue]),
     Object(dict[string, JsonValue]),
 }
 
@@ -56,7 +55,7 @@ fn parse_json_node(): JsonValue {
         return JsonValue { String: value_as_string() };
     } else if tag == 4 {
         let length = value_as_array_items();
-        let items = [JsonValue { Null: false }; length];
+        let items = list[JsonValue { Null: false }; length];
         let idx = 0; 
         while idx < length {
             items[idx] = parse_json_node();
@@ -65,7 +64,7 @@ fn parse_json_node(): JsonValue {
         return JsonValue { Array: items };
     } else if tag == 5 {
         let entries = value_as_object_entries();
-        let obj = dict[ dummy: JsonValue { Null: false } ];
+        let obj = dict{ dummy: JsonValue { Null: false } };
         let idx = 0;
         while idx < entries {
             let key = value_as_string();
@@ -77,7 +76,7 @@ fn parse_json_node(): JsonValue {
 }
 
 let json = parse_json("{\'hello\': 1024 }");
-json?.Object["hello"]?.Number
+json.Object["hello"]?.Number
 "#,
         HashMap::new(),
     )

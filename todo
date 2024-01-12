@@ -38,6 +38,7 @@ collections:
 - cells
 - slices
 - boxes (maybe not - maybe just RC?)
+- automatically convert types when assigning collections?
 
 borrow checker and lifetimes:
 - check borrows for function calls
