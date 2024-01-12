@@ -366,7 +366,7 @@ fn statement<'a>(
                     TokenValue::Let => {
                         let statement = variable_declaration(source, context, cursor)?;
                         assert_next_lexeme_eq(
-                            source.next(),
+                            source,
                             TokenValue::Semicolon,
                             statement.provenance.end(),
                             "expected ; after 'let' statement",
@@ -492,7 +492,7 @@ fn interface_or_struct_body<'a>(
     is_interface: bool,
 ) -> Result<(SourceMarker, Vec<NameAndType<'a>>, Vec<AstNode<'a>>), ParseError> {
     let mut cursor = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::OpenBracket,
         cursor,
         "expected open bracket to start fields",
@@ -545,7 +545,7 @@ fn interface_or_struct_body<'a>(
                 ));
             } else {
                 let token = assert_next_lexeme_eq(
-                    source.next(),
+                    source,
                     TokenValue::OpenBracket,
                     cursor,
                     "expected open bracket to start function body",
@@ -607,7 +607,7 @@ fn union_declaration<'a>(
 ) -> Result<AstNode<'a>, ParseError> {
     let (name, mut provenance) = word(source, cursor, "expected name after 'union'")?;
     let mut cursor = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::OpenBracket,
         provenance.end(),
         "expected open bracket to start variants",
@@ -621,14 +621,14 @@ fn union_declaration<'a>(
     while !closed {
         let (name, name_range) = word(source, cursor, "expected variant name")?;
         let paren = assert_next_lexeme_eq(
-            source.next(),
+            source,
             TokenValue::OpenParen,
             name_range.end(),
             "expected ( after variant name",
         )?;
         let ty = type_expression(source, context, paren.range.end())?;
         let paren = assert_next_lexeme_eq(
-            source.next(),
+            source,
             TokenValue::CloseParen,
             ty.provenance.end(),
             "expected ) after variant type",
@@ -662,7 +662,7 @@ fn extern_function_declaration<'a>(
     start: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let mut provenance = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::Function,
         start,
         "expected 'fn' after 'extern'",
@@ -727,7 +727,7 @@ fn function_declaration<'a>(
     } = function_header(source, context, start)?;
     let mut provenance = SourceRange::new(start, end);
     let next_token = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::OpenBracket,
         start,
         "expected { after function declaration",
@@ -763,7 +763,7 @@ fn function_header<'a>(
     let (name, provenance) = word(source, cursor, "expected name after 'fn'")?;
 
     let next_token = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::OpenParen,
         provenance.end(),
         "expected open parenthesis to start parameters",
@@ -793,7 +793,7 @@ fn function_header<'a>(
         }
     }
     let next_token = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::CloseParen,
         cursor,
         "expected closing parenthesis to end parameters",
@@ -848,7 +848,7 @@ fn variable_declaration<'a>(
         "expected word after 'let' in declaration",
     )?;
     let cursor = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::Assign,
         provenance.end(),
         "expected = after let binding target",
@@ -914,7 +914,7 @@ fn type_expression<'a>(
         }
         TokenValue::Dict => {
             let token = assert_next_lexeme_eq(
-                source.next(),
+                source,
                 TokenValue::OpenSquare,
                 next.range.end(),
                 "expected [ after dict type",
@@ -924,7 +924,7 @@ fn type_expression<'a>(
             let key = add_node(context, key);
 
             let token = assert_next_lexeme_eq(
-                source.next(),
+                source,
                 TokenValue::Comma,
                 end,
                 "expected , after dict key type",
@@ -935,7 +935,7 @@ fn type_expression<'a>(
             let value = add_node(context, value);
 
             let token = assert_next_lexeme_eq(
-                source.next(),
+                source,
                 TokenValue::CloseSquare,
                 end,
                 "expected ] after dict type",
@@ -948,7 +948,7 @@ fn type_expression<'a>(
         }
         TokenValue::List => {
             let token = assert_next_lexeme_eq(
-                source.next(),
+                source,
                 TokenValue::OpenSquare,
                 next.range.end(),
                 "expected [ after array type",
@@ -959,7 +959,7 @@ fn type_expression<'a>(
             let value = add_node(context, value);
 
             let token = assert_next_lexeme_eq(
-                source.next(),
+                source,
                 TokenValue::CloseSquare,
                 end,
                 "expected ] after array type",
@@ -1026,7 +1026,7 @@ fn expression_pratt<'a>(
         TokenValue::OpenParen => {
             let left = expression_pratt(source, context, cursor, 0, can_be_struct)?;
             assert_next_lexeme_eq(
-                source.next(),
+                source,
                 TokenValue::CloseParen,
                 left.provenance.end(),
                 "expected ) to match (",
@@ -1122,7 +1122,7 @@ fn expression_pratt<'a>(
                 TokenValue::OpenSquare => {
                     let index = expression(source, context, range.end(), can_be_struct)?;
                     let Token { range, .. } = assert_next_lexeme_eq(
-                        source.next(),
+                        source,
                         TokenValue::CloseSquare,
                         index.provenance.end(),
                         "expected ] to follow array index",
@@ -1165,7 +1165,7 @@ fn expression_pratt<'a>(
                             }
                         } else {
                             let token = assert_next_lexeme_eq(
-                                source.next(),
+                                source,
                                 TokenValue::Colon,
                                 end,
                                 "expected colon after field name",
@@ -1185,7 +1185,7 @@ fn expression_pratt<'a>(
                                 source.next();
                             } else {
                                 assert_next_lexeme_eq(
-                                    source.next(),
+                                    source,
                                     TokenValue::CloseBracket,
                                     end,
                                     "expected close parenthesis or comma after argument",
@@ -1331,7 +1331,7 @@ fn array_literal<'a>(
     can_be_struct: bool,
 ) -> Result<AstNode<'a>, ParseError> {
     let token = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::OpenSquare,
         start,
         "expected [ to start list literal",
@@ -1382,7 +1382,7 @@ fn array_literal<'a>(
         TokenValue::Semicolon => {
             let length = expression(source, context, separator.range.end(), true)?;
             let close = assert_next_lexeme_eq(
-                source.next(),
+                source,
                 TokenValue::CloseSquare,
                 length.provenance.end(),
                 "expected ] after list length in list literal",
@@ -1411,7 +1411,7 @@ fn dict_literal<'a>(
     start: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let token = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::OpenBracket,
         start,
         "expected { to start dict literal",
@@ -1428,7 +1428,7 @@ fn dict_literal<'a>(
                 already_peeked_token(source)?;
                 let key = expression(source, context, cursor, true)?;
                 let token = assert_next_lexeme_eq(
-                    source.next(),
+                    source,
                     TokenValue::CloseSquare,
                     cursor,
                     "Expected ] after key expression",
@@ -1464,7 +1464,7 @@ fn dict_literal<'a>(
             }
         };
         let token = assert_next_lexeme_eq(
-            source.next(),
+            source,
             TokenValue::Colon,
             cursor,
             "Expected : after key in dict",
@@ -1499,7 +1499,7 @@ fn if_or_while<'a>(
 ) -> Result<AstNode<'a>, ParseError> {
     let predicate = expression(source, context, cursor, false)?;
     let token = assert_next_lexeme_eq(
-        source.next(),
+        source,
         TokenValue::OpenBracket,
         predicate.provenance.end(),
         "expected { after predicate",
@@ -1669,12 +1669,15 @@ fn already_peeked_token(source: &mut TokenIter) -> Result<Token, ParseError> {
 }
 
 fn assert_next_lexeme_eq(
-    lexeme: Option<Result<Token, LexError>>,
+    source: &mut TokenIter,
     target: TokenValue,
     provenance: SourceMarker,
     reason: &'static str,
 ) -> Result<Token, ParseError> {
-    let lexeme = lexeme.ok_or(ParseError::UnexpectedEndOfInput(provenance, reason))??;
+    skim_off_comments(source);
+    let lexeme = source
+        .next()
+        .ok_or(ParseError::UnexpectedEndOfInput(provenance, reason))??;
     assert_lexeme_eq(&lexeme, target, reason)?;
 
     Ok(lexeme)
@@ -1772,6 +1775,6 @@ fn skim_off_comments(source: &mut TokenIter) {
         ..
     })) = source.peek()
     {
-        dbg!(source.next().unwrap().unwrap());
+        source.next().unwrap().unwrap();
     }
 }
