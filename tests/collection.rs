@@ -5,7 +5,7 @@ use brick::{eval, Value};
 async fn basic_index() {
     let result = eval(
         r#"
-let array = [30, 31, 32, 33, 34, 35, 36];
+let array = list[30, 31, 32, 33, 34, 35, 36];
 array[5]
 "#,
     )
@@ -18,7 +18,7 @@ array[5]
 async fn arrays() {
     let result = eval(
         r#"
-let array = [1, 2, 3, 4];
+let array = list[1, 2, 3, 4];
 let index = 0;
 let total = 0;
 while index < array.len() {
@@ -37,7 +37,7 @@ total
 async fn array_assignments() {
     let result = eval(
         r#"
-let array = [0, 0, 0, 0];
+let array = list[0, 0, 0, 0];
 let index = 0;
 while index < array.len() {
     array[index] = index;
@@ -56,7 +56,7 @@ async fn array_assignments_length() {
     let result = eval(
         r#"
 let length = 30;
-let array = [0; length];
+let array = list[0; length];
 let index = 0;
 while index < array.len() {
     array[index] = index;
@@ -75,7 +75,7 @@ array[length - 3]
 async fn bad_array_assignment() {
     eval(
         r#"
-let array = [1, 2, 3, 4];
+let array = list[1, 2, 3, 4];
 array[2] = "test";
 "#,
     )
@@ -88,7 +88,7 @@ array[2] = "test";
 async fn array_index_overflow() {
     eval(
         r#"
-let array = [1, 2, 3, 4];
+let array = list[1, 2, 3, 4];
 array[5]
 "#,
     )
@@ -100,7 +100,7 @@ array[5]
 async fn basic_dict_keys() {
     let result = eval(
         r#"
-let val = dict[ [1]: 30, [2]: 8 ];
+let val = dict{ [1]: 30, [2]: 8 };
 val[1] - val[2]
 "#,
     )
@@ -113,7 +113,7 @@ val[1] - val[2]
 async fn write_to_dict() {
     let result = eval(
         r#"
-let val = dict[ [1]: 30, [2]: 8 ];
+let val = dict{ [1]: 30, [2]: 8 };
 val[1] = 80;
 val[1]
 "#,

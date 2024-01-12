@@ -676,7 +676,7 @@ fn extern_function_declaration<'a>(
     } = function_header(source, context, provenance.end())?;
     provenance.set_end(end);
 
-    let next = token(source, end, "expected ; or { after extern fn decl")?;
+    let next = next_token(source, end, "expected ; or { after extern fn decl")?;
     let (value, end) = match &next.value {
         TokenValue::Semicolon => (
             AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
@@ -897,7 +897,7 @@ fn type_expression<'a>(
     context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
-    let next = token(source, cursor, "expected type")?;
+    let next = next_token(source, cursor, "expected type")?;
     let node = match next.value {
         ptr @ (TokenValue::Unique | TokenValue::Ref) => {
             let subtype = type_expression(source, context, next.range.end())?;
@@ -946,34 +946,32 @@ fn type_expression<'a>(
                 SourceRange::new(next.range.start(), token.range.end()),
             )
         }
+        TokenValue::List => {
+            let token = assert_next_lexeme_eq(
+                source.next(),
+                TokenValue::OpenSquare,
+                next.range.end(),
+                "expected [ after array type",
+            )?;
+
+            let value = type_expression(source, context, token.range.end())?;
+            let end = value.provenance.end();
+            let value = add_node(context, value);
+
+            let token = assert_next_lexeme_eq(
+                source.next(),
+                TokenValue::CloseSquare,
+                end,
+                "expected ] after array type",
+            )?;
+
+            AstNode::new(
+                AstNodeValue::ArrayType(value),
+                SourceRange::new(next.range.start(), token.range.end()),
+            )
+        }
         // TODO: reserve array word
-        TokenValue::Word(name) => match name.as_str() {
-            "array" => {
-                let token = assert_next_lexeme_eq(
-                    source.next(),
-                    TokenValue::OpenSquare,
-                    next.range.end(),
-                    "expected [ after array type",
-                )?;
-
-                let value = type_expression(source, context, token.range.end())?;
-                let end = value.provenance.end();
-                let value = add_node(context, value);
-
-                let token = assert_next_lexeme_eq(
-                    source.next(),
-                    TokenValue::CloseSquare,
-                    end,
-                    "expected ] after array type",
-                )?;
-
-                AstNode::new(
-                    AstNodeValue::ArrayType(value),
-                    SourceRange::new(next.range.start(), token.range.end()),
-                )
-            }
-            _ => AstNode::new(AstNodeValue::name(name), next.range),
-        },
+        TokenValue::Word(name) => AstNode::new(AstNodeValue::name(name), next.range),
         _ => {
             return Err(ParseError::UnexpectedToken(
                 Box::new(next),
@@ -1016,7 +1014,7 @@ fn expression_pratt<'a>(
     min_binding: u8,
     can_be_struct: bool,
 ) -> Result<AstNode<'a>, ParseError> {
-    let Token { value, range } = token(source, start, "expected expression")?;
+    let Token { value, range } = next_token(source, start, "expected expression")?;
     let start = range.start();
     let cursor = range.end();
     let mut left = match value {
@@ -1037,7 +1035,7 @@ fn expression_pratt<'a>(
             left
         }
         TokenValue::Dict => dict_literal(source, context, cursor)?,
-        TokenValue::OpenSquare => array_literal(source, context, cursor, can_be_struct)?,
+        TokenValue::List => array_literal(source, context, cursor, can_be_struct)?,
         token @ (TokenValue::If | TokenValue::While) => {
             if_or_while(source, context, token, cursor)?
         }
@@ -1332,8 +1330,18 @@ fn array_literal<'a>(
     start: SourceMarker,
     can_be_struct: bool,
 ) -> Result<AstNode<'a>, ParseError> {
-    let expr = expression(source, context, start, can_be_struct)?;
-    let separator = token(source, start, "expected comma, semicolon or ]")?;
+    let token = assert_next_lexeme_eq(
+        source.next(),
+        TokenValue::OpenSquare,
+        start,
+        "expected [ to start list literal",
+    )?;
+    let expr = expression(source, context, token.range.start(), can_be_struct)?;
+    let separator = next_token(
+        source,
+        expr.provenance.start(),
+        "expected comma, semicolon or ]",
+    )?;
     match separator.value {
         TokenValue::Comma => {
             let mut end = separator.range.end();
@@ -1361,7 +1369,7 @@ fn array_literal<'a>(
                     source,
                     TokenValue::CloseSquare,
                     end,
-                    "expected comma or ] to end array literal",
+                    "expected comma or ] to end list literal",
                 )?;
                 end = new_end.end();
                 closed = should_break;
@@ -1377,7 +1385,7 @@ fn array_literal<'a>(
                 source.next(),
                 TokenValue::CloseSquare,
                 length.provenance.end(),
-                "expected ] after array length in array literal",
+                "expected ] after list length in list literal",
             )?;
             let expr = add_node(context, expr);
             let length = add_node(context, length);
@@ -1404,14 +1412,14 @@ fn dict_literal<'a>(
 ) -> Result<AstNode<'a>, ParseError> {
     let token = assert_next_lexeme_eq(
         source.next(),
-        TokenValue::OpenSquare,
+        TokenValue::OpenBracket,
         start,
-        "expected [ to start dict literal",
+        "expected { to start dict literal",
     )?;
     let mut cursor = token.range.end();
     let mut entries = Vec::new();
     loop {
-        let key = match peek_token(source, cursor, "expected ] or next entry")?.value {
+        let key = match peek_token(source, cursor, "expected } or next entry")?.value {
             TokenValue::CloseBracket => {
                 source.next();
                 break;
@@ -1434,7 +1442,7 @@ fn dict_literal<'a>(
                 cursor = key_range.end();
 
                 if let lex @ (TokenValue::Comma | TokenValue::CloseBracket) =
-                    &peek_token(source, cursor, "expected comma or } to end struct literal")?.value
+                    &peek_token(source, cursor, "expected comma or } to end dict literal")?.value
                 {
                     let lex = lex.clone();
                     let token = already_peeked_token(source)?;
@@ -1467,9 +1475,9 @@ fn dict_literal<'a>(
         entries.push((key, value));
         let (did_end, range) = comma_or_end_list(
             source,
-            TokenValue::CloseSquare,
+            TokenValue::CloseBracket,
             cursor,
-            "expected , or ] in dict literal",
+            "expected , or } in dict literal",
         )?;
         cursor = range.end();
         if did_end {
@@ -1591,7 +1599,7 @@ fn integer(
     cursor: SourceMarker,
     reason: &'static str,
 ) -> Result<(u64, SourceRange), ParseError> {
-    match token(source, cursor, reason)? {
+    match next_token(source, cursor, reason)? {
         Token {
             value: TokenValue::Int(int),
             range,
@@ -1647,7 +1655,7 @@ fn word(
     cursor: SourceMarker,
     reason: &'static str,
 ) -> Result<(String, SourceRange), ParseError> {
-    match token(source, cursor, reason)? {
+    match next_token(source, cursor, reason)? {
         Token {
             value: TokenValue::Word(name),
             range,
@@ -1696,7 +1704,7 @@ fn comma_or_end_list(
     start: SourceMarker,
     reason: &'static str,
 ) -> Result<(bool, SourceRange), ParseError> {
-    let next = token(source, start, reason)?;
+    let next = next_token(source, start, reason)?;
     match next.value {
         TokenValue::Comma => match peek_token_optional(source)? {
             Some(token) if token.value == list_end => {
@@ -1725,7 +1733,7 @@ fn peek_for_closed(
     Ok(closed)
 }
 
-fn token(
+fn next_token(
     source: &mut TokenIter,
     cursor: SourceMarker,
     reason: &'static str,
