@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use brick::{eval_with_bindings, Value};
 
 // Requirements
-// TODO: nullable index operator
 // TODO: string support
 // TODO: push to dictionaries
 // TODO: string keys for dictionaries
-// TODO: null checks OR ?. for unions
 
 // Ergonomics
+// TODO: null checks OR ?. for unions
+// TODO: nullable index operator
 // TODO: Zero-variant unions
 // TODO: for loops / ranges
 // TODO: empty array, dict operator
@@ -76,7 +76,8 @@ fn parse_json_node(): JsonValue {
 }
 
 let json = parse_json("{\'hello\': 1024 }");
-json.Object["hello"]?.Number
+let obj = json.Object ?? dict{ dummy: JsonValue { Null: false } };
+obj["hello"].Number
 "#,
         HashMap::new(),
     )
