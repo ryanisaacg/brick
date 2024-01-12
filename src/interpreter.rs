@@ -477,6 +477,21 @@ pub async fn evaluate_block(
             evaluate_block(fns, params, vm, inner).await?;
             println!("{:?}", vm.op_stack.last().unwrap());
         }
+        LinearNodeValue::MemoryCopy { source, dest, size } => {
+            evaluate_block(fns, params, vm, source).await?;
+            let Value::Size(source) = vm.op_stack.pop().unwrap() else {
+                unreachable!()
+            };
+            evaluate_block(fns, params, vm, dest).await?;
+            let Value::Size(dest) = vm.op_stack.pop().unwrap() else {
+                unreachable!()
+            };
+            evaluate_block(fns, params, vm, size).await?;
+            let Value::Size(size) = vm.op_stack.pop().unwrap() else {
+                unreachable!()
+            };
+            vm.memory.copy_within(source..source + size, dest);
+        }
     }
 
     Ok(())

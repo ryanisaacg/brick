@@ -15,9 +15,9 @@ misc:
 
 type parameters:
 - non-reified / non-monomorphizing:
-    - functions can take type parameters and typecheck properly
     - generic type syntax
     - types can be parameterized
+    - nested type parameters are correctly resolved
 - monomorphizing
 - generic types can be constrained by interfaces
 
@@ -27,12 +27,11 @@ runtime:
 
 collections:
 - arrays:
-    - array push to end
-    - allow empty arrays to typecheck
+    - allow empty arrays to typecheck (requires generic type syntax)
 - dicts:
     - insert new entries into dictionaries
     - use a hash table
-    - allow empty dicts to type check
+    - allow empty dicts to type check (requires generic type syntax)
 - rc's:
     - basic RCs
     - can take RC'ed references to collections? maybe even RC'ed subreferences to user-defined collections?

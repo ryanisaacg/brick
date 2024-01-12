@@ -11,11 +11,13 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RuntimeFunction {
     ArrayLength,
+    ArrayPush,
 }
 
 pub struct RuntimeFunctionOnType {
     pub func: RuntimeFunction,
     pub decl: StaticDeclaration,
+    pub ptr_ty: PointerKind,
 }
 
 static ARRAY_FUNCTIONS: OnceLock<HashMap<String, RuntimeFunctionOnType>> = OnceLock::new();
@@ -33,20 +35,43 @@ pub fn add_runtime_functions(declarations: &mut HashMap<TypeID, &StaticDeclarati
                     id: TypeID::new(),
                     func_id: FunctionID::new(),
                     is_associated: true,
-                    // TODO: generic types
+                    type_param_count: 1,
                     params: vec![ExpressionType::Pointer(
                         PointerKind::Shared,
-                        Box::new(ExpressionType::Void),
+                        Box::new(ExpressionType::TypeParameterReference(0)),
                     )],
                     returns: ExpressionType::Primitive(PrimitiveType::PointerSize),
                 }),
+                ptr_ty: PointerKind::Shared,
             },
         );
+        map.insert(
+            "push".to_string(),
+            RuntimeFunctionOnType {
+                func: RuntimeFunction::ArrayPush,
+                decl: StaticDeclaration::Func(FuncType {
+                    id: TypeID::new(),
+                    func_id: FunctionID::new(),
+                    is_associated: true,
+                    type_param_count: 1,
+                    params: vec![
+                        ExpressionType::Pointer(
+                            PointerKind::Unique,
+                            Box::new(ExpressionType::TypeParameterReference(0)),
+                        ),
+                        ExpressionType::TypeParameterReference(0),
+                    ],
+                    returns: ExpressionType::Void,
+                }),
+                ptr_ty: PointerKind::Unique,
+            },
+        );
+
         map
     });
 
     for (_key, decl) in array_functions.iter() {
-        declarations.insert(decl.decl.id(), &array_functions.get("len").unwrap().decl);
+        declarations.insert(decl.decl.id(), &decl.decl);
     }
 }
 

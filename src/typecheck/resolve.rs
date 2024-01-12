@@ -150,6 +150,7 @@ fn resolve_declaration(
                 .copied()
                 .unwrap_or_else(TypeID::new),
             func_id: *id,
+            type_param_count: 0,
             params: params
                 .iter()
                 .map(|(_, NameAndType { ty: type_, .. })| {
@@ -179,6 +180,7 @@ fn resolve_declaration(
                 .copied()
                 .unwrap_or_else(TypeID::new),
             func_id: *id,
+            type_param_count: 0,
             params: params
                 .iter()
                 .map(|NameAndType { ty: type_, .. }| resolve_type_expr(names_to_type_id, type_))

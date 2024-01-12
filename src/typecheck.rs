@@ -27,6 +27,7 @@ pub enum ExpressionType {
     Collection(CollectionType),
     Null,
     Nullable(Box<ExpressionType>),
+    TypeParameterReference(usize),
 }
 
 impl ExpressionType {
@@ -39,7 +40,8 @@ impl ExpressionType {
             | ExpressionType::Pointer(_, _)
             | ExpressionType::Collection(_)
             | ExpressionType::Null
-            | ExpressionType::Nullable(_) => None,
+            | ExpressionType::Nullable(_)
+            | ExpressionType::TypeParameterReference(_) => None,
         }
     }
 }
@@ -178,6 +180,7 @@ pub struct StructType {
 pub struct FuncType {
     pub id: TypeID,
     pub func_id: FunctionID,
+    pub type_param_count: usize,
     pub params: Vec<ExpressionType>,
     pub returns: ExpressionType,
     pub is_associated: bool,
@@ -819,14 +822,31 @@ fn typecheck_expression<'a>(
                 return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
             }
 
+            let mut generic_args = vec![ExpressionType::Unreachable; func.type_param_count];
+
             for (arg, param) in args.iter().zip(params.iter()) {
                 let arg = typecheck_expression(arg, outer_scopes, current_scope, context)?;
-                if !is_assignable_to(&context.id_to_decl, param, arg) {
-                    return Err(TypecheckError::TypeMismatch {
-                        received: arg.clone(),
-                        expected: param.clone(),
-                    });
-                }
+                match param {
+                    ExpressionType::TypeParameterReference(index) => {
+                        if generic_args[*index] == ExpressionType::Unreachable {
+                            generic_args[*index] = arg.clone();
+                        } else if !is_assignable_to(&context.id_to_decl, &generic_args[*index], arg)
+                        {
+                            return Err(TypecheckError::TypeMismatch {
+                                received: arg.clone(),
+                                expected: generic_args[*index].clone(),
+                            });
+                        }
+                    }
+                    _ => {
+                        if !is_assignable_to(&context.id_to_decl, param, arg) {
+                            return Err(TypecheckError::TypeMismatch {
+                                received: arg.clone(),
+                                expected: param.clone(),
+                            });
+                        }
+                    }
+                };
             }
 
             func.returns.clone()
@@ -1106,6 +1126,9 @@ pub fn is_assignable_to(
     use PrimitiveType::*;
 
     match (left, right) {
+        (TypeParameterReference(_), _) | (_, TypeParameterReference(_)) => {
+            todo!("can you ever end up here?")
+        }
         (Unreachable, Unreachable) => true,
         (Unreachable, _) => todo!("I don't think you can ever have an unreachable lvalue?"),
         (_, Unreachable) => true,

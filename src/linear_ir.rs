@@ -99,9 +99,16 @@ impl LinearNode {
         }
     }
 
-    fn heap_alloc(size: usize) -> LinearNode {
+    fn heap_alloc_const(size: usize) -> LinearNode {
         LinearNode {
             value: LinearNodeValue::HeapAlloc(Box::new(LinearNode::size(size))),
+            provenance: None,
+        }
+    }
+
+    fn heap_alloc_var(size: LinearNode) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::HeapAlloc(Box::new(size)),
             provenance: None,
         }
     }
@@ -169,6 +176,17 @@ impl LinearNode {
             provenance: None,
         }
     }
+
+    fn memcpy(source: LinearNode, dest: LinearNode, size: LinearNode) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::MemoryCopy {
+                source: Box::new(source),
+                dest: Box::new(dest),
+                size: Box::new(size),
+            },
+            provenance: None,
+        }
+    }
 }
 
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
@@ -194,6 +212,11 @@ pub enum LinearNodeValue {
         offset: usize,
         ty: PhysicalType,
         value: Box<LinearNode>,
+    },
+    MemoryCopy {
+        source: Box<LinearNode>,
+        dest: Box<LinearNode>,
+        size: Box<LinearNode>,
     },
 
     // TODO: just full stack machine?
@@ -641,7 +664,7 @@ fn lower_expression(
             let inner_ty = *inner_ty;
             let mut instrs = vec![LinearNode::write_temp(
                 0,
-                LinearNode::heap_alloc(size * values.len()),
+                LinearNode::heap_alloc_const(size * values.len()),
             )];
             instrs.extend(values.into_iter().enumerate().map(|(idx, value)| {
                 LinearNode::new(LinearNodeValue::WriteMemory {
@@ -835,7 +858,7 @@ fn lower_expression(
 
             let mut instrs = vec![LinearNode::write_temp(
                 0,
-                LinearNode::heap_alloc(entry_size * length),
+                LinearNode::heap_alloc_const(entry_size * length),
             )];
             let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
             instrs.extend(keys.into_iter().enumerate().map(|(idx, value)| {
@@ -913,6 +936,130 @@ fn lower_expression(
                 offset: offset + POINTER_SIZE,
                 ty: PhysicalType::Pointer,
             }
+        }
+        HirNodeValue::RuntimeCall(RuntimeFunction::ArrayPush, mut args) => {
+            let inserted = args.pop().unwrap();
+            let HirNodeValue::TakeUnique(arr) = args.pop().unwrap().value else {
+                unreachable!()
+            };
+            let ExpressionType::Collection(CollectionType::Array(array_inner_ty)) = &arr.ty else {
+                unreachable!()
+            };
+            let array_inner_ty = expr_ty_to_physical(array_inner_ty);
+            let (location, content_offset) =
+                lower_lvalue(declarations, stack_entries, stack_offset, *arr);
+            let length_offset = content_offset + POINTER_SIZE;
+            let capacity_offset = length_offset + POINTER_SIZE;
+
+            let inserted = lower_expression(declarations, stack_entries, stack_offset, inserted);
+
+            LinearNodeValue::Sequence(vec![
+                // pointer to array
+                LinearNode::write_temp(0, location),
+                // array length
+                LinearNode::write_temp(
+                    1,
+                    LinearNode::read_memory(
+                        LinearNode::read_temp(0),
+                        length_offset,
+                        PhysicalType::Pointer,
+                    ),
+                ),
+                // if (length + 1) * 2 > capacity, realloc
+                LinearNode::if_node(
+                    LinearNode::ptr_comparison(
+                        ComparisonOp::GreaterThan,
+                        LinearNode::ptr_arithmetic(
+                            ArithmeticOp::Multiply,
+                            LinearNode::ptr_arithmetic(
+                                ArithmeticOp::Add,
+                                LinearNode::read_temp(1),
+                                LinearNode::size(1),
+                            ),
+                            LinearNode::size(2),
+                        ),
+                        LinearNode::read_memory(
+                            LinearNode::read_temp(0),
+                            capacity_offset,
+                            PhysicalType::Pointer,
+                        ),
+                    ),
+                    // Increase capacity
+                    vec![
+                        // new capacity = (length + 1) * 2
+                        LinearNode::write_temp(
+                            2,
+                            LinearNode::ptr_arithmetic(
+                                ArithmeticOp::Multiply,
+                                LinearNode::ptr_arithmetic(
+                                    ArithmeticOp::Add,
+                                    LinearNode::read_temp(1),
+                                    LinearNode::size(1),
+                                ),
+                                LinearNode::size(2),
+                            ),
+                        ),
+                        // allocate new buffer
+                        LinearNode::write_temp(
+                            3,
+                            LinearNode::heap_alloc_var(LinearNode::read_temp(2)),
+                        ),
+                        // copy old buffer to new buffer
+                        LinearNode::memcpy(
+                            LinearNode::read_memory(
+                                LinearNode::read_temp(0),
+                                content_offset,
+                                PhysicalType::Pointer,
+                            ),
+                            LinearNode::read_temp(3),
+                            LinearNode::ptr_arithmetic(
+                                ArithmeticOp::Multiply,
+                                LinearNode::read_temp(1),
+                                LinearNode::size(array_inner_ty.size(declarations)),
+                            ),
+                        ),
+                        // write new capacity
+                        LinearNode::write_memory(
+                            LinearNode::read_temp(0),
+                            capacity_offset,
+                            PhysicalType::Pointer,
+                            LinearNode::read_temp(2),
+                        ),
+                    ],
+                    None,
+                    provenance.clone(),
+                ),
+                // write value
+                LinearNode::write_memory(
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Add,
+                        LinearNode::read_memory(
+                            LinearNode::read_temp(0),
+                            content_offset,
+                            PhysicalType::Pointer,
+                        ),
+                        LinearNode::ptr_arithmetic(
+                            ArithmeticOp::Multiply,
+                            LinearNode::read_temp(1),
+                            LinearNode::size(array_inner_ty.size(declarations)),
+                        ),
+                    ),
+                    0,
+                    array_inner_ty.clone(),
+                    inserted,
+                ),
+                // increment length
+                LinearNode::write_memory(
+                    LinearNode::read_temp(0),
+                    length_offset,
+                    PhysicalType::Pointer,
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Add,
+                        LinearNode::read_temp(1),
+                        LinearNode::size(1),
+                    ),
+                ),
+            ])
         }
     };
 
@@ -1207,6 +1354,7 @@ fn expression_type_size(
             NULL_TAG_SIZE + expression_type_size(declarations, inner)
         }
         ExpressionType::ReferenceTo(_) => todo!(),
+        ExpressionType::TypeParameterReference(_) => todo!(),
     }
 }
 
@@ -1426,6 +1574,7 @@ fn layout_type(
             )
         }
         ExpressionType::ReferenceTo(_) => todo!(),
+        ExpressionType::TypeParameterReference(_) => todo!(),
     }
 }
 
@@ -1444,5 +1593,6 @@ fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
             PhysicalType::Nullable(Box::new(ty))
         }
         ExpressionType::ReferenceTo(_) => todo!(),
+        ExpressionType::TypeParameterReference(_) => todo!(),
     }
 }

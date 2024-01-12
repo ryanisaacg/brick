@@ -293,5 +293,6 @@ fn is_affine(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &Expression
         ExpressionType::Null => false,
         ExpressionType::Nullable(inner) => is_affine(declarations, inner),
         ExpressionType::ReferenceTo(_) => todo!(),
+        ExpressionType::TypeParameterReference(_) => todo!(),
     }
 }

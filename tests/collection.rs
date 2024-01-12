@@ -97,6 +97,22 @@ array[5]
 }
 
 #[tokio::test]
+async fn append_to_array() {
+    let result = eval(
+        r#"
+let array = list[0];
+while array.len() < 10 {
+    array.push(array.len());
+}
+array[9]
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(9)]);
+}
+
+#[tokio::test]
 async fn basic_dict_keys() {
     let result = eval(
         r#"
