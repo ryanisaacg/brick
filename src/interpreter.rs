@@ -7,22 +7,19 @@ use crate::{
     id::{FunctionID, TypeID},
     linear_ir::{
         DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
-        PhysicalType, TypeLayoutValue, NULL_TAG_SIZE,
+        PhysicalPrimitive, PhysicalType, TypeLayoutValue, NULL_TAG_SIZE,
     },
-    typecheck::PrimitiveType,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     FunctionID(FunctionID),
     Size(usize),
+    Byte(u8),
     Int32(i32),
     Int64(i64),
     Float32(f32),
     Float64(f64),
-    Bool(bool),
-    Char(char),
-    String(String),
 }
 
 impl Value {
@@ -175,7 +172,7 @@ pub async fn evaluate_block(
             vm.heap_ptr += amount;
         }
         LinearNodeValue::Parameter(idx) => {
-            let mut temp = Value::Bool(false);
+            let mut temp = Value::Byte(0);
             std::mem::swap(&mut temp, &mut params[*idx]);
             vm.op_stack.push(temp);
         }
@@ -232,11 +229,10 @@ pub async fn evaluate_block(
         }
         LinearNodeValue::If(cond, if_branch, else_branch) => {
             evaluate_block(fns, params, vm, cond).await?;
-            dbg!(&vm.op_stack);
-            let Some(Value::Bool(cond)) = vm.op_stack.pop() else {
+            let Some(Value::Byte(cond)) = vm.op_stack.pop() else {
                 unreachable!()
             };
-            if cond {
+            if cond != 0 {
                 for node in if_branch.iter() {
                     evaluate_block(fns, params, vm, node).await?;
                 }
@@ -258,10 +254,10 @@ pub async fn evaluate_block(
         },
         LinearNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, child) => {
             evaluate_block(fns, params, vm, child).await?;
-            let Value::Bool(val) = vm.op_stack.pop().unwrap() else {
+            let Value::Byte(val) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
             };
-            vm.op_stack.push(Value::Bool(!val));
+            vm.op_stack.push(bool_value(val == 0));
         }
         LinearNodeValue::Arithmetic(op, _ty, lhs, rhs) => {
             evaluate_block(fns, params, vm, rhs).await?;
@@ -313,11 +309,9 @@ pub async fn evaluate_block(
             evaluate_block(fns, params, vm, lhs).await?;
             let left = vm.op_stack.pop().unwrap();
             let right = vm.op_stack.pop().unwrap();
-            if *op == ComparisonOp::EqualTo {
-                vm.op_stack.push(Value::Bool(left == right));
-            } else {
-                vm.op_stack.push(Value::Bool(left != right));
-            }
+            vm.op_stack.push(bool_value(
+                (*op == ComparisonOp::EqualTo) == (left == right),
+            ));
         }
         LinearNodeValue::Comparison(op, _ty, lhs, rhs) => {
             evaluate_block(fns, params, vm, rhs).await?;
@@ -326,38 +320,38 @@ pub async fn evaluate_block(
             let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let val = match (left, right) {
                 (Numeric::Int32(left), Numeric::Int32(right)) => match op {
-                    ComparisonOp::LessThan => Value::Bool(left < right),
-                    ComparisonOp::GreaterThan => Value::Bool(left > right),
-                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
-                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::LessThan => bool_value(left < right),
+                    ComparisonOp::GreaterThan => bool_value(left > right),
+                    ComparisonOp::LessEqualThan => bool_value(left <= right),
+                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
                     ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (Numeric::Float32(left), Numeric::Float32(right)) => match op {
-                    ComparisonOp::LessThan => Value::Bool(left < right),
-                    ComparisonOp::GreaterThan => Value::Bool(left > right),
-                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
-                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::LessThan => bool_value(left < right),
+                    ComparisonOp::GreaterThan => bool_value(left > right),
+                    ComparisonOp::LessEqualThan => bool_value(left <= right),
+                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
                     ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (Numeric::Int64(left), Numeric::Int64(right)) => match op {
-                    ComparisonOp::LessThan => Value::Bool(left < right),
-                    ComparisonOp::GreaterThan => Value::Bool(left > right),
-                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
-                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::LessThan => bool_value(left < right),
+                    ComparisonOp::GreaterThan => bool_value(left > right),
+                    ComparisonOp::LessEqualThan => bool_value(left <= right),
+                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
                     ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (Numeric::Float64(left), Numeric::Float64(right)) => match op {
-                    ComparisonOp::LessThan => Value::Bool(left < right),
-                    ComparisonOp::GreaterThan => Value::Bool(left > right),
-                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
-                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::LessThan => bool_value(left < right),
+                    ComparisonOp::GreaterThan => bool_value(left > right),
+                    ComparisonOp::LessEqualThan => bool_value(left <= right),
+                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
                     ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (Numeric::Size(left), Numeric::Size(right)) => match op {
-                    ComparisonOp::LessThan => Value::Bool(left < right),
-                    ComparisonOp::GreaterThan => Value::Bool(left > right),
-                    ComparisonOp::LessEqualThan => Value::Bool(left <= right),
-                    ComparisonOp::GreaterEqualThan => Value::Bool(left >= right),
+                    ComparisonOp::LessThan => bool_value(left < right),
+                    ComparisonOp::GreaterThan => bool_value(left > right),
+                    ComparisonOp::LessEqualThan => bool_value(left <= right),
+                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
                     ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                 },
                 (_, _) => unreachable!(),
@@ -366,31 +360,32 @@ pub async fn evaluate_block(
         }
         LinearNodeValue::BinaryLogical(op, lhs, rhs) => {
             evaluate_block(fns, params, vm, lhs).await?;
-            let Value::Bool(left) = vm.op_stack.pop().unwrap() else {
+            let Value::Byte(left) = vm.op_stack.pop().unwrap() else {
                 unreachable!();
             };
+            let left = left != 0;
             let result = match op {
                 BinaryLogicalOp::BooleanAnd => {
                     left && {
                         evaluate_block(fns, params, vm, rhs).await?;
-                        let Value::Bool(right) = vm.op_stack.pop().unwrap() else {
+                        let Value::Byte(right) = vm.op_stack.pop().unwrap() else {
                             unreachable!();
                         };
-                        right
+                        right != 0
                     }
                 }
                 BinaryLogicalOp::BooleanOr => {
                     left || {
                         evaluate_block(fns, params, vm, rhs).await?;
-                        let Value::Bool(right) = vm.op_stack.pop().unwrap() else {
+                        let Value::Byte(right) = vm.op_stack.pop().unwrap() else {
                             unreachable!();
                         };
-                        right
+                        right != 0
                     }
                 }
             };
 
-            vm.op_stack.push(Value::Bool(result));
+            vm.op_stack.push(bool_value(result));
         }
         LinearNodeValue::Size(size) => {
             vm.op_stack.push(Value::Size(*size));
@@ -401,14 +396,12 @@ pub async fn evaluate_block(
         LinearNodeValue::Float(x) => {
             vm.op_stack.push(Value::Float32(*x as f32));
         }
-        LinearNodeValue::Bool(x) => {
-            vm.op_stack.push(Value::Bool(*x));
+        LinearNodeValue::Byte(x) => {
+            vm.op_stack.push(Value::Byte(*x));
         }
         LinearNodeValue::CharLiteral(x) => {
-            vm.op_stack.push(Value::Char(*x));
-        }
-        LinearNodeValue::StringLiteral(x) => {
-            vm.op_stack.push(Value::String(x.clone()));
+            // TODO: lossy conversion
+            vm.op_stack.push(Value::Byte(*x as u8));
         }
         LinearNodeValue::FunctionID(x) => {
             vm.op_stack.push(Value::FunctionID(*x));
@@ -434,49 +427,49 @@ pub async fn evaluate_block(
             evaluate_block(fns, params, vm, value).await?;
             let val = vm.op_stack.pop().unwrap();
             vm.op_stack.push(match val {
-                Value::String(_) | Value::Bool(_) | Value::Char(_) | Value::FunctionID(_) => {
+                Value::FunctionID(_) => {
                     unreachable!()
                 }
                 Value::Size(_) => todo!(),
+                Value::Byte(val) => match to {
+                    PhysicalPrimitive::Byte => Value::Byte(val),
+                    PhysicalPrimitive::Int32 => Value::Int32(val as i32),
+                    PhysicalPrimitive::Int64 => Value::Int64(val as i64),
+                    PhysicalPrimitive::Float32 => Value::Float32(val as f32),
+                    PhysicalPrimitive::Float64 => Value::Float64(val as f64),
+                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                },
                 Value::Int32(val) => match to {
-                    PrimitiveType::Int32 => Value::Int32(val),
-                    PrimitiveType::Int64 => Value::Int64(val as i64),
-                    PrimitiveType::Float32 => Value::Float32(val as f32),
-                    PrimitiveType::Float64 => Value::Float64(val as f64),
-                    PrimitiveType::PointerSize => Value::Size(val as usize),
-                    PrimitiveType::String | PrimitiveType::Bool | PrimitiveType::Char => {
-                        unreachable!()
-                    }
+                    PhysicalPrimitive::Byte => Value::Byte(val as u8),
+                    PhysicalPrimitive::Int32 => Value::Int32(val),
+                    PhysicalPrimitive::Int64 => Value::Int64(val as i64),
+                    PhysicalPrimitive::Float32 => Value::Float32(val as f32),
+                    PhysicalPrimitive::Float64 => Value::Float64(val as f64),
+                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
                 },
                 Value::Int64(val) => match to {
-                    PrimitiveType::Int32 => Value::Int32(val as i32),
-                    PrimitiveType::Int64 => Value::Int64(val),
-                    PrimitiveType::Float32 => Value::Float32(val as f32),
-                    PrimitiveType::Float64 => Value::Float64(val as f64),
-                    PrimitiveType::PointerSize => Value::Size(val as usize),
-                    PrimitiveType::String | PrimitiveType::Bool | PrimitiveType::Char => {
-                        unreachable!()
-                    }
+                    PhysicalPrimitive::Byte => Value::Byte(val as u8),
+                    PhysicalPrimitive::Int32 => Value::Int32(val as i32),
+                    PhysicalPrimitive::Int64 => Value::Int64(val),
+                    PhysicalPrimitive::Float32 => Value::Float32(val as f32),
+                    PhysicalPrimitive::Float64 => Value::Float64(val as f64),
+                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
                 },
                 Value::Float32(val) => match to {
-                    PrimitiveType::Int32 => Value::Int32(val as i32),
-                    PrimitiveType::Int64 => Value::Int64(val as i64),
-                    PrimitiveType::Float32 => Value::Float32(val),
-                    PrimitiveType::Float64 => Value::Float64(val as f64),
-                    PrimitiveType::PointerSize => Value::Size(val as usize),
-                    PrimitiveType::String | PrimitiveType::Bool | PrimitiveType::Char => {
-                        unreachable!()
-                    }
+                    PhysicalPrimitive::Byte => Value::Byte(val as u8),
+                    PhysicalPrimitive::Int32 => Value::Int32(val as i32),
+                    PhysicalPrimitive::Int64 => Value::Int64(val as i64),
+                    PhysicalPrimitive::Float32 => Value::Float32(val),
+                    PhysicalPrimitive::Float64 => Value::Float64(val as f64),
+                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
                 },
                 Value::Float64(val) => match to {
-                    PrimitiveType::Int32 => Value::Int32(val as i32),
-                    PrimitiveType::Int64 => Value::Int64(val as i64),
-                    PrimitiveType::Float32 => Value::Float32(val as f32),
-                    PrimitiveType::Float64 => Value::Float64(val),
-                    PrimitiveType::PointerSize => Value::Size(val as usize),
-                    PrimitiveType::String | PrimitiveType::Bool | PrimitiveType::Char => {
-                        unreachable!()
-                    }
+                    PhysicalPrimitive::Byte => Value::Byte(val as u8),
+                    PhysicalPrimitive::Int32 => Value::Int32(val as i32),
+                    PhysicalPrimitive::Int64 => Value::Int64(val as i64),
+                    PhysicalPrimitive::Float32 => Value::Float32(val as f32),
+                    PhysicalPrimitive::Float64 => Value::Float64(val),
+                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
                 },
             });
         }
@@ -487,6 +480,10 @@ pub async fn evaluate_block(
     }
 
     Ok(())
+}
+
+fn bool_value(val: bool) -> Value {
+    Value::Byte(if val { 1 } else { 0 })
 }
 
 fn write(
@@ -537,10 +534,10 @@ fn write(
             write_primitive(op_stack, memory, location);
         }
         PhysicalType::Nullable(ty) => match op_stack.pop().unwrap() {
-            Value::Bool(false) => {
+            Value::Byte(0) => {
                 memory[location] = 0;
             }
-            Value::Bool(true) => {
+            Value::Byte(_) => {
                 memory[location] = 1;
                 write(op_stack, layouts, memory, location + NULL_TAG_SIZE, ty);
             }
@@ -563,9 +560,7 @@ fn write_primitive(op_stack: &mut Vec<Value>, memory: &mut [u8], location: usize
         Value::Int64(x) => bytemuck::bytes_of(x),
         Value::Float32(x) => bytemuck::bytes_of(x),
         Value::Float64(x) => bytemuck::bytes_of(x),
-        Value::Bool(x) => bytemuck::bytes_of(x),
-        Value::Char(x) => bytemuck::bytes_of(x),
-        Value::String(_) => todo!(),
+        Value::Byte(x) => bytemuck::bytes_of(x),
     };
     memory[location..(location + bytes.len())].copy_from_slice(bytes);
     bytes.len()
@@ -603,28 +598,38 @@ fn read(
                         );
                         location -= 4;
                     }
-                    read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
+                    read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
                 }
                 TypeLayoutValue::Union(_) => todo!(),
             }
         }
         PhysicalType::Collection(ty) => match ty {
             PhysicalCollection::Array | PhysicalCollection::Dict => {
-                read_primitive(op_stack, memory, location + 16, PrimitiveType::PointerSize);
-                read_primitive(op_stack, memory, location + 8, PrimitiveType::PointerSize);
-                read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
+                read_primitive(
+                    op_stack,
+                    memory,
+                    location + 16,
+                    PhysicalPrimitive::PointerSize,
+                );
+                read_primitive(
+                    op_stack,
+                    memory,
+                    location + 8,
+                    PhysicalPrimitive::PointerSize,
+                );
+                read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
             }
         },
         PhysicalType::Pointer => {
-            read_primitive(op_stack, memory, location, PrimitiveType::PointerSize);
+            read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
         }
         PhysicalType::Nullable(ty) => {
             let null_flag = memory[location];
             if null_flag == 0 {
-                op_stack.push(Value::Bool(false));
+                op_stack.push(bool_value(false));
             } else {
                 read(op_stack, layouts, memory, location + NULL_TAG_SIZE, ty);
-                op_stack.push(Value::Bool(true));
+                op_stack.push(bool_value(true));
             }
         }
         PhysicalType::FunctionPointer => {
@@ -638,25 +643,23 @@ fn read_primitive(
     op_stack: &mut Vec<Value>,
     memory: &[u8],
     location: usize,
-    primitive: PrimitiveType,
+    primitive: PhysicalPrimitive,
 ) {
     op_stack.push(match primitive {
-        PrimitiveType::Char => todo!(), //Value::Char(*bytemuck::from_bytes(memory)),
-        PrimitiveType::String => todo!(),
-        PrimitiveType::Int32 => {
+        PhysicalPrimitive::Byte => Value::Byte(memory[location]),
+        PhysicalPrimitive::Int32 => {
             Value::Int32(*bytemuck::from_bytes(&memory[location..(location + 4)]))
         }
-        PrimitiveType::Float32 => {
+        PhysicalPrimitive::Float32 => {
             Value::Float32(*bytemuck::from_bytes(&memory[location..(location + 4)]))
         }
-        PrimitiveType::Int64 => {
+        PhysicalPrimitive::Int64 => {
             Value::Int64(*bytemuck::from_bytes(&memory[location..(location + 8)]))
         }
-        PrimitiveType::Float64 => {
+        PhysicalPrimitive::Float64 => {
             Value::Float64(*bytemuck::from_bytes(&memory[location..(location + 8)]))
         }
-        PrimitiveType::Bool => Value::Bool(memory[location] != 0),
-        PrimitiveType::PointerSize => {
+        PhysicalPrimitive::PointerSize => {
             let base_ptr = &memory[location..(location + 8)];
             let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
             Value::Size(base_ptr)

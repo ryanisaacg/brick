@@ -22,7 +22,7 @@ x
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Bool(false)]);
+    assert_matches!(&result[..], [Value::Byte(0)]);
 }
 
 #[tokio::test]
@@ -35,7 +35,7 @@ x
     )
     .await
     .unwrap();
-    assert_matches!(&result[..], [Value::Int32(70), Value::Bool(true)]);
+    assert_matches!(&result[..], [Value::Int32(70), Value::Byte(1)]);
 }
 
 #[tokio::test]

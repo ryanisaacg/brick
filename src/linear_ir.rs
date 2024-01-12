@@ -72,7 +72,7 @@ impl LinearNode {
         LinearNode {
             value: LinearNodeValue::Arithmetic(
                 op,
-                PrimitiveType::PointerSize,
+                PhysicalPrimitive::PointerSize,
                 Box::new(lhs),
                 Box::new(rhs),
             ),
@@ -84,7 +84,7 @@ impl LinearNode {
         LinearNode {
             value: LinearNodeValue::Comparison(
                 op,
-                PrimitiveType::PointerSize,
+                PhysicalPrimitive::PointerSize,
                 Box::new(lhs),
                 Box::new(rhs),
             ),
@@ -162,6 +162,13 @@ impl LinearNode {
             provenance: None,
         }
     }
+
+    fn bool_value(val: bool) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::Byte(if val { 1 } else { 0 }),
+            provenance: None,
+        }
+    }
 }
 
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
@@ -212,13 +219,13 @@ pub enum LinearNodeValue {
 
     Arithmetic(
         ArithmeticOp,
-        PrimitiveType,
+        PhysicalPrimitive,
         Box<LinearNode>,
         Box<LinearNode>,
     ),
     Comparison(
         ComparisonOp,
-        PrimitiveType,
+        PhysicalPrimitive,
         Box<LinearNode>,
         Box<LinearNode>,
     ),
@@ -226,15 +233,14 @@ pub enum LinearNodeValue {
     UnaryLogical(UnaryLogicalOp, Box<LinearNode>),
     Cast {
         value: Box<LinearNode>,
-        from: PrimitiveType,
-        to: PrimitiveType,
+        from: PhysicalPrimitive,
+        to: PhysicalPrimitive,
     },
     Size(usize),
     Int(i64),
     Float(f64),
-    Bool(bool),
     CharLiteral(char),
-    StringLiteral(String),
+    Byte(u8),
     FunctionID(FunctionID),
 
     // Probably not keeping this around forever
@@ -376,15 +382,16 @@ fn lower_expression(
     let value = match value {
         HirNodeValue::Int(x) => LinearNodeValue::Int(x),
         HirNodeValue::Float(x) => LinearNodeValue::Float(x),
-        HirNodeValue::Bool(x) => LinearNodeValue::Bool(x),
-        HirNodeValue::Null => LinearNodeValue::Bool(false),
+        HirNodeValue::Bool(x) => LinearNodeValue::Byte(if x { 1 } else { 0 }),
+        HirNodeValue::Null => LinearNodeValue::Byte(0),
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
-        HirNodeValue::StringLiteral(x) => LinearNodeValue::StringLiteral(x),
+        HirNodeValue::StringLiteral(_x) => todo!(),
 
         HirNodeValue::Arithmetic(op, lhs, rhs) => {
             let ExpressionType::Primitive(ty) = rhs.ty else {
                 unreachable!("binoperands must be primitive not {:?}", ty)
             };
+            let ty = primitive_to_physical(ty);
             LinearNodeValue::Arithmetic(
                 op,
                 ty,
@@ -406,6 +413,7 @@ fn lower_expression(
             let ExpressionType::Primitive(ty) = rhs.ty else {
                 unreachable!("binoperands must be primitive not {:?}", ty)
             };
+            let ty = primitive_to_physical(ty);
             LinearNodeValue::Comparison(
                 op,
                 ty,
@@ -483,14 +491,14 @@ fn lower_expression(
                         LinearNode::size(*variant_idx),
                         LinearNode::read_memory(location.clone(), offset, PhysicalType::Pointer),
                     ),
-                    vec![LinearNode::new(LinearNodeValue::Bool(false))],
+                    vec![LinearNode::bool_value(false)],
                     Some(vec![
                         LinearNode::read_memory(
                             location,
                             offset + UNION_TAG_SIZE,
                             variant_ty.clone(),
                         ),
-                        LinearNode::new(LinearNodeValue::Bool(true)),
+                        LinearNode::bool_value(true),
                     ]),
                     None,
                 )])
@@ -555,13 +563,13 @@ fn lower_expression(
                     LinearNode::read_memory(
                         location.clone(),
                         initial_offset,
-                        PhysicalType::Primitive(PrimitiveType::Bool),
+                        PhysicalType::Primitive(PhysicalPrimitive::Byte),
                     ),
                     vec![
                         LinearNode::debug(LinearNode::read_memory(location, read_offset, ty)),
-                        LinearNode::new(LinearNodeValue::Bool(true)),
+                        LinearNode::bool_value(true),
                     ],
-                    Some(vec![LinearNode::new(LinearNodeValue::Bool(false))]),
+                    Some(vec![LinearNode::bool_value(false)]),
                     provenance.clone(),
                 ),
                 LinearNode::new(LinearNodeValue::StackDealloc(alloc_size)),
@@ -588,7 +596,7 @@ fn lower_expression(
             let (ptr, offset) = lower_lvalue(declarations, stack_entries, stack_offset, *inner);
             LinearNodeValue::Arithmetic(
                 ArithmeticOp::Add,
-                PrimitiveType::PointerSize,
+                PhysicalPrimitive::PointerSize,
                 Box::new(ptr),
                 Box::new(LinearNode::size(offset)),
             )
@@ -800,8 +808,8 @@ fn lower_expression(
                 stack_offset,
                 *value,
             )),
-            from,
-            to,
+            from: primitive_to_physical(from),
+            to: primitive_to_physical(to),
         },
         HirNodeValue::DictIndex(dict, idx) => {
             let (location, offset) =
@@ -893,7 +901,7 @@ fn lower_expression(
         ),
         HirNodeValue::MakeNullable(value) => LinearNodeValue::Sequence(vec![
             lower_expression(declarations, stack_entries, stack_offset, *value),
-            LinearNode::new(LinearNodeValue::Bool(true)),
+            LinearNode::bool_value(true),
         ]),
         HirNodeValue::RuntimeCall(RuntimeFunction::ArrayLength, mut args) => {
             let HirNodeValue::TakeShared(arr) = args.remove(0).value else {
@@ -1097,7 +1105,7 @@ fn dict_index_location(
     let ExpressionType::Primitive(idx_ty) = &idx.ty else {
         todo!("non-primitive keys for dictionaries")
     };
-    let idx_ty = *idx_ty;
+    let idx_ty = primitive_to_physical(*idx_ty);
 
     let key_size = expression_type_size(declarations, key_ty);
     let value_size = expression_type_size(declarations, value_ty);
@@ -1189,7 +1197,7 @@ fn expression_type_size(
     match expr {
         ExpressionType::Void => 0,
         ExpressionType::Unreachable => unreachable!(),
-        ExpressionType::Primitive(prim) => primitive_type_size(*prim),
+        ExpressionType::Primitive(prim) => primitive_type_size(primitive_to_physical(*prim)),
         ExpressionType::InstanceOf(id) => declarations[id].size(),
         ExpressionType::Pointer(_, _) => POINTER_SIZE,
         ExpressionType::Collection(CollectionType::Array(_)) => POINTER_SIZE * 3,
@@ -1202,16 +1210,28 @@ fn expression_type_size(
     }
 }
 
-fn primitive_type_size(prim: PrimitiveType) -> usize {
+fn primitive_to_physical(p: PrimitiveType) -> PhysicalPrimitive {
+    match p {
+        // TODO: should chars be 4 byte or 1 byte
+        PrimitiveType::Char => PhysicalPrimitive::Byte,
+        PrimitiveType::String => todo!(),
+        PrimitiveType::Int32 => PhysicalPrimitive::Int32,
+        PrimitiveType::Float32 => PhysicalPrimitive::Float32,
+        PrimitiveType::Int64 => PhysicalPrimitive::Int64,
+        PrimitiveType::Float64 => PhysicalPrimitive::Float64,
+        PrimitiveType::Bool => PhysicalPrimitive::Byte,
+        PrimitiveType::PointerSize => PhysicalPrimitive::PointerSize,
+    }
+}
+
+fn primitive_type_size(prim: PhysicalPrimitive) -> usize {
     match prim {
-        PrimitiveType::Char => 1,
-        PrimitiveType::String => POINTER_SIZE,
-        PrimitiveType::Int32 => 4,
-        PrimitiveType::Float32 => 4,
-        PrimitiveType::Int64 => 8,
-        PrimitiveType::Float64 => 8,
-        PrimitiveType::Bool => 1,
-        PrimitiveType::PointerSize => POINTER_SIZE,
+        PhysicalPrimitive::Int32 => 4,
+        PhysicalPrimitive::Float32 => 4,
+        PhysicalPrimitive::Int64 => 8,
+        PhysicalPrimitive::Float64 => 8,
+        PhysicalPrimitive::Byte => 1,
+        PhysicalPrimitive::PointerSize => POINTER_SIZE,
     }
 }
 
@@ -1238,9 +1258,19 @@ pub enum TypeLayoutValue {
     Union(HashMap<String, (usize, PhysicalType)>),
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum PhysicalPrimitive {
+    Byte,
+    Int32,
+    Float32,
+    Int64,
+    Float64,
+    PointerSize,
+}
+
 #[derive(Clone, Debug)]
 pub enum PhysicalType {
-    Primitive(PrimitiveType),
+    Primitive(PhysicalPrimitive),
     Referenced(TypeID),
     Nullable(Box<PhysicalType>),
     // TODO: unify with primitive pointer size?
@@ -1258,16 +1288,7 @@ pub enum PhysicalCollection {
 impl PhysicalType {
     fn size(&self, declarations: &HashMap<TypeID, DeclaredTypeLayout>) -> usize {
         match self {
-            PhysicalType::Primitive(p) => match p {
-                PrimitiveType::Char => todo!(),
-                PrimitiveType::String => todo!(),
-                PrimitiveType::Int32 => 4,
-                PrimitiveType::Float32 => 4,
-                PrimitiveType::Int64 => 8,
-                PrimitiveType::Float64 => 8,
-                PrimitiveType::Bool => 1,
-                PrimitiveType::PointerSize => POINTER_SIZE,
-            },
+            PhysicalType::Primitive(p) => primitive_type_size(*p),
             PhysicalType::Referenced(id) => declarations[id].size(),
             PhysicalType::Nullable(_) => todo!(),
             PhysicalType::Pointer | PhysicalType::FunctionPointer => POINTER_SIZE,
@@ -1382,8 +1403,9 @@ fn layout_type(
     match ty {
         ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
         ExpressionType::Primitive(p) => {
-            let size = primitive_type_size(*p);
-            (PhysicalType::Primitive(*p), size)
+            let p = primitive_to_physical(*p);
+            let size = primitive_type_size(p);
+            (PhysicalType::Primitive(p), size)
         }
         ExpressionType::InstanceOf(id) => {
             let size = layout_static_decl(declarations, layouts, declarations[id]);
@@ -1410,7 +1432,7 @@ fn layout_type(
 fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
     match ty {
         ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
-        ExpressionType::Primitive(p) => PhysicalType::Primitive(*p),
+        ExpressionType::Primitive(p) => PhysicalType::Primitive(primitive_to_physical(*p)),
         ExpressionType::InstanceOf(id) => PhysicalType::Referenced(*id),
         ExpressionType::Collection(c) => PhysicalType::Collection(match c {
             CollectionType::Array(_) => PhysicalCollection::Array,

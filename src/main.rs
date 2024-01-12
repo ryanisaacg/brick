@@ -26,30 +26,6 @@ async fn main() {
             None
         }),
     );
-    bindings.insert(
-        "prompt".to_string(),
-        bind_fn(|_, values| async move {
-            let Value::String(input) = &values[0] else {
-                panic!("expected string");
-            };
-            println!("{}", input);
-            let mut input = String::new();
-            stdin()
-                .read_line(&mut input)
-                .expect("should be able to read from stdin");
-            Some(Value::String(input.trim().to_string()))
-        }),
-    );
-    bindings.insert(
-        "print".to_string(),
-        bind_fn(|_, values| async move {
-            let Value::String(input) = &values[0] else {
-                panic!("expected string");
-            };
-            println!("{}", input);
-            None
-        }),
-    );
 
     println!(
         "{:?}",
