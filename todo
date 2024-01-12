@@ -13,13 +13,13 @@ linear IR:
 misc:
 - auto-dereference dot operator
 
-generic programming:
-- functions can take type parameters and typecheck properly
-- types can be parameterized
-- structs and unions can have associated functions
-- there are interfaces which can require specific associated functions
-- structs and unions can be passed in place of an interface
-- interfaces can constrain generic parameters
+type parameters:
+- non-reified / non-monomorphizing:
+    - functions can take type parameters and typecheck properly
+    - generic type syntax
+    - types can be parameterized
+- monomorphizing
+- generic types can be constrained by interfaces
 
 runtime:
 - runtime functions on collections can be either shared or unique pointers
