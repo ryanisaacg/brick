@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     id::TypeID,
-    runtime::array_runtime_functions,
+    runtime::{array_runtime_functions, dictionary_runtime_functions},
     typecheck::{
         CollectionType, ExpressionType, InterfaceType, PointerKind, PrimitiveType,
         StaticDeclaration, StructType,
@@ -81,10 +81,14 @@ pub fn rewrite(declarations: &HashMap<TypeID, &StaticDeclaration>, root: &mut Hi
                 _ => {}
             }
         }
-        ty @ ExpressionType::Collection(CollectionType::Array(_)) => {
+        ty @ ExpressionType::Collection(col_ty) => {
             let ty = ty.clone();
 
-            let runtime_fns = array_runtime_functions();
+            let runtime_fns = match col_ty {
+                CollectionType::Array(_) => array_runtime_functions(),
+                CollectionType::Dict(_, _) => dictionary_runtime_functions(),
+            };
+
             let runtime_fn = runtime_fns.get(func_name).unwrap();
 
             let mut temp_lhs = HirNode::dummy();

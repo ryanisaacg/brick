@@ -9,7 +9,7 @@ use crate::{
         InterfaceDeclarationValue, StructDeclarationValue, UnaryOp,
     },
     provenance::SourceRange,
-    runtime::{add_runtime_functions, array_runtime_functions},
+    runtime::{add_runtime_functions, array_runtime_functions, dictionary_runtime_functions},
 };
 
 use self::resolve::resolve_type_expr;
@@ -427,7 +427,12 @@ fn typecheck_function<'a>(
         context,
     )?;
 
-    if !is_assignable_to(&context.id_to_decl, &function_type.returns, return_value) {
+    if !is_assignable_to(
+        &context.id_to_decl,
+        None,
+        &function_type.returns,
+        return_value,
+    ) {
         return Err(TypecheckError::TypeMismatch {
             expected: function_type.returns.clone(),
             received: return_value.clone(),
@@ -474,7 +479,7 @@ fn typecheck_expression<'a>(
             if let Some(type_hint) = type_hint {
                 let ty = resolve_type_expr(&context.name_to_type_id, type_hint)?;
                 // TODO: generate type error
-                assert!(is_assignable_to(&context.id_to_decl, &ty, value_ty));
+                assert!(is_assignable_to(&context.id_to_decl, None, &ty, value_ty));
                 type_hint.ty.set(ty.clone()).unwrap();
                 current_scope.insert(name.clone(), (node.id.into(), ty));
             } else {
@@ -545,6 +550,14 @@ fn typecheck_expression<'a>(
                         todo!("array methods")
                     }
                 }
+                ExpressionType::Collection(CollectionType::Dict(_key_ty, _value_ty)) => {
+                    let runtime = dictionary_runtime_functions();
+                    if let Some(ty) = runtime.get(name) {
+                        ExpressionType::ReferenceTo(ty.decl.id())
+                    } else {
+                        todo!("dict methods")
+                    }
+                }
                 _ => todo!("lhs hand of dot operator"),
             }
         }
@@ -572,6 +585,7 @@ fn typecheck_expression<'a>(
                         typecheck_expression(index, outer_scopes, current_scope, context)?;
                     if !is_assignable_to(
                         &context.id_to_decl,
+                        None,
                         &ExpressionType::Primitive(PrimitiveType::PointerSize),
                         index_ty,
                     ) {
@@ -586,7 +600,7 @@ fn typecheck_expression<'a>(
                 ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) => {
                     let index_ty =
                         typecheck_expression(index, outer_scopes, current_scope, context)?;
-                    if !is_assignable_to(&context.id_to_decl, index_ty, key_ty) {
+                    if !is_assignable_to(&context.id_to_decl, None, index_ty, key_ty) {
                         return Err(TypecheckError::TypeMismatch {
                             received: index_ty.clone(),
                             expected: ExpressionType::Primitive(PrimitiveType::Int32),
@@ -611,9 +625,9 @@ fn typecheck_expression<'a>(
             let ExpressionType::Primitive(_) = fully_dereference(right) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
-            if is_assignable_to(&context.id_to_decl, left, right) {
+            if is_assignable_to(&context.id_to_decl, None, left, right) {
                 left.clone()
-            } else if is_assignable_to(&context.id_to_decl, right, left) {
+            } else if is_assignable_to(&context.id_to_decl, None, right, left) {
                 right.clone()
             } else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
@@ -625,6 +639,7 @@ fn typecheck_expression<'a>(
 
             if !is_assignable_to(
                 &context.id_to_decl,
+                None,
                 &ExpressionType::Primitive(PrimitiveType::Bool),
                 left,
             ) {
@@ -635,6 +650,7 @@ fn typecheck_expression<'a>(
             }
             if !is_assignable_to(
                 &context.id_to_decl,
+                None,
                 &ExpressionType::Primitive(PrimitiveType::Bool),
                 right,
             ) {
@@ -675,7 +691,7 @@ fn typecheck_expression<'a>(
             assert!(validate_lvalue(left));
             let right = typecheck_expression(right, outer_scopes, current_scope, context)?;
 
-            if !is_assignable_to(&context.id_to_decl, left_ty, right) {
+            if !is_assignable_to(&context.id_to_decl, None, left_ty, right) {
                 return Err(TypecheckError::TypeMismatch {
                     received: right.clone(),
                     expected: left_ty.clone(),
@@ -699,7 +715,7 @@ fn typecheck_expression<'a>(
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
 
-            if !is_assignable_to(&context.id_to_decl, left_ty, right) {
+            if !is_assignable_to(&context.id_to_decl, None, left_ty, right) {
                 return Err(TypecheckError::TypeMismatch {
                     received: right.clone(),
                     expected: left_ty.clone(),
@@ -716,7 +732,7 @@ fn typecheck_expression<'a>(
             };
             let ty = *ty.clone();
 
-            if !is_assignable_to(&context.id_to_decl, &ty, right_ty) {
+            if !is_assignable_to(&context.id_to_decl, None, &ty, right_ty) {
                 return Err(TypecheckError::TypeMismatch {
                     received: right_ty.clone(),
                     expected: ty.clone(),
@@ -769,9 +785,9 @@ fn typecheck_expression<'a>(
 
             match else_branch {
                 Some(else_branch) => {
-                    if is_assignable_to(&context.id_to_decl, if_branch, else_branch) {
+                    if is_assignable_to(&context.id_to_decl, None, if_branch, else_branch) {
                         if_branch.clone()
-                    } else if is_assignable_to(&context.id_to_decl, else_branch, if_branch) {
+                    } else if is_assignable_to(&context.id_to_decl, None, else_branch, if_branch) {
                         else_branch.clone()
                     } else {
                         panic!("if and else don't match");
@@ -826,27 +842,13 @@ fn typecheck_expression<'a>(
 
             for (arg, param) in args.iter().zip(params.iter()) {
                 let arg = typecheck_expression(arg, outer_scopes, current_scope, context)?;
-                match param {
-                    ExpressionType::TypeParameterReference(index) => {
-                        if generic_args[*index] == ExpressionType::Unreachable {
-                            generic_args[*index] = arg.clone();
-                        } else if !is_assignable_to(&context.id_to_decl, &generic_args[*index], arg)
-                        {
-                            return Err(TypecheckError::TypeMismatch {
-                                received: arg.clone(),
-                                expected: generic_args[*index].clone(),
-                            });
-                        }
-                    }
-                    _ => {
-                        if !is_assignable_to(&context.id_to_decl, param, arg) {
-                            return Err(TypecheckError::TypeMismatch {
-                                received: arg.clone(),
-                                expected: param.clone(),
-                            });
-                        }
-                    }
-                };
+                find_generic_bindings(&mut generic_args[..], param, arg);
+                if !is_assignable_to(&context.id_to_decl, Some(&generic_args), param, arg) {
+                    return Err(TypecheckError::TypeMismatch {
+                        received: arg.clone(),
+                        expected: param.clone(),
+                    });
+                }
             }
 
             func.returns.clone()
@@ -870,7 +872,7 @@ fn typecheck_expression<'a>(
                         };
                         let arg_field =
                             typecheck_expression(arg_field, outer_scopes, current_scope, context)?;
-                        if !is_assignable_to(&context.id_to_decl, param_field, arg_field) {
+                        if !is_assignable_to(&context.id_to_decl, None, param_field, arg_field) {
                             return Err(TypecheckError::TypeMismatch {
                                 received: arg_field.clone(),
                                 expected: param_field.clone(),
@@ -890,7 +892,7 @@ fn typecheck_expression<'a>(
                         return Err(TypecheckError::MissingField(node.provenance.clone()));
                     };
                     let arg = typecheck_expression(arg, outer_scopes, current_scope, context)?;
-                    if !is_assignable_to(&context.id_to_decl, param, arg) {
+                    if !is_assignable_to(&context.id_to_decl, None, param, arg) {
                         return Err(TypecheckError::TypeMismatch {
                             received: param.clone(),
                             expected: arg.clone(),
@@ -910,7 +912,7 @@ fn typecheck_expression<'a>(
             for (key, value) in entries.iter() {
                 let key_ty = typecheck_expression(key, outer_scopes, current_scope, context)?;
                 if let Some(expected_key_ty) = result_key_ty {
-                    if !is_assignable_to(&context.id_to_decl, key_ty, expected_key_ty) {
+                    if !is_assignable_to(&context.id_to_decl, None, key_ty, expected_key_ty) {
                         return Err(TypecheckError::TypeMismatch {
                             received: key_ty.clone(),
                             expected: expected_key_ty.clone(),
@@ -921,7 +923,7 @@ fn typecheck_expression<'a>(
                 }
                 let value_ty = typecheck_expression(value, outer_scopes, current_scope, context)?;
                 if let Some(expected_value_ty) = result_value_ty {
-                    if !is_assignable_to(&context.id_to_decl, value_ty, expected_value_ty) {
+                    if !is_assignable_to(&context.id_to_decl, None, value_ty, expected_value_ty) {
                         return Err(TypecheckError::TypeMismatch {
                             received: value_ty.clone(),
                             expected: expected_value_ty.clone(),
@@ -990,6 +992,7 @@ fn typecheck_expression<'a>(
                 let child_ty = typecheck_expression(child, outer_scopes, current_scope, context)?;
                 if !is_assignable_to(
                     &context.id_to_decl,
+                    None,
                     child_ty,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
                 ) {
@@ -1037,7 +1040,7 @@ fn typecheck_returns<'a>(
             .as_ref()
             .map(|child| child.ty.get().unwrap())
             .unwrap_or(&ExpressionType::Void);
-        if !is_assignable_to(&context.id_to_decl, expected_ty, return_ty) {
+        if !is_assignable_to(&context.id_to_decl, None, expected_ty, return_ty) {
             errors.push(TypecheckError::TypeMismatch {
                 expected: expected_ty.clone(),
                 received: return_ty.clone(),
@@ -1117,8 +1120,59 @@ fn resolve_name(
         .cloned()
 }
 
+fn find_generic_bindings(
+    generic_args: &mut [ExpressionType],
+    left: &ExpressionType,
+    right: &ExpressionType,
+) {
+    match (left, right) {
+        // All scalar expression types cannot contain a generic binding. They may not match
+        // the right side of the expression, but we're not checking that in this method
+        (
+            ExpressionType::Void
+            | ExpressionType::Unreachable
+            | ExpressionType::Primitive(_)
+            | ExpressionType::InstanceOf(_)
+            | ExpressionType::ReferenceTo(_)
+            | ExpressionType::Null,
+            _,
+        ) => {}
+        (
+            ExpressionType::Pointer(PointerKind::Shared, left),
+            ExpressionType::Pointer(PointerKind::Shared | PointerKind::Unique, right),
+        )
+        | (
+            ExpressionType::Pointer(PointerKind::Unique, left),
+            ExpressionType::Pointer(PointerKind::Unique, right),
+        )
+        | (
+            ExpressionType::Collection(CollectionType::Array(left)),
+            ExpressionType::Collection(CollectionType::Array(right)),
+        )
+        | (ExpressionType::Nullable(left), ExpressionType::Nullable(right)) => {
+            find_generic_bindings(generic_args, left, right);
+        }
+        (ExpressionType::Nullable(left), _) => find_generic_bindings(generic_args, left, right),
+        (
+            ExpressionType::Collection(CollectionType::Dict(left_key, left_value)),
+            ExpressionType::Collection(CollectionType::Dict(right_key, right_value)),
+        ) => {
+            find_generic_bindings(generic_args, left_key, right_key);
+            find_generic_bindings(generic_args, left_value, right_value);
+        }
+        (ExpressionType::TypeParameterReference(idx), _) => {
+            if generic_args[*idx] == ExpressionType::Unreachable {
+                generic_args[*idx] = right.clone();
+            }
+        }
+        (ExpressionType::Collection(CollectionType::Dict(..) | CollectionType::Array(_)), _)
+        | (ExpressionType::Pointer(_, _), _) => {}
+    }
+}
+
 pub fn is_assignable_to(
     id_to_decl: &HashMap<TypeID, &StaticDeclaration>,
+    generic_args: Option<&[ExpressionType]>,
     left: &ExpressionType,
     right: &ExpressionType,
 ) -> bool {
@@ -1126,7 +1180,13 @@ pub fn is_assignable_to(
     use PrimitiveType::*;
 
     match (left, right) {
-        (TypeParameterReference(_), _) | (_, TypeParameterReference(_)) => {
+        (TypeParameterReference(idx), _) => is_assignable_to(
+            id_to_decl,
+            generic_args,
+            &generic_args.unwrap()[*idx],
+            right,
+        ),
+        (_, TypeParameterReference(_)) => {
             todo!("can you ever end up here?")
         }
         (Unreachable, Unreachable) => true,
@@ -1142,18 +1202,22 @@ pub fn is_assignable_to(
         (Pointer(left_ty, left_inner), Pointer(right_ty, right_inner)) => {
             (left_ty == right_ty
                 || *left_ty == PointerKind::Shared && *right_ty == PointerKind::Unique)
-                && is_assignable_to(id_to_decl, left_inner, right_inner)
+                && is_assignable_to(id_to_decl, generic_args, left_inner, right_inner)
         }
         // TODO: auto-dereference in the IR
-        (left, Pointer(_, right_inner)) => is_assignable_to(id_to_decl, left, right_inner),
+        (left, Pointer(_, right_inner)) => {
+            is_assignable_to(id_to_decl, generic_args, left, right_inner)
+        }
         // TODO: support auto-dereferencing on lhs
         (Pointer(_, _), _right) => false,
 
         // Nullability
         (Nullable(_), Null) => true,
         (_, Null) => false,
-        (Nullable(left), Nullable(right)) => is_assignable_to(id_to_decl, left, right),
-        (Nullable(left), right) => is_assignable_to(id_to_decl, left, right),
+        (Nullable(left), Nullable(right)) => {
+            is_assignable_to(id_to_decl, generic_args, left, right)
+        }
+        (Nullable(left), right) => is_assignable_to(id_to_decl, generic_args, left, right),
         (_, Nullable(_)) => false,
 
         (Primitive(Float32), Primitive(Int32))

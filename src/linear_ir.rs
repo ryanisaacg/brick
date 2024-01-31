@@ -291,10 +291,12 @@ pub fn linearize_nodes(
                 }
             }
             HirNodeValue::Declaration(id) => {
-                values.push(stack_alloc(declarations, stack_entries, stack_offset, &node.ty, id).0);
+                let alloc_size = expression_type_size(declarations, &node.ty);
+                values.push(stack_alloc(stack_entries, stack_offset, alloc_size, id));
             }
             HirNodeValue::Parameter(idx, id) => {
-                values.push(stack_alloc(declarations, stack_entries, stack_offset, &node.ty, id).0);
+                let alloc_size = expression_type_size(declarations, &node.ty);
+                values.push(stack_alloc(stack_entries, stack_offset, alloc_size, id));
 
                 let (location, offset) = variable_location(stack_entries, id);
                 let ty = expr_ty_to_physical(&node.ty);
@@ -537,8 +539,8 @@ fn lower_expression(
         }
         HirNodeValue::NullableTraverse(lhs, rhs) => {
             let temp_id = VariableID::new();
-            let (alloc, alloc_size) =
-                stack_alloc(declarations, stack_entries, stack_offset, &lhs.ty, temp_id);
+            let alloc_size = expression_type_size(declarations, &lhs.ty);
+            let alloc = stack_alloc(stack_entries, stack_offset, alloc_size, temp_id);
             let (location, initial_offset) = variable_location(stack_entries, temp_id);
             stack_entries.remove(&temp_id);
 
@@ -835,8 +837,13 @@ fn lower_expression(
             to: primitive_to_physical(to),
         },
         HirNodeValue::DictIndex(dict, idx) => {
-            let (location, offset) =
-                dict_index_location(declarations, stack_entries, stack_offset, *dict, *idx);
+            let (location, offset) = dict_index_location_or_abort(
+                declarations,
+                stack_entries,
+                stack_offset,
+                *dict,
+                *idx,
+            );
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
@@ -1061,25 +1068,50 @@ fn lower_expression(
                 ),
             ])
         }
+        HirNodeValue::RuntimeCall(RuntimeFunction::DictionaryInsert, _args) => todo!(),
+        HirNodeValue::RuntimeCall(RuntimeFunction::DictionaryContains, mut args) => {
+            let key = args.pop().unwrap();
+            let HirNodeValue::TakeShared(dict) = args.pop().unwrap().value else {
+                unreachable!()
+            };
+            let ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) = &dict.ty
+            else {
+                unreachable!()
+            };
+
+            let key_ty = expr_ty_to_physical(key_ty);
+            let value_ty = expr_ty_to_physical(value_ty);
+            let entry_size = key_ty.size(declarations) + value_ty.size(declarations);
+            let PhysicalType::Primitive(key_ty) = key_ty else {
+                unreachable!()
+            };
+
+            let dict = lower_expression(declarations, stack_entries, stack_offset, *dict);
+            let key = lower_expression(declarations, stack_entries, stack_offset, key);
+
+            LinearNodeValue::If(
+                Box::new(dict_get_entry_for_key(dict, key, 0, key_ty, entry_size)),
+                vec![
+                    LinearNode::new(LinearNodeValue::Discard),
+                    LinearNode::new(LinearNodeValue::Byte(1)),
+                ],
+                Some(vec![LinearNode::new(LinearNodeValue::Byte(0))]),
+            )
+        }
     };
 
     LinearNode { value, provenance }
 }
 
 fn stack_alloc(
-    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &mut HashMap<VariableID, usize>,
     stack_offset: &mut usize,
-    ty: &ExpressionType,
+    alloc_size: usize,
     id: VariableID,
-) -> (LinearNode, usize) {
-    let alloc_size = expression_type_size(declarations, ty);
+) -> LinearNode {
     *stack_offset += alloc_size;
     stack_entries.insert(id, *stack_offset);
-    (
-        LinearNode::new(LinearNodeValue::StackAlloc(alloc_size)),
-        alloc_size,
-    )
+    LinearNode::new(LinearNodeValue::StackAlloc(alloc_size))
 }
 
 fn lower_lvalue(
@@ -1106,7 +1138,7 @@ fn lower_lvalue(
             &lvalue.ty,
         ),
         HirNodeValue::DictIndex(dict, idx) => {
-            dict_index_location(declarations, stack_entries, stack_offset, *dict, *idx)
+            dict_index_location_or_abort(declarations, stack_entries, stack_offset, *dict, *idx)
         }
 
         HirNodeValue::Parameter(_, _) => todo!(),
@@ -1239,7 +1271,7 @@ fn array_index_location(
     )
 }
 
-fn dict_index_location(
+fn dict_index_location_or_abort(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &mut HashMap<VariableID, usize>,
     stack_offset: &mut usize,
@@ -1259,74 +1291,114 @@ fn dict_index_location(
     let entry_size = key_size + value_size;
 
     let dict = lower_expression(declarations, stack_entries, stack_offset, dict);
+    let idx = lower_expression(declarations, stack_entries, stack_offset, idx);
+
+    let temp_key_id = VariableID::new();
+    let alloc = stack_alloc(stack_entries, stack_offset, key_size, temp_key_id);
+    let (key_location, key_offset) = variable_location(stack_entries, temp_key_id);
 
     (
         LinearNode::new(LinearNodeValue::Sequence(vec![
-            // pointer
-            LinearNode::write_temp(1, dict),
-            // length
-            LinearNode::write_temp(2, LinearNode::new(LinearNodeValue::TopOfStack)),
-            // capacity
-            LinearNode::new(LinearNodeValue::Discard),
-            // index
-            LinearNode::write_temp(3, LinearNode::size(0)),
-            LinearNode::new(LinearNodeValue::Loop(vec![
-                // Check if we've found the key
-                LinearNode::if_node(
-                    LinearNode::new(LinearNodeValue::Comparison(
-                        ComparisonOp::EqualTo,
-                        idx_ty,
-                        Box::new(LinearNode::read_memory(
-                            LinearNode::read_temp(1),
-                            0,
-                            PhysicalType::Primitive(idx_ty),
-                        )),
-                        // TODO: don't repeatedly call this
-                        Box::new(lower_expression(
-                            declarations,
-                            stack_entries,
-                            stack_offset,
-                            idx,
-                        )),
-                    )),
-                    vec![
-                        LinearNode::read_temp(1),
-                        LinearNode::new(LinearNodeValue::Break),
-                    ],
-                    None,
-                    None,
-                ),
-                // Increment the length counter and check if we've overflowed the bounds
-                LinearNode::write_temp(
-                    3,
-                    LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Add,
-                        LinearNode::read_temp(3),
-                        LinearNode::size(1),
-                    ),
-                ),
-                LinearNode::write_temp(
-                    1,
-                    LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Add,
-                        LinearNode::read_temp(1),
-                        LinearNode::size(entry_size),
-                    ),
-                ),
-                LinearNode::if_node(
-                    LinearNode::ptr_comparison(
-                        ComparisonOp::EqualTo,
-                        LinearNode::read_temp(2),
-                        LinearNode::read_temp(3),
-                    ),
-                    vec![LinearNode::new(LinearNodeValue::Abort)],
-                    None,
-                    None,
-                ),
-            ])),
+            alloc,
+            LinearNode::write_memory(
+                key_location.clone(),
+                key_offset,
+                PhysicalType::Primitive(idx_ty),
+                idx,
+            ),
+            LinearNode::if_node(
+                dict_get_entry_for_key(dict, key_location, key_offset, idx_ty, entry_size),
+                vec![
+                    LinearNode::new(LinearNodeValue::StackDealloc(key_size)),
+                    LinearNode::new(LinearNodeValue::TopOfStack),
+                ],
+                Some(vec![LinearNode::new(LinearNodeValue::Abort)]),
+                None,
+            ),
         ])),
         key_size,
     )
+}
+
+// TODO: make this work as a function, rather than inlined?
+/**
+ * Returns a nullable pointer to the given dictionary entry
+ */
+fn dict_get_entry_for_key(
+    dict_pointer: LinearNode,
+    key_location: LinearNode,
+    key_offset: usize,
+    key_ty: PhysicalPrimitive,
+    entry_size: usize,
+) -> LinearNode {
+    LinearNode::new(LinearNodeValue::Sequence(vec![
+        // key
+        LinearNode::write_temp(0, key_location),
+        // pointer
+        LinearNode::write_temp(1, dict_pointer),
+        // length
+        LinearNode::write_temp(2, LinearNode::new(LinearNodeValue::TopOfStack)),
+        // capacity
+        LinearNode::new(LinearNodeValue::Discard),
+        // index
+        LinearNode::write_temp(3, LinearNode::size(0)),
+        LinearNode::new(LinearNodeValue::Loop(vec![
+            // Check if we've found the key
+            LinearNode::if_node(
+                LinearNode::new(LinearNodeValue::Comparison(
+                    ComparisonOp::EqualTo,
+                    key_ty,
+                    Box::new(LinearNode::read_memory(
+                        LinearNode::read_temp(1),
+                        0,
+                        PhysicalType::Primitive(key_ty),
+                    )),
+                    Box::new(LinearNode::read_memory(
+                        LinearNode::read_temp(0),
+                        key_offset,
+                        PhysicalType::Primitive(key_ty),
+                    )),
+                )),
+                vec![
+                    LinearNode::read_temp(1),
+                    LinearNode::new(LinearNodeValue::Byte(1)),
+                    LinearNode::new(LinearNodeValue::Break),
+                ],
+                None,
+                None,
+            ),
+            // Increment the length counter and check if we've overflowed the bounds
+            LinearNode::write_temp(
+                3,
+                LinearNode::ptr_arithmetic(
+                    ArithmeticOp::Add,
+                    LinearNode::read_temp(3),
+                    LinearNode::size(1),
+                ),
+            ),
+            LinearNode::write_temp(
+                1,
+                LinearNode::ptr_arithmetic(
+                    ArithmeticOp::Add,
+                    LinearNode::read_temp(1),
+                    LinearNode::size(entry_size),
+                ),
+            ),
+            LinearNode::if_node(
+                LinearNode::ptr_comparison(
+                    ComparisonOp::EqualTo,
+                    LinearNode::read_temp(2),
+                    LinearNode::read_temp(3),
+                ),
+                vec![
+                    LinearNode::new(LinearNodeValue::Byte(0)),
+                    LinearNode::new(LinearNodeValue::Break),
+                ],
+                None,
+                None,
+            ),
+        ])),
+    ]))
 }
 
 // TODO: this should probably be determined by the backend...

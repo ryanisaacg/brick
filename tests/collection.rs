@@ -113,6 +113,22 @@ array[9]
 }
 
 #[tokio::test]
+#[should_panic]
+async fn append_illegal_type_to_array() {
+    eval(
+        r#"
+let array = list[0];
+while array.len() < 10 {
+    array.push(array.len());
+}
+array[9.0]
+"#,
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn basic_dict_keys() {
     let result = eval(
         r#"
@@ -137,4 +153,26 @@ val[1]
     .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(80)]);
+}
+
+#[tokio::test]
+async fn dict_contains() {
+    let result = eval(
+        r#"
+let value = 0;
+let d = dict{ [1]: 30 };
+let key = 1;
+if d.contains_key(ref key) {
+    value += 5;
+}
+key = 2;
+if d.contains_key(ref key) {
+    value += 50;
+}
+value
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(5)]);
 }

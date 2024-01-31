@@ -334,7 +334,7 @@ impl HirNode {
                 callback(variant_ty, child);
             }
             HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
-                if is_assignable_to(declarations, &lhs.ty, &rhs.ty) {
+                if is_assignable_to(declarations, None, &lhs.ty, &rhs.ty) {
                     callback(&lhs.ty, rhs);
                 } else {
                     callback(&rhs.ty, lhs);
@@ -438,7 +438,7 @@ impl HirNode {
                 callback(key_ty, idx);
             }
             HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
-                if is_assignable_to(declarations, &lhs.ty, &rhs.ty) {
+                if is_assignable_to(declarations, None, &lhs.ty, &rhs.ty) {
                     callback(&lhs.ty, rhs);
                 } else {
                     callback(&rhs.ty, lhs);

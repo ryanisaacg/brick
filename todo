@@ -22,7 +22,6 @@ type parameters:
 - generic types can be constrained by interfaces
 
 runtime:
-- runtime functions on collections can be either shared or unique pointers
 - possible exploration: runtime functions written in Rust or Zig?
 
 collections:
@@ -31,6 +30,7 @@ collections:
 - dicts:
     - insert new entries into dictionaries
     - use a hash table
+    - take references as keys, not the direct key type
     - allow empty dicts to type check (requires generic type syntax)
 - rc's:
     - basic RCs
