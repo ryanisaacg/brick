@@ -1734,12 +1734,14 @@ fn layout_type(
             (PhysicalType::Referenced(*id), size)
         }
         ExpressionType::Pointer(_, _) => (PhysicalType::Pointer, POINTER_SIZE),
-        ExpressionType::Collection(CollectionType::Array(_)) => {
-            (PhysicalType::Pointer, POINTER_SIZE)
-        }
-        ExpressionType::Collection(CollectionType::Dict(_, _)) => {
-            todo!()
-        }
+        ExpressionType::Collection(CollectionType::Array(_)) => (
+            PhysicalType::Collection(PhysicalCollection::Array),
+            POINTER_SIZE,
+        ),
+        ExpressionType::Collection(CollectionType::Dict(_, _)) => (
+            PhysicalType::Collection(PhysicalCollection::Dict),
+            POINTER_SIZE,
+        ),
         ExpressionType::Nullable(inner) => {
             let (inner, size) = layout_type(declarations, layouts, inner);
             (

@@ -4,7 +4,6 @@ use brick::{eval_with_bindings, Value};
 
 // Requirements
 // TODO: string support
-// TODO: push to dictionaries
 // TODO: string keys for dictionaries
 
 // Ergonomics
@@ -68,7 +67,7 @@ fn parse_json_node(): JsonValue {
         let idx = 0;
         while idx < entries {
             let key = value_as_string();
-            obj[key] = parse_json_node();
+            obj.insert(key, parse_json_node());
         }
         return JsonValue { Object: obj };
     }
