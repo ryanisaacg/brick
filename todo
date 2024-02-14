@@ -7,6 +7,8 @@ error reporting:
 - ability to continue in face of errors
 
 linear IR:
+- Remove hard-coded references to variable locations - force the backend to make those placements
+- Remove the "temp" system and introduce incrementing variable IDs, and allow backends to allocate registers as needed
 - (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
 - (maybe) AST rewrite the HIR to disambiguate between variable references and function references
 
