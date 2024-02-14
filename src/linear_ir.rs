@@ -14,9 +14,6 @@ use crate::{
 #[derive(Debug)]
 pub struct LinearFunction {
     pub id: FunctionID,
-    // TODO: memory layouts instead of expression types?
-    pub params: Vec<PhysicalType>,
-    pub returns: Option<PhysicalType>,
     pub body: Vec<LinearNode>,
 }
 
@@ -36,9 +33,6 @@ pub fn linearize_function(
     LinearFunction {
         id: function.id,
         body,
-        // TODO
-        params: Vec::new(),
-        returns: None,
     }
 }
 
@@ -277,7 +271,6 @@ pub fn linearize_nodes(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &mut HashMap<VariableID, usize>,
     stack_offset: &mut usize,
-    //blocks: &mut VecDeque<LinearBlock>,
     mut nodes: VecDeque<HirNode>,
 ) -> Vec<LinearNode> {
     let mut values = Vec::new();
@@ -337,8 +330,6 @@ pub fn linearize_nodes(
                     value: LinearNodeValue::Return(expr),
                     provenance: node.provenance,
                 });
-                // TODO: is this a legal optimization?
-                break;
             }
             // TODO: should If be an expression in linear IR?
             HirNodeValue::If(cond, if_block, else_block) => {
@@ -781,8 +772,7 @@ fn lower_expression(
                 .enumerate()
                 .find_map(|(idx, id)| {
                     if *id == fn_id {
-                        // TODO: fix this constant
-                        Some(idx * 4)
+                        Some(idx * FUNCTION_ID_SIZE)
                     } else {
                         None
                     }
@@ -1509,6 +1499,7 @@ const POINTER_SIZE: usize = 8;
 const UNION_TAG_SIZE: usize = 8;
 // TODO: alignment
 pub const NULL_TAG_SIZE: usize = 4;
+const FUNCTION_ID_SIZE: usize = 4;
 
 fn expression_type_size(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
@@ -1556,8 +1547,6 @@ fn primitive_type_size(prim: PhysicalPrimitive) -> usize {
         PhysicalPrimitive::PointerSize => POINTER_SIZE,
     }
 }
-
-// TODO
 
 // TODO: move to its own module?
 #[derive(Debug)]
@@ -1671,8 +1660,7 @@ fn layout_static_decl(
                 .associated_functions
                 .values()
                 .map(|decl| {
-                    // TODO: don't hardcode function ID
-                    size += 4;
+                    size += FUNCTION_ID_SIZE;
                     let StaticDeclaration::Func(func) = decl else {
                         unreachable!()
                     };
