@@ -1003,14 +1003,13 @@ fn lower_expression(
                     PhysicalType::Primitive(key_ty),
                     key.clone(),
                 ),
-                LinearNode::read_memory(
-                    LinearNode::read_register(ptr),
-                    dict_offset,
-                    PhysicalType::Collection(PhysicalCollection::Dict),
-                ),
                 LinearNode::if_node(
                     dict_get_entry_for_key(
-                        LinearNode::new(LinearNodeValue::TopOfStack),
+                        LinearNode::read_memory(
+                            LinearNode::read_register(ptr),
+                            dict_offset,
+                            PhysicalType::Collection(PhysicalCollection::Dict),
+                        ),
                         temp_key_location,
                         temp_key_offset,
                         key_ty,
@@ -1030,12 +1029,11 @@ fn lower_expression(
                         ),
                     ],
                     Some(vec![
-                        LinearNode::read_register(ptr),
                         // Pointer to newly allocated entry
                         LinearNode::write_register(
                             entry_register,
                             LinearNode::new(array_alloc_space_to_push(
-                                LinearNode::new(LinearNodeValue::TopOfStack),
+                                LinearNode::read_register(ptr),
                                 dict_offset,
                                 entry_size,
                                 None,
