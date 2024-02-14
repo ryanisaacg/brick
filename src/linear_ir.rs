@@ -591,7 +591,7 @@ fn lower_expression(
                         PhysicalType::Primitive(PhysicalPrimitive::Byte),
                     ),
                     vec![
-                        LinearNode::debug(LinearNode::read_memory(location, read_offset, ty)),
+                        LinearNode::read_memory(location, read_offset, ty),
                         LinearNode::bool_value(true),
                     ],
                     Some(vec![LinearNode::bool_value(false)]),
@@ -953,122 +953,114 @@ fn lower_expression(
                 unreachable!()
             };
             let array_inner_ty = expr_ty_to_physical(array_inner_ty);
-            let (location, content_offset) =
-                lower_lvalue(declarations, stack_entries, stack_offset, *arr);
-            let length_offset = content_offset + POINTER_SIZE;
-            let capacity_offset = length_offset + POINTER_SIZE;
+            let (location, offset) = lower_lvalue(declarations, stack_entries, stack_offset, *arr);
 
             let inserted = lower_expression(declarations, stack_entries, stack_offset, inserted);
 
+            LinearNodeValue::WriteMemory {
+                location: Box::new(LinearNode::new(array_alloc_space_to_push(
+                    location,
+                    offset,
+                    array_inner_ty.size(declarations),
+                    provenance.clone(),
+                ))),
+                offset: 0,
+                ty: array_inner_ty,
+                value: Box::new(inserted),
+            }
+        }
+        HirNodeValue::RuntimeCall(RuntimeFunction::DictionaryInsert, mut args) => {
+            let value = args.pop().unwrap();
+            let key = args.pop().unwrap();
+            let HirNodeValue::TakeUnique(dict) = args.pop().unwrap().value else {
+                unreachable!()
+            };
+            let ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) = &dict.ty
+            else {
+                unreachable!()
+            };
+
+            let key_ty = expr_ty_to_physical(key_ty);
+            let value_ty = expr_ty_to_physical(value_ty);
+            let key_size = key_ty.size(declarations);
+            let entry_size = key_size + value_ty.size(declarations);
+            let PhysicalType::Primitive(key_ty) = key_ty else {
+                unreachable!()
+            };
+
+            let (dict_location, dict_offset) =
+                lower_lvalue(declarations, stack_entries, stack_offset, *dict.clone());
+
+            let key = lower_expression(declarations, stack_entries, stack_offset, key);
+            let value = lower_expression(declarations, stack_entries, stack_offset, value);
+
+            let temp_key_id = VariableID::new();
+            let alloc = stack_alloc(stack_entries, stack_offset, key_size, temp_key_id);
+            let (temp_key_location, temp_key_offset) =
+                variable_location(stack_entries, temp_key_id);
+
             LinearNodeValue::Sequence(vec![
-                // pointer to array
-                LinearNode::write_temp(0, location),
-                // array length
-                LinearNode::write_temp(
-                    1,
-                    LinearNode::read_memory(
-                        LinearNode::read_temp(0),
-                        length_offset,
-                        PhysicalType::Pointer,
-                    ),
+                alloc,
+                // pointer to dict
+                LinearNode::write_temp(0, dict_location),
+                LinearNode::write_memory(
+                    temp_key_location.clone(),
+                    temp_key_offset,
+                    PhysicalType::Primitive(key_ty),
+                    key.clone(),
                 ),
-                // if (length + 1) * 2 > capacity, realloc
+                LinearNode::read_memory(
+                    LinearNode::read_temp(0),
+                    dict_offset,
+                    PhysicalType::Collection(PhysicalCollection::Dict),
+                ),
                 LinearNode::if_node(
-                    LinearNode::ptr_comparison(
-                        ComparisonOp::GreaterThan,
-                        LinearNode::ptr_arithmetic(
-                            ArithmeticOp::Multiply,
-                            LinearNode::ptr_arithmetic(
-                                ArithmeticOp::Add,
-                                LinearNode::read_temp(1),
-                                LinearNode::size(1),
-                            ),
-                            LinearNode::size(2),
-                        ),
-                        LinearNode::read_memory(
-                            LinearNode::read_temp(0),
-                            capacity_offset,
-                            PhysicalType::Pointer,
-                        ),
+                    dict_get_entry_for_key(
+                        LinearNode::new(LinearNodeValue::TopOfStack),
+                        temp_key_location,
+                        temp_key_offset,
+                        key_ty,
+                        entry_size,
                     ),
-                    // Increase capacity
                     vec![
-                        // new capacity = (length + 1) * 2
-                        LinearNode::write_temp(
-                            2,
-                            LinearNode::ptr_arithmetic(
-                                ArithmeticOp::Multiply,
-                                LinearNode::ptr_arithmetic(
-                                    ArithmeticOp::Add,
-                                    LinearNode::read_temp(1),
-                                    LinearNode::size(1),
-                                ),
-                                LinearNode::size(2),
-                            ),
-                        ),
-                        // allocate new buffer
-                        LinearNode::write_temp(
-                            3,
-                            LinearNode::heap_alloc_var(LinearNode::read_temp(2)),
-                        ),
-                        // copy old buffer to new buffer
-                        LinearNode::memcpy(
-                            LinearNode::read_memory(
-                                LinearNode::read_temp(0),
-                                content_offset,
-                                PhysicalType::Pointer,
-                            ),
-                            LinearNode::read_temp(3),
-                            LinearNode::ptr_arithmetic(
-                                ArithmeticOp::Multiply,
-                                LinearNode::read_temp(1),
-                                LinearNode::size(array_inner_ty.size(declarations)),
-                            ),
-                        ),
-                        // write new capacity
+                        // pointer to existing entry
+                        LinearNode::write_temp(1, LinearNode::new(LinearNodeValue::TopOfStack)),
                         LinearNode::write_memory(
-                            LinearNode::read_temp(0),
-                            capacity_offset,
-                            PhysicalType::Pointer,
-                            LinearNode::read_temp(2),
+                            LinearNode::read_temp(1),
+                            key_size,
+                            value_ty.clone(),
+                            value.clone(),
                         ),
                     ],
-                    None,
-                    provenance.clone(),
-                ),
-                // write value
-                LinearNode::write_memory(
-                    LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Add,
-                        LinearNode::read_memory(
-                            LinearNode::read_temp(0),
-                            content_offset,
-                            PhysicalType::Pointer,
+                    Some(vec![
+                        LinearNode::read_temp(0),
+                        // Pointer to newly allocated entry
+                        LinearNode::write_temp(
+                            1,
+                            LinearNode::new(array_alloc_space_to_push(
+                                LinearNode::new(LinearNodeValue::TopOfStack),
+                                dict_offset,
+                                entry_size,
+                                None,
+                            )),
                         ),
-                        LinearNode::ptr_arithmetic(
-                            ArithmeticOp::Multiply,
+                        LinearNode::write_memory(
                             LinearNode::read_temp(1),
-                            LinearNode::size(array_inner_ty.size(declarations)),
+                            0,
+                            PhysicalType::Primitive(key_ty),
+                            key,
                         ),
-                    ),
-                    0,
-                    array_inner_ty.clone(),
-                    inserted,
-                ),
-                // increment length
-                LinearNode::write_memory(
-                    LinearNode::read_temp(0),
-                    length_offset,
-                    PhysicalType::Pointer,
-                    LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Add,
-                        LinearNode::read_temp(1),
-                        LinearNode::size(1),
-                    ),
+                        LinearNode::write_memory(
+                            LinearNode::read_temp(1),
+                            key_size,
+                            value_ty,
+                            value,
+                        ),
+                    ]),
+                    provenance.clone(),
                 ),
             ])
         }
-        HirNodeValue::RuntimeCall(RuntimeFunction::DictionaryInsert, _args) => todo!(),
         HirNodeValue::RuntimeCall(RuntimeFunction::DictionaryContains, mut args) => {
             let key = args.pop().unwrap();
             let HirNodeValue::TakeShared(dict) = args.pop().unwrap().value else {
@@ -1318,6 +1310,116 @@ fn dict_index_location_or_abort(
         ])),
         key_size,
     )
+}
+
+fn array_alloc_space_to_push(
+    array_location: LinearNode,
+    array_offset: usize,
+    elem_size: usize,
+    provenance: Option<SourceRange>,
+) -> LinearNodeValue {
+    let length_offset = array_offset + POINTER_SIZE;
+    let capacity_offset = length_offset + POINTER_SIZE;
+
+    LinearNodeValue::Sequence(vec![
+        // pointer to array
+        LinearNode::write_temp(0, LinearNode::debug(array_location)),
+        // array length
+        LinearNode::write_temp(
+            1,
+            LinearNode::debug(LinearNode::read_memory(
+                LinearNode::read_temp(0),
+                length_offset,
+                PhysicalType::Pointer,
+            )),
+        ),
+        // if (length + 1) * 2 > capacity, realloc
+        LinearNode::if_node(
+            LinearNode::ptr_comparison(
+                ComparisonOp::GreaterThan,
+                LinearNode::ptr_arithmetic(
+                    ArithmeticOp::Multiply,
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Add,
+                        LinearNode::read_temp(1),
+                        LinearNode::size(1),
+                    ),
+                    LinearNode::size(2),
+                ),
+                LinearNode::debug(LinearNode::read_memory(
+                    LinearNode::read_temp(0),
+                    capacity_offset,
+                    PhysicalType::Pointer,
+                )),
+            ),
+            // Increase capacity
+            vec![
+                // new capacity = (length + 1) * 2
+                LinearNode::write_temp(
+                    2,
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Multiply,
+                        LinearNode::ptr_arithmetic(
+                            ArithmeticOp::Add,
+                            LinearNode::read_temp(1),
+                            LinearNode::size(1),
+                        ),
+                        LinearNode::size(2),
+                    ),
+                ),
+                // allocate new buffer
+                LinearNode::write_temp(3, LinearNode::heap_alloc_var(LinearNode::read_temp(2))),
+                // copy old buffer to new buffer
+                LinearNode::memcpy(
+                    LinearNode::read_memory(
+                        LinearNode::read_temp(0),
+                        array_offset,
+                        PhysicalType::Pointer,
+                    ),
+                    LinearNode::read_temp(3),
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Multiply,
+                        LinearNode::read_temp(1),
+                        LinearNode::size(elem_size),
+                    ),
+                ),
+                // write new capacity
+                LinearNode::write_memory(
+                    LinearNode::read_temp(0),
+                    capacity_offset,
+                    PhysicalType::Pointer,
+                    LinearNode::read_temp(2),
+                ),
+            ],
+            None,
+            provenance,
+        ),
+        // increment length
+        LinearNode::write_memory(
+            LinearNode::read_temp(0),
+            length_offset,
+            PhysicalType::Pointer,
+            LinearNode::ptr_arithmetic(
+                ArithmeticOp::Add,
+                LinearNode::read_temp(1),
+                LinearNode::size(1),
+            ),
+        ),
+        // Return pointer to now-writable location
+        LinearNode::ptr_arithmetic(
+            ArithmeticOp::Add,
+            LinearNode::read_memory(
+                LinearNode::read_temp(0),
+                array_offset,
+                PhysicalType::Pointer,
+            ),
+            LinearNode::ptr_arithmetic(
+                ArithmeticOp::Multiply,
+                LinearNode::read_temp(1),
+                LinearNode::size(elem_size),
+            ),
+        ),
+    ])
 }
 
 // TODO: make this work as a function, rather than inlined?

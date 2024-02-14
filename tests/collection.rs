@@ -176,3 +176,35 @@ value
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(5)]);
 }
+
+#[tokio::test]
+async fn insert_existing_dict() {
+    let result = eval(
+        r#"
+let val = dict{ [1]: 10, [2]: 15, [3]: 20 };
+val.insert(3, 800);
+val[1] + val[2] + val[3]
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(825)]);
+}
+
+#[tokio::test]
+async fn insert_new_in_dict() {
+    let result = eval(
+        r#"
+let val = dict{ [1]: 30 };
+let i = 1;
+while i < 10 {
+    val.insert(i, i * 3);
+    i += 1;
+}
+val[7]
+"#,
+    )
+    .await
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(21)]);
+}

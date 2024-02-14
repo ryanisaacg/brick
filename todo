@@ -28,10 +28,10 @@ collections:
 - arrays:
     - allow empty arrays to typecheck (requires generic type syntax)
 - dicts:
-    - insert new entries into dictionaries
     - use a hash table
     - take references as keys, not the direct key type
     - allow empty dicts to type check (requires generic type syntax)
+    - should set syntax auto-insert if necessary?
 - rc's:
     - basic RCs
     - can take RC'ed references to collections? maybe even RC'ed subreferences to user-defined collections?
