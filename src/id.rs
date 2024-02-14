@@ -101,3 +101,14 @@ impl VariableID {
         Self(VARIABLE_COUNTER.fetch_add(1, Ordering::Relaxed) as u32)
     }
 }
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RegisterID(u32);
+
+impl RegisterID {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        static REGISTER_COUNTER: AtomicUsize = AtomicUsize::new(1);
+        Self(REGISTER_COUNTER.fetch_add(1, Ordering::Relaxed) as u32)
+    }
+}

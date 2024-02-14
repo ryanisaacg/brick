@@ -109,6 +109,7 @@ pub fn interpret_code(
         // TODO
         evaluate_block(&functions, &mut [], &mut vm, &statement).unwrap();
     }
+    debug_assert_eq!(vm.temporaries.len(), 0);
 
     Ok(vm.op_stack)
 }

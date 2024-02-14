@@ -5,7 +5,7 @@ use crate::{
         ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirFunction, HirNode, HirNodeValue,
         UnaryLogicalOp,
     },
-    id::{FunctionID, TypeID, VariableID},
+    id::{FunctionID, RegisterID, TypeID, VariableID},
     provenance::SourceRange,
     runtime::RuntimeFunction,
     typecheck::{CollectionType, ExpressionType, PrimitiveType, StaticDeclaration},
@@ -107,16 +107,23 @@ impl LinearNode {
         }
     }
 
-    fn write_temp(tmp: u8, value: LinearNode) -> LinearNode {
+    fn write_register(id: RegisterID, value: LinearNode) -> LinearNode {
         LinearNode {
-            value: LinearNodeValue::WriteTemporary(tmp, Box::new(value)),
+            value: LinearNodeValue::WriteRegister(id, Box::new(value)),
             provenance: None,
         }
     }
 
-    fn read_temp(tmp: u8) -> LinearNode {
+    fn read_register(id: RegisterID) -> LinearNode {
         LinearNode {
-            value: LinearNodeValue::ReadTemporary(tmp),
+            value: LinearNodeValue::ReadRegister(id),
+            provenance: None,
+        }
+    }
+
+    fn kill_register(id: RegisterID) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::KillRegister(id),
             provenance: None,
         }
     }
@@ -228,11 +235,10 @@ pub enum LinearNodeValue {
     Abort,
 
     Sequence(Vec<LinearNode>),
-    /*
-     * Temporaries are bound to specific sequences
-     */
-    WriteTemporary(u8, Box<LinearNode>),
-    ReadTemporary(u8),
+    WriteRegister(RegisterID, Box<LinearNode>),
+    ReadRegister(RegisterID),
+    // TODO: automatically?
+    KillRegister(RegisterID),
 
     Arithmetic(
         ArithmeticOp,
@@ -655,28 +661,26 @@ fn lower_expression(
             let length = values.len();
 
             let inner_ty = *inner_ty;
-            let mut instrs = vec![LinearNode::write_temp(
-                0,
+            let buffer_ptr = RegisterID::new();
+
+            let mut instrs = vec![LinearNode::write_register(
+                buffer_ptr,
                 LinearNode::heap_alloc_const(size * values.len()),
             )];
             instrs.extend(values.into_iter().enumerate().map(|(idx, value)| {
-                LinearNode::new(LinearNodeValue::WriteMemory {
-                    location: Box::new(LinearNode::read_temp(0)),
-                    offset: size * idx,
-                    ty: expr_ty_to_physical(&inner_ty),
-                    value: Box::new(lower_expression(
-                        declarations,
-                        stack_entries,
-                        stack_offset,
-                        value,
-                    )),
-                })
+                LinearNode::write_memory(
+                    LinearNode::read_register(buffer_ptr),
+                    size * idx,
+                    expr_ty_to_physical(&inner_ty),
+                    lower_expression(declarations, stack_entries, stack_offset, value),
+                )
             }));
             // capacity
             instrs.push(LinearNode::size(length));
             // length
             instrs.push(LinearNode::size(length));
-            instrs.push(LinearNode::new(LinearNodeValue::ReadTemporary(0)));
+            instrs.push(LinearNode::read_register(buffer_ptr));
+            instrs.push(LinearNode::kill_register(buffer_ptr));
 
             LinearNodeValue::Sequence(instrs)
         }
@@ -688,28 +692,28 @@ fn lower_expression(
             let length = lower_expression(declarations, stack_entries, stack_offset, *length);
             let inner_ty = *inner_ty;
 
+            let length_register = RegisterID::new();
+            let buffer_register = RegisterID::new();
+            let index_register = RegisterID::new();
+
             LinearNodeValue::Sequence(vec![
-                // Store the length of the array in a temporary
-                LinearNode::write_temp(0, length),
-                // Allocate memory and store the pointer in another temporary
-                LinearNode::write_temp(
-                    1,
+                LinearNode::write_register(length_register, length),
+                LinearNode::write_register(
+                    buffer_register,
                     LinearNode::new(LinearNodeValue::HeapAlloc(Box::new(
                         LinearNode::ptr_arithmetic(
                             ArithmeticOp::Multiply,
                             LinearNode::size(size),
-                            LinearNode::read_temp(0),
+                            LinearNode::read_register(length_register),
                         ),
                     ))),
                 ),
-                // Create a temporary for indexing the array as we fill it in
-                LinearNode::write_temp(2, LinearNode::size(0)),
+                LinearNode::write_register(index_register, LinearNode::size(0)),
                 LinearNode::new(LinearNodeValue::Loop(vec![LinearNode::if_node(
-                    // idx = length?
                     LinearNode::ptr_comparison(
                         ComparisonOp::EqualTo,
-                        LinearNode::read_temp(2),
-                        LinearNode::read_temp(0),
+                        LinearNode::read_register(index_register),
+                        LinearNode::read_register(length_register),
                     ),
                     vec![LinearNode::new(LinearNodeValue::Break)],
                     Some(vec![
@@ -717,32 +721,36 @@ fn lower_expression(
                         LinearNode::write_memory(
                             LinearNode::ptr_arithmetic(
                                 ArithmeticOp::Add,
-                                LinearNode::read_temp(1),
+                                LinearNode::read_register(buffer_register),
                                 LinearNode::ptr_arithmetic(
                                     ArithmeticOp::Add,
                                     LinearNode::size(size),
-                                    LinearNode::read_temp(2),
+                                    LinearNode::read_register(index_register),
                                 ),
                             ),
                             0,
                             expr_ty_to_physical(&inner_ty),
                             lower_expression(declarations, stack_entries, stack_offset, *value),
                         ),
-                        // idx += 1
-                        LinearNode::write_temp(
-                            2,
+                        LinearNode::write_register(
+                            index_register,
                             LinearNode::ptr_arithmetic(
                                 ArithmeticOp::Add,
-                                LinearNode::read_temp(2),
+                                LinearNode::read_register(index_register),
                                 LinearNode::size(1),
                             ),
                         ),
                     ]),
                     None,
                 )])),
-                LinearNode::read_temp(0),
-                LinearNode::read_temp(0),
-                LinearNode::read_temp(1),
+                // Return values
+                LinearNode::read_register(length_register),
+                LinearNode::read_register(length_register),
+                LinearNode::read_register(buffer_register),
+                // Cleanup
+                LinearNode::kill_register(length_register),
+                LinearNode::kill_register(index_register),
+                LinearNode::kill_register(buffer_register),
             ])
         }
         HirNodeValue::InterfaceAddress(table) => {
@@ -853,42 +861,35 @@ fn lower_expression(
 
             let length = entries.len();
 
-            let mut instrs = vec![LinearNode::write_temp(
-                0,
+            let buffer = RegisterID::new();
+
+            let mut instrs = vec![LinearNode::write_register(
+                buffer,
                 LinearNode::heap_alloc_const(entry_size * length),
             )];
             let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
             instrs.extend(keys.into_iter().enumerate().map(|(idx, value)| {
-                LinearNode::new(LinearNodeValue::WriteMemory {
-                    location: Box::new(LinearNode::read_temp(0)),
-                    offset: entry_size * idx,
-                    ty: key_ty.clone(),
-                    value: Box::new(lower_expression(
-                        declarations,
-                        stack_entries,
-                        stack_offset,
-                        value,
-                    )),
-                })
+                LinearNode::write_memory(
+                    LinearNode::read_register(buffer),
+                    entry_size * idx,
+                    key_ty.clone(),
+                    lower_expression(declarations, stack_entries, stack_offset, value),
+                )
             }));
             instrs.extend(values.into_iter().enumerate().map(|(idx, value)| {
-                LinearNode::new(LinearNodeValue::WriteMemory {
-                    location: Box::new(LinearNode::read_temp(0)),
-                    offset: entry_size * idx + key_size,
-                    ty: value_ty.clone(),
-                    value: Box::new(lower_expression(
-                        declarations,
-                        stack_entries,
-                        stack_offset,
-                        value,
-                    )),
-                })
+                LinearNode::write_memory(
+                    LinearNode::read_register(buffer),
+                    entry_size * idx + key_size,
+                    value_ty.clone(),
+                    lower_expression(declarations, stack_entries, stack_offset, value),
+                )
             }));
-            // capacity
-            instrs.push(LinearNode::size(length));
-            // length
-            instrs.push(LinearNode::size(length));
-            instrs.push(LinearNode::new(LinearNodeValue::ReadTemporary(0)));
+            instrs.extend([
+                LinearNode::size(length),
+                LinearNode::size(length),
+                LinearNode::read_register(buffer),
+                LinearNode::kill_register(buffer),
+            ]);
 
             LinearNodeValue::Sequence(instrs)
         }
@@ -989,10 +990,13 @@ fn lower_expression(
             let (temp_key_location, temp_key_offset) =
                 variable_location(stack_entries, temp_key_id);
 
+            let ptr = RegisterID::new();
+            let entry_register = RegisterID::new();
+
             LinearNodeValue::Sequence(vec![
                 alloc,
                 // pointer to dict
-                LinearNode::write_temp(0, dict_location),
+                LinearNode::write_register(ptr, dict_location),
                 LinearNode::write_memory(
                     temp_key_location.clone(),
                     temp_key_offset,
@@ -1000,7 +1004,7 @@ fn lower_expression(
                     key.clone(),
                 ),
                 LinearNode::read_memory(
-                    LinearNode::read_temp(0),
+                    LinearNode::read_register(ptr),
                     dict_offset,
                     PhysicalType::Collection(PhysicalCollection::Dict),
                 ),
@@ -1014,19 +1018,22 @@ fn lower_expression(
                     ),
                     vec![
                         // pointer to existing entry
-                        LinearNode::write_temp(1, LinearNode::new(LinearNodeValue::TopOfStack)),
+                        LinearNode::write_register(
+                            entry_register,
+                            LinearNode::new(LinearNodeValue::TopOfStack),
+                        ),
                         LinearNode::write_memory(
-                            LinearNode::read_temp(1),
+                            LinearNode::read_register(entry_register),
                             key_size,
                             value_ty.clone(),
                             value.clone(),
                         ),
                     ],
                     Some(vec![
-                        LinearNode::read_temp(0),
+                        LinearNode::read_register(ptr),
                         // Pointer to newly allocated entry
-                        LinearNode::write_temp(
-                            1,
+                        LinearNode::write_register(
+                            entry_register,
                             LinearNode::new(array_alloc_space_to_push(
                                 LinearNode::new(LinearNodeValue::TopOfStack),
                                 dict_offset,
@@ -1035,13 +1042,13 @@ fn lower_expression(
                             )),
                         ),
                         LinearNode::write_memory(
-                            LinearNode::read_temp(1),
+                            LinearNode::read_register(entry_register),
                             0,
                             PhysicalType::Primitive(key_ty),
                             key,
                         ),
                         LinearNode::write_memory(
-                            LinearNode::read_temp(1),
+                            LinearNode::read_register(entry_register),
                             key_size,
                             value_ty,
                             value,
@@ -1049,6 +1056,8 @@ fn lower_expression(
                     ]),
                     provenance.clone(),
                 ),
+                LinearNode::kill_register(entry_register),
+                LinearNode::kill_register(ptr),
             ])
         }
         HirNodeValue::RuntimeCall(RuntimeFunction::DictionaryContains, mut args) => {
@@ -1215,28 +1224,24 @@ fn array_index_location(
     let size = expression_type_size(declarations, ty);
     let idx = lower_expression(declarations, stack_entries, stack_offset, idx);
     let arr = lower_expression(declarations, stack_entries, stack_offset, arr);
+
+    let idx_register = RegisterID::new();
+    let arr_ptr_register = RegisterID::new();
+    let length_register = RegisterID::new();
+
     (
         LinearNode::new(LinearNodeValue::Sequence(vec![
-            LinearNode::write_temp(3, idx),
-            LinearNode::write_temp(
-                0,
-                LinearNode::ptr_arithmetic(
-                    ArithmeticOp::Multiply,
-                    LinearNode::size(size),
-                    LinearNode::read_temp(3),
-                ),
+            LinearNode::write_register(idx_register, idx),
+            LinearNode::write_register(arr_ptr_register, arr),
+            LinearNode::write_register(
+                length_register,
+                LinearNode::new(LinearNodeValue::TopOfStack),
             ),
-            // pointer
-            LinearNode::write_temp(1, arr),
-            // length
-            LinearNode::write_temp(2, LinearNode::new(LinearNodeValue::TopOfStack)),
             LinearNode::if_node(
                 LinearNode::ptr_comparison(
                     ComparisonOp::GreaterEqualThan,
-                    // index
-                    LinearNode::read_temp(3),
-                    // length
-                    LinearNode::read_temp(2),
+                    LinearNode::read_register(idx_register),
+                    LinearNode::read_register(length_register),
                 ),
                 vec![LinearNode::abort()],
                 None,
@@ -1245,9 +1250,16 @@ fn array_index_location(
             LinearNode::new(LinearNodeValue::Discard),
             LinearNode::ptr_arithmetic(
                 ArithmeticOp::Add,
-                LinearNode::read_temp(0),
-                LinearNode::read_temp(1),
+                LinearNode::ptr_arithmetic(
+                    ArithmeticOp::Multiply,
+                    LinearNode::size(size),
+                    LinearNode::read_register(idx_register),
+                ),
+                LinearNode::read_register(arr_ptr_register),
             ),
+            LinearNode::kill_register(idx_register),
+            LinearNode::kill_register(arr_ptr_register),
+            LinearNode::kill_register(length_register),
         ])),
         0,
     )
@@ -1311,14 +1323,17 @@ fn array_alloc_space_to_push(
     let length_offset = array_offset + POINTER_SIZE;
     let capacity_offset = length_offset + POINTER_SIZE;
 
+    let arr_ptr = RegisterID::new();
+    let length_register = RegisterID::new();
+    let new_capacity_register = RegisterID::new();
+    let buffer_register = RegisterID::new();
+
     LinearNodeValue::Sequence(vec![
-        // pointer to array
-        LinearNode::write_temp(0, LinearNode::debug(array_location)),
-        // array length
-        LinearNode::write_temp(
-            1,
+        LinearNode::write_register(arr_ptr, LinearNode::debug(array_location)),
+        LinearNode::write_register(
+            length_register,
             LinearNode::debug(LinearNode::read_memory(
-                LinearNode::read_temp(0),
+                LinearNode::read_register(arr_ptr),
                 length_offset,
                 PhysicalType::Pointer,
             )),
@@ -1331,13 +1346,13 @@ fn array_alloc_space_to_push(
                     ArithmeticOp::Multiply,
                     LinearNode::ptr_arithmetic(
                         ArithmeticOp::Add,
-                        LinearNode::read_temp(1),
+                        LinearNode::read_register(length_register),
                         LinearNode::size(1),
                     ),
                     LinearNode::size(2),
                 ),
                 LinearNode::debug(LinearNode::read_memory(
-                    LinearNode::read_temp(0),
+                    LinearNode::read_register(arr_ptr),
                     capacity_offset,
                     PhysicalType::Pointer,
                 )),
@@ -1345,40 +1360,43 @@ fn array_alloc_space_to_push(
             // Increase capacity
             vec![
                 // new capacity = (length + 1) * 2
-                LinearNode::write_temp(
-                    2,
+                LinearNode::write_register(
+                    new_capacity_register,
                     LinearNode::ptr_arithmetic(
                         ArithmeticOp::Multiply,
                         LinearNode::ptr_arithmetic(
                             ArithmeticOp::Add,
-                            LinearNode::read_temp(1),
+                            LinearNode::read_register(length_register),
                             LinearNode::size(1),
                         ),
                         LinearNode::size(2),
                     ),
                 ),
                 // allocate new buffer
-                LinearNode::write_temp(3, LinearNode::heap_alloc_var(LinearNode::read_temp(2))),
+                LinearNode::write_register(
+                    buffer_register,
+                    LinearNode::heap_alloc_var(LinearNode::read_register(new_capacity_register)),
+                ),
                 // copy old buffer to new buffer
                 LinearNode::memcpy(
                     LinearNode::read_memory(
-                        LinearNode::read_temp(0),
+                        LinearNode::read_register(arr_ptr),
                         array_offset,
                         PhysicalType::Pointer,
                     ),
-                    LinearNode::read_temp(3),
+                    LinearNode::read_register(buffer_register),
                     LinearNode::ptr_arithmetic(
                         ArithmeticOp::Multiply,
-                        LinearNode::read_temp(1),
+                        LinearNode::read_register(length_register),
                         LinearNode::size(elem_size),
                     ),
                 ),
                 // write new capacity
                 LinearNode::write_memory(
-                    LinearNode::read_temp(0),
+                    LinearNode::read_register(arr_ptr),
                     capacity_offset,
                     PhysicalType::Pointer,
-                    LinearNode::read_temp(2),
+                    LinearNode::read_register(new_capacity_register),
                 ),
             ],
             None,
@@ -1386,12 +1404,12 @@ fn array_alloc_space_to_push(
         ),
         // increment length
         LinearNode::write_memory(
-            LinearNode::read_temp(0),
+            LinearNode::read_register(arr_ptr),
             length_offset,
             PhysicalType::Pointer,
             LinearNode::ptr_arithmetic(
                 ArithmeticOp::Add,
-                LinearNode::read_temp(1),
+                LinearNode::read_register(length_register),
                 LinearNode::size(1),
             ),
         ),
@@ -1399,16 +1417,20 @@ fn array_alloc_space_to_push(
         LinearNode::ptr_arithmetic(
             ArithmeticOp::Add,
             LinearNode::read_memory(
-                LinearNode::read_temp(0),
+                LinearNode::read_register(arr_ptr),
                 array_offset,
                 PhysicalType::Pointer,
             ),
             LinearNode::ptr_arithmetic(
                 ArithmeticOp::Multiply,
-                LinearNode::read_temp(1),
+                LinearNode::read_register(length_register),
                 LinearNode::size(elem_size),
             ),
         ),
+        LinearNode::kill_register(arr_ptr),
+        LinearNode::kill_register(length_register),
+        LinearNode::kill_register(new_capacity_register),
+        LinearNode::kill_register(buffer_register),
     ])
 }
 
@@ -1423,17 +1445,17 @@ fn dict_get_entry_for_key(
     key_ty: PhysicalPrimitive,
     entry_size: usize,
 ) -> LinearNode {
+    let key_ptr = RegisterID::new();
+    let dict_ptr = RegisterID::new();
+    let dict_length = RegisterID::new();
+    let index = RegisterID::new();
+
     LinearNode::new(LinearNodeValue::Sequence(vec![
-        // key
-        LinearNode::write_temp(0, key_location),
-        // pointer
-        LinearNode::write_temp(1, dict_pointer),
-        // length
-        LinearNode::write_temp(2, LinearNode::new(LinearNodeValue::TopOfStack)),
-        // capacity
+        LinearNode::write_register(key_ptr, key_location),
+        LinearNode::write_register(dict_ptr, dict_pointer),
+        LinearNode::write_register(dict_length, LinearNode::new(LinearNodeValue::TopOfStack)),
         LinearNode::new(LinearNodeValue::Discard),
-        // index
-        LinearNode::write_temp(3, LinearNode::size(0)),
+        LinearNode::write_register(index, LinearNode::size(0)),
         LinearNode::new(LinearNodeValue::Loop(vec![
             // Check if we've found the key
             LinearNode::if_node(
@@ -1441,18 +1463,18 @@ fn dict_get_entry_for_key(
                     ComparisonOp::EqualTo,
                     key_ty,
                     Box::new(LinearNode::read_memory(
-                        LinearNode::read_temp(1),
+                        LinearNode::read_register(dict_ptr),
                         0,
                         PhysicalType::Primitive(key_ty),
                     )),
                     Box::new(LinearNode::read_memory(
-                        LinearNode::read_temp(0),
+                        LinearNode::read_register(key_ptr),
                         key_offset,
                         PhysicalType::Primitive(key_ty),
                     )),
                 )),
                 vec![
-                    LinearNode::read_temp(1),
+                    LinearNode::read_register(dict_ptr),
                     LinearNode::new(LinearNodeValue::Byte(1)),
                     LinearNode::new(LinearNodeValue::Break),
                 ],
@@ -1460,27 +1482,27 @@ fn dict_get_entry_for_key(
                 None,
             ),
             // Increment the length counter and check if we've overflowed the bounds
-            LinearNode::write_temp(
-                3,
+            LinearNode::write_register(
+                index,
                 LinearNode::ptr_arithmetic(
                     ArithmeticOp::Add,
-                    LinearNode::read_temp(3),
+                    LinearNode::read_register(index),
                     LinearNode::size(1),
                 ),
             ),
-            LinearNode::write_temp(
-                1,
+            LinearNode::write_register(
+                dict_ptr,
                 LinearNode::ptr_arithmetic(
                     ArithmeticOp::Add,
-                    LinearNode::read_temp(1),
+                    LinearNode::read_register(dict_ptr),
                     LinearNode::size(entry_size),
                 ),
             ),
             LinearNode::if_node(
                 LinearNode::ptr_comparison(
                     ComparisonOp::EqualTo,
-                    LinearNode::read_temp(2),
-                    LinearNode::read_temp(3),
+                    LinearNode::read_register(dict_length),
+                    LinearNode::read_register(index),
                 ),
                 vec![
                     LinearNode::new(LinearNodeValue::Byte(0)),
@@ -1490,6 +1512,10 @@ fn dict_get_entry_for_key(
                 None,
             ),
         ])),
+        LinearNode::kill_register(key_ptr),
+        LinearNode::kill_register(dict_ptr),
+        LinearNode::kill_register(dict_length),
+        LinearNode::kill_register(index),
     ]))
 }
 

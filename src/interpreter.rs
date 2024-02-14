@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::{
     hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
-    id::{FunctionID, TypeID},
+    id::{FunctionID, RegisterID, TypeID},
     linear_ir::{
         DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
         PhysicalPrimitive, PhysicalType, TypeLayoutValue, NULL_TAG_SIZE,
@@ -67,7 +67,7 @@ pub enum Unwind {
 
 pub struct VM {
     pub memory: [u8; 1024],
-    pub temporaries: [usize; 16],
+    pub temporaries: HashMap<RegisterID, usize>,
     pub layouts: HashMap<TypeID, DeclaredTypeLayout>,
     pub op_stack: Vec<Value>,
     pub base_ptr: usize,
@@ -80,7 +80,7 @@ impl VM {
         let memory = [0; 1024];
         VM {
             memory,
-            temporaries: [0; 16],
+            temporaries: HashMap::new(),
             layouts,
             op_stack: Vec::new(),
             base_ptr: memory.len(),
@@ -142,12 +142,9 @@ pub fn evaluate_block(
 ) -> Result<(), Unwind> {
     match &node.value {
         LinearNodeValue::Sequence(seq) => {
-            let mut temp = [0; 16];
-            std::mem::swap(&mut vm.temporaries, &mut temp);
             for node in seq.iter() {
                 evaluate_block(fns, params, vm, node)?;
             }
-            std::mem::swap(&mut vm.temporaries, &mut temp);
         }
         LinearNodeValue::StackFrame => {
             vm.op_stack.push(Value::Size(vm.base_ptr));
@@ -401,15 +398,22 @@ pub fn evaluate_block(
         LinearNodeValue::FunctionID(x) => {
             vm.op_stack.push(Value::FunctionID(*x));
         }
-        LinearNodeValue::WriteTemporary(tmp, val) => {
+        LinearNodeValue::WriteRegister(tmp, val) => {
             evaluate_block(fns, params, vm, val)?;
             let Value::Size(val) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
             };
-            vm.temporaries[*tmp as usize] = val;
+            vm.temporaries.insert(*tmp, val);
         }
-        LinearNodeValue::ReadTemporary(tmp) => {
-            vm.op_stack.push(Value::Size(vm.temporaries[*tmp as usize]));
+        LinearNodeValue::ReadRegister(tmp) => {
+            vm.op_stack.push(Value::Size(
+                *vm.temporaries
+                    .get(tmp)
+                    .expect("temp to be defined before use"),
+            ));
+        }
+        LinearNodeValue::KillRegister(tmp) => {
+            vm.temporaries.remove(tmp);
         }
         LinearNodeValue::Discard => {
             vm.op_stack.pop().unwrap();
