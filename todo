@@ -14,6 +14,23 @@ linear IR:
 misc:
 - auto-dereference dot operator
 
+coroutines / generators / async:
+- syntax for declaring a coroutine:
+    - function header
+    - yield command
+- add yield to IR
+- add coroutine / sequence objects to type system, IR
+- support for coroutines in compilation:
+    - identify suspend points in the coroutine body
+    - save all current state when suspending
+    - resume state and return to correct suspend point when resuming
+
+static data:
+- add some syntax for declaring global state
+- handle global state in the HIR
+- handle global state in the LIR
+- handle global state in the interpreter
+
 type parameters:
 - non-reified / non-monomorphizing:
     - generic type syntax
