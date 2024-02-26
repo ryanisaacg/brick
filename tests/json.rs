@@ -15,9 +15,9 @@ use brick::{eval_with_bindings, Value};
 // TODO: empty array, dict operator
 // TODO: don't close quotes with escaped quotes
 
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn json_parse() {
+fn json_parse() {
     let result = eval_with_bindings(
         r#"
 extern fn ext_parse_json(val: string);
@@ -81,7 +81,6 @@ obj["hello"].Number
 "#,
         HashMap::new(),
     )
-    .await
     .unwrap();
     assert_eq!(&result[..], &[Value::Float64(1024.0)]);
 }

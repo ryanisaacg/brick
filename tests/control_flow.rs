@@ -1,8 +1,8 @@
 use assert_matches::assert_matches;
 use brick::{eval, Value};
 
-#[tokio::test]
-async fn branching() {
+#[test]
+fn branching() {
     let result = eval(
         r#"
 let i = 0;
@@ -14,13 +14,12 @@ if i < 6 {
 n
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(4)]);
 }
 
-#[tokio::test]
-async fn else_if() {
+#[test]
+fn else_if() {
     let result = eval(
         r#"
 let i = 0;
@@ -37,13 +36,12 @@ if i > 3 {
 n
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(80)]);
 }
 
-#[tokio::test]
-async fn basic_loop() {
+#[test]
+fn basic_loop() {
     let result = eval(
         r#"
 let i = 0;
@@ -55,7 +53,6 @@ while i < 6 {
 n
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(128)]);
 }

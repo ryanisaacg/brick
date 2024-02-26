@@ -1,8 +1,8 @@
 use assert_matches::assert_matches;
 use brick::{eval, Value};
 
-#[tokio::test]
-async fn associated_functions() {
+#[test]
+fn associated_functions() {
     eval(
         r#"
 interface HasArea {
@@ -16,12 +16,11 @@ fn area_2(shape: HasArea): f32 {
 
 "#,
     )
-    .await
     .unwrap();
 }
 
-#[tokio::test]
-async fn can_assign_structs_easy() {
+#[test]
+fn can_assign_structs_easy() {
     eval(
         r#"
 interface HasArea {
@@ -44,12 +43,11 @@ let x = Square { size: 2 };
 area_2(x);
 "#,
     )
-    .await
     .unwrap();
 }
 
-#[tokio::test]
-async fn can_assign_structs() {
+#[test]
+fn can_assign_structs() {
     let result = eval(
         r#"
 interface HasArea {
@@ -76,7 +74,6 @@ let a2 = area_2(x);
 a1 + a2
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(17)]);
 }

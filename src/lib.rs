@@ -2,16 +2,13 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    future::Future,
-    io,
-    sync::Arc,
+    fs, io,
 };
 
 use borrowck::BorrowError;
 use hir::HirModule;
-pub use interpreter::Value;
-use interpreter::{evaluate_block, ExternBinding, VM};
+use interpreter::{evaluate_block, VM};
+pub use interpreter::{ExternBinding, Value};
 use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;
 use typecheck::{resolve::resolve_module, typecheck, StaticDeclaration};
@@ -42,31 +39,22 @@ pub enum CompileError {
     BorrowcheckError(Vec<BorrowError>),
 }
 
-pub fn bind_fn<F>(
-    closure: impl Fn(&mut [u8], Vec<Value>) -> F + Send + Sync + 'static,
-) -> Arc<ExternBinding>
-where
-    F: Future<Output = Option<Value>> + Send + Sync + 'static,
-{
-    Arc::new(move |memory, stack| Box::pin(closure(memory, stack)))
-}
-
-pub async fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
-    let val = interpret_code("eval", source.to_string(), HashMap::new()).await?;
+pub fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
+    let val = interpret_code("eval", source.to_string(), HashMap::new())?;
 
     Ok(val)
 }
 
-pub async fn eval_with_bindings(
+pub fn eval_with_bindings(
     source: &str,
     bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
 ) -> Result<Vec<Value>, CompileError> {
-    let val = interpret_code("eval", source.to_string(), bindings).await?;
+    let val = interpret_code("eval", source.to_string(), bindings)?;
 
     Ok(val)
 }
 
-pub async fn interpret_code(
+pub fn interpret_code(
     source_name: &'static str,
     contents: String,
     mut bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
@@ -119,9 +107,7 @@ pub async fn interpret_code(
     let mut vm = VM::new(ty_declarations);
     for statement in statements {
         // TODO
-        evaluate_block(&functions, &mut [], &mut vm, &statement)
-            .await
-            .unwrap();
+        evaluate_block(&functions, &mut [], &mut vm, &statement).unwrap();
     }
 
     Ok(vm.op_stack)

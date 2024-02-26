@@ -1,8 +1,8 @@
 use assert_matches::assert_matches;
 use brick::{eval, typecheck_module, Value};
 
-#[tokio::test]
-async fn basic_construction() {
+#[test]
+fn basic_construction() {
     let result = eval(
         r#"
 struct Triple {
@@ -16,13 +16,12 @@ let tri = Triple { a: 1, b: 2, c: 3 };
 tri.a + tri.b + tri.c
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(6)]);
 }
 
-#[tokio::test]
-async fn associated_functions() {
+#[test]
+fn associated_functions() {
     let result = eval(
         r#"
 struct Point2 {
@@ -38,14 +37,13 @@ let x = Point2 { x: 3, y: -1 };
 x.length2()
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(10)]);
 }
 
-#[tokio::test]
+#[test]
 #[should_panic] // TODO: allow marking structs as copy
-async fn nested_structs() {
+fn nested_structs() {
     let result = eval(
         r#"
 struct Point2 {
@@ -79,13 +77,12 @@ tl = Point2 { x: 1000, y: 1000 };
 rect.area()
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(100)]);
 }
 
-#[tokio::test]
-async fn order_matters() {
+#[test]
+fn order_matters() {
     let result = eval(
         r#"
 struct Triplet {
@@ -106,13 +103,12 @@ let n = Triplet { a, b, c};
 n.a.x + n.b.y * n.c.x
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(7)]);
 }
 
-#[tokio::test]
-async fn assignment() {
+#[test]
+fn assignment() {
     let result = eval(
         r#"
 struct Container {
@@ -130,14 +126,13 @@ val.inner.x = 5;
 val.inner.x
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(5)]);
 }
 
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn bad_associated_functions() {
+fn bad_associated_functions() {
     eval(
         r#"
 struct Square {
@@ -149,7 +144,6 @@ struct Square {
 }
 "#,
     )
-    .await
     .unwrap();
 }
 

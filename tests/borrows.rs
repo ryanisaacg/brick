@@ -1,7 +1,7 @@
 use brick::{eval, CompileError};
 
-#[tokio::test]
-async fn basic_moves() {
+#[test]
+fn basic_moves() {
     let result = eval(
         r#"
 struct Data {}
@@ -12,8 +12,7 @@ fn test(): Data {
     x
 }
     "#,
-    )
-    .await;
+    );
     if let Err(CompileError::BorrowcheckError(error)) = result {
         assert_eq!(error.len(), 1);
     } else {
@@ -21,8 +20,8 @@ fn test(): Data {
     }
 }
 
-#[tokio::test]
-async fn conditional_move() {
+#[test]
+fn conditional_move() {
     let result = eval(
         r#"
 struct Data {}
@@ -35,8 +34,7 @@ fn test(): Data {
     x
 }
     "#,
-    )
-    .await;
+    );
     if let Err(CompileError::BorrowcheckError(error)) = result {
         assert_eq!(error.len(), 1);
     } else {

@@ -1,9 +1,9 @@
 use assert_matches::assert_matches;
 use brick::{eval, Value};
 
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn reference_immutability_violation() {
+fn reference_immutability_violation() {
     eval(
         r#"
 fn immutable_mutation(x: ref i32) {
@@ -14,12 +14,11 @@ let x = 2;
 immutable_mutation(ref x);
 "#,
     )
-    .await
     .unwrap();
 }
 
-#[tokio::test]
-async fn immutable_reference() {
+#[test]
+fn immutable_reference() {
     let result = eval(
         r#"
 fn plus_one(x: ref i32): i32 {
@@ -30,13 +29,12 @@ let x = 2;
 plus_one(ref x)
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(3)]);
 }
 
-#[tokio::test]
-async fn mutable_reference() {
+#[test]
+fn mutable_reference() {
     let result = eval(
         r#"
 let x = 2;
@@ -45,13 +43,12 @@ let y = unique x;
 *y
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(4)]);
 }
 
-#[tokio::test]
-async fn mutable_reference_param() {
+#[test]
+fn mutable_reference_param() {
     let result = eval(
         r#"
 fn unique_mutation(x: unique i32) {
@@ -63,13 +60,12 @@ unique_mutation(unique x);
 x
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(7)]);
 }
 
-#[tokio::test]
-async fn mutability_conversion_legal() {
+#[test]
+fn mutability_conversion_legal() {
     let result = eval(
         r#"
 fn add_one(x: unique i32) {
@@ -85,14 +81,13 @@ add_one(unique x);
 x
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(3)]);
 }
 
-#[tokio::test]
 #[should_panic]
-async fn mutability_conversion_illegal() {
+#[test]
+fn mutability_conversion_illegal() {
     eval(
         r#"
 fn add_one(x: unique i32) {
@@ -108,14 +103,13 @@ let x = 2;
 incremented(ref x);
 "#,
     )
-    .await
     .unwrap();
 }
 
 // TODO: borrow check non-main
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn mutable_borrow_already_borrowed() {
+fn mutable_borrow_already_borrowed() {
     eval(
         r#"
 fn main(): i32 {
@@ -127,14 +121,13 @@ fn main(): i32 {
 }
 "#,
     )
-    .await
     .unwrap();
 }
 
 // TODO: borrow check non-main
-#[tokio::test]
+#[test]
 #[should_panic]
-async fn double_mutable_borrow() {
+fn double_mutable_borrow() {
     eval(
         r#"
 fn main(): i32 {
@@ -146,12 +139,11 @@ fn main(): i32 {
 }
 "#,
     )
-    .await
     .unwrap();
 }
 
-#[tokio::test]
-async fn many_immutable_borrows() {
+#[test]
+fn many_immutable_borrows() {
     let result = eval(
         r#"
 fn main(): i32 {
@@ -164,7 +156,6 @@ fn main(): i32 {
 main()
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(30)]);
 }

@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use assert_matches::assert_matches;
-use brick::{bind_fn, eval, eval_with_bindings, interpret_code, Value};
+use brick::{eval, eval_with_bindings, interpret_code, ExternBinding, Value};
 
-#[tokio::test]
-async fn add() {
+#[test]
+fn add() {
     let result = eval(
         r#"
 // test test test
@@ -16,13 +17,12 @@ fn add(a: i32, b: i32): i32 {
 add(1, 2)
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(3)]);
 }
 
-#[tokio::test]
-async fn recursion() {
+#[test]
+fn recursion() {
     let result = eval(
         r#"
 fn fib(input: i32): i32 {
@@ -39,14 +39,13 @@ fn fib(input: i32): i32 {
 fib(5)
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(5)]);
 }
 
-#[tokio::test]
 #[should_panic]
-async fn return_mismatch() {
+#[test]
+fn return_mismatch() {
     eval(
         r#"
 fn function(): i32 {
@@ -54,19 +53,18 @@ fn function(): i32 {
 }
 "#,
     )
-    .await
     .unwrap();
 }
 
 static mut INCR_VALUE: i32 = 0;
 
-#[tokio::test]
-async fn extern_binding() {
-    let mut bindings = HashMap::new();
+#[test]
+fn extern_binding() {
+    let mut bindings: HashMap<String, Arc<ExternBinding>> = HashMap::new();
 
     bindings.insert(
         "next".to_string(),
-        bind_fn(|_, _| async move {
+        Arc::new(|_, _| {
             let x = unsafe { INCR_VALUE };
             unsafe {
                 INCR_VALUE += 1;
@@ -87,13 +85,12 @@ x
         .to_string(),
         bindings,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(2)]);
 }
 
-#[tokio::test]
-async fn complex_call() {
+#[test]
+fn complex_call() {
     let result = eval(
         r#"
 fn add(a: i32, b: i32): i32 {
@@ -110,28 +107,25 @@ add({
 })
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(15)]);
 }
 
-#[tokio::test]
-async fn extern_pointer() {
-    let mut funcs = HashMap::new();
+#[test]
+fn extern_pointer() {
+    let mut funcs: HashMap<String, Arc<ExternBinding>> = HashMap::new();
     funcs.insert(
         "increment".to_string(),
-        bind_fn(|memory, mut stack| {
-            std::future::ready({
-                let Value::Size(pointer) = stack.pop().unwrap() else {
-                    unreachable!()
-                };
-                let size = std::mem::size_of::<i32>();
-                let mut value: i32 = *bytemuck::from_bytes(&memory[pointer..(pointer + size)]);
-                value += 1;
-                memory[pointer..(pointer + size)].copy_from_slice(bytemuck::bytes_of(&value));
+        Arc::new(|memory, mut stack| {
+            let Value::Size(pointer) = stack.pop().unwrap() else {
+                unreachable!()
+            };
+            let size = std::mem::size_of::<i32>();
+            let mut value: i32 = *bytemuck::from_bytes(&memory[pointer..(pointer + size)]);
+            value += 1;
+            memory[pointer..(pointer + size)].copy_from_slice(bytemuck::bytes_of(&value));
 
-                None
-            })
+            None
         }),
     );
     let result = eval_with_bindings(
@@ -143,14 +137,13 @@ x
 "#,
         funcs,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(11)]);
 }
 
-#[tokio::test]
 #[should_panic]
-async fn illegal_return() {
+#[test]
+fn illegal_return() {
     eval(
         r#"
 fn add(a: i32, b: i32): i32 {
@@ -161,12 +154,11 @@ fn add(a: i32, b: i32): i32 {
 }
 "#,
     )
-    .await
     .unwrap();
 }
 
-#[tokio::test]
-async fn doesnt_converge() {
+#[test]
+fn doesnt_converge() {
     eval(
         r#"
 fn cmp(a: i32, b: i32): i32 {
@@ -182,12 +174,11 @@ fn cmp(a: i32, b: i32): i32 {
 }
 "#,
     )
-    .await
     .unwrap();
 }
 
-#[tokio::test]
-async fn void_return() {
+#[test]
+fn void_return() {
     let result = eval(
         r#"
 fn incr_if_positive(a: unique i32) {
@@ -202,7 +193,6 @@ incr_if_positive(unique x);
 x
 "#,
     )
-    .await
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(-3)]);
 }
