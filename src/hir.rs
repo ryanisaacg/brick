@@ -68,6 +68,7 @@ pub struct HirFunction {
     pub id: FunctionID,
     pub name: String,
     pub body: HirNode,
+    pub is_generator: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -145,8 +146,11 @@ impl HirNode {
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
             | HirNodeValue::Null
+            | HirNodeValue::Yield(None)
             | HirNodeValue::Return(None) => {}
-            HirNodeValue::Call(lhs, params) | HirNodeValue::VtableCall(lhs, _, params) => {
+            HirNodeValue::Call(lhs, params)
+            | HirNodeValue::VtableCall(lhs, _, params)
+            | HirNodeValue::GeneratorResume(lhs, params) => {
                 callback(lhs);
                 for param in params.iter_mut() {
                     callback(param);
@@ -162,6 +166,7 @@ impl HirNode {
             | HirNodeValue::Dereference(child)
             | HirNodeValue::ArrayLiteralLength(child, _)
             | HirNodeValue::Return(Some(child))
+            | HirNodeValue::Yield(Some(child))
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
             | HirNodeValue::StructToInterface { value: child, .. } => {
@@ -236,8 +241,11 @@ impl HirNode {
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
             | HirNodeValue::Null
+            | HirNodeValue::Yield(None)
             | HirNodeValue::Return(None) => {}
-            HirNodeValue::Call(lhs, params) | HirNodeValue::VtableCall(lhs, _, params) => {
+            HirNodeValue::Call(lhs, params)
+            | HirNodeValue::VtableCall(lhs, _, params)
+            | HirNodeValue::GeneratorResume(lhs, params) => {
                 callback(lhs);
                 for param in params.iter() {
                     callback(param);
@@ -252,6 +260,7 @@ impl HirNode {
             | HirNodeValue::Dereference(child)
             | HirNodeValue::UnaryLogical(_, child)
             | HirNodeValue::ArrayLiteralLength(child, _)
+            | HirNodeValue::Yield(Some(child))
             | HirNodeValue::Return(Some(child))
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
@@ -368,6 +377,14 @@ impl HirNode {
                     callback(ty, &params[i]);
                 }
             }
+            HirNodeValue::GeneratorResume(lhs, params) => {
+                let ExpressionType::Generator { param_ty, .. } = &lhs.ty else {
+                    unreachable!()
+                };
+                if param_ty.as_ref() != &ExpressionType::Void {
+                    callback(param_ty.as_ref(), params.last().unwrap());
+                }
+            }
             HirNodeValue::RuntimeCall(runtime_fn, params) => {
                 let StaticDeclaration::Func(func) = &info_for_function(runtime_fn).decl else {
                     unreachable!()
@@ -379,7 +396,7 @@ impl HirNode {
             HirNodeValue::Assignment(lhs, rhs) => {
                 callback(&lhs.ty, rhs);
             }
-            HirNodeValue::Return(_) => {
+            HirNodeValue::Yield(_) | HirNodeValue::Return(_) => {
                 // TODO: check return types
             }
             HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Sequence(_) => {
@@ -480,6 +497,14 @@ impl HirNode {
                     callback(ty, &mut params[i]);
                 }
             }
+            HirNodeValue::GeneratorResume(lhs, params) => {
+                let ExpressionType::Generator { param_ty, .. } = &lhs.ty else {
+                    unreachable!()
+                };
+                if param_ty.as_ref() != &ExpressionType::Void {
+                    callback(param_ty.as_ref(), params.last_mut().unwrap());
+                }
+            }
             HirNodeValue::RuntimeCall(runtime_fn, params) => {
                 let StaticDeclaration::Func(func) = &info_for_function(runtime_fn).decl else {
                     unreachable!()
@@ -491,7 +516,7 @@ impl HirNode {
             HirNodeValue::Assignment(lhs, rhs) => {
                 callback(&lhs.ty, rhs);
             }
-            HirNodeValue::Return(_) => {
+            HirNodeValue::Yield(_) | HirNodeValue::Return(_) => {
                 // TODO: check return types
             }
             HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Sequence(_) => {
@@ -531,6 +556,7 @@ pub enum HirNodeValue {
     Declaration(VariableID),
 
     Call(Box<HirNode>, Vec<HirNode>),
+    GeneratorResume(Box<HirNode>, Vec<HirNode>),
     // TODO: break this up into Union Access and Struct Access?
     Access(Box<HirNode>, String),
     NullableTraverse(Box<HirNode>, Vec<String>),
@@ -544,6 +570,7 @@ pub enum HirNodeValue {
     UnaryLogical(UnaryLogicalOp, Box<HirNode>),
 
     Return(Option<Box<HirNode>>),
+    Yield(Option<Box<HirNode>>),
 
     Int(i64),
     Float(f64),

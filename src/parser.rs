@@ -40,6 +40,7 @@ impl<'a> AstNode<'a> {
 
         match &self.value {
             Return(Some(child))
+            | Yield(Some(child))
             | TakeRef(child)
             | TakeUnique(child)
             | ArrayLiteralLength(child, _)
@@ -52,7 +53,13 @@ impl<'a> AstNode<'a> {
             | ArrayType(child) => {
                 callback(child);
             }
-            DictType(left, right) | BinExpr(_, left, right) | While(left, right) => {
+            DictType(left, right)
+            | BinExpr(_, left, right)
+            | While(left, right)
+            | GeneratorType {
+                yield_ty: left,
+                param_ty: right,
+            } => {
                 callback(right);
                 callback(left);
             }
@@ -157,7 +164,9 @@ impl<'a> AstNode<'a> {
             | Null
             | CharLiteral(_)
             | StringLiteral(_)
-            | Return(None) => {}
+            | Return(None)
+            | Yield(None)
+            | VoidType => {}
         }
     }
 }
@@ -174,6 +183,7 @@ pub struct FunctionDeclarationValue<'a> {
      * is available in the environment
      */
     pub is_extern: bool,
+    pub is_generator: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -222,6 +232,7 @@ pub enum AstNodeValue<'a> {
     Declaration(String, Option<&'a mut AstNode<'a>>, &'a mut AstNode<'a>),
     Import(String),
     Return(Option<&'a mut AstNode<'a>>),
+    Yield(Option<&'a mut AstNode<'a>>),
     // Any non-specific expression that ends in ; is a statement
     Statement(&'a mut AstNode<'a>),
 
@@ -255,11 +266,17 @@ pub enum AstNodeValue<'a> {
     Deref(&'a mut AstNode<'a>),
 
     // Types
+    // TODO: unify
+    VoidType,
     UniqueType(&'a mut AstNode<'a>),
     SharedType(&'a mut AstNode<'a>),
     ArrayType(&'a mut AstNode<'a>),
     DictType(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
     NullableType(&'a mut AstNode<'a>),
+    GeneratorType {
+        yield_ty: &'a mut AstNode<'a>,
+        param_ty: &'a mut AstNode<'a>,
+    },
 }
 
 impl<'a> AstNodeValue<'a> {
@@ -355,6 +372,7 @@ fn statement<'a>(
             TokenValue::Let
             | TokenValue::Import
             | TokenValue::Function
+            | TokenValue::Gen
             | TokenValue::Extern
             | TokenValue::Struct
             | TokenValue::Union
@@ -387,7 +405,17 @@ fn statement<'a>(
                         statement
                     }
                     TokenValue::Extern => extern_function_declaration(source, context, cursor)?,
-                    TokenValue::Function => function_declaration(source, context, cursor)?,
+                    TokenValue::Function => function_declaration(source, context, cursor, false)?,
+                    TokenValue::Gen => {
+                        let token = assert_next_lexeme_eq(
+                            source,
+                            TokenValue::Function,
+                            cursor,
+                            "expected fn after gen",
+                        )?;
+                        let cursor = token.range.end();
+                        function_declaration(source, context, cursor, true)?
+                    }
                     TokenValue::Struct => struct_declaration(source, context, cursor)?,
                     TokenValue::Union => union_declaration(source, context, cursor)?,
                     TokenValue::Interface => interface_declaration(source, context, cursor)?,
@@ -561,6 +589,7 @@ fn interface_or_struct_body<'a>(
                         returns,
                         body: add_node(context, body),
                         is_extern: true,
+                        is_generator: false,
                     }),
                     SourceRange::new(start, cursor),
                 ));
@@ -698,6 +727,7 @@ fn extern_function_declaration<'a>(
                     returns,
                     body: add_node(context, body),
                     is_extern: true,
+                    is_generator: false,
                 }),
                 end,
             )
@@ -718,6 +748,7 @@ fn function_declaration<'a>(
     source: &mut TokenIter,
     context: &'a Arena<AstNode<'a>>,
     start: SourceMarker,
+    is_generator: bool,
 ) -> Result<AstNode<'a>, ParseError> {
     let FunctionHeader {
         name,
@@ -743,6 +774,7 @@ fn function_declaration<'a>(
             returns,
             body: add_node(context, body),
             is_extern: false,
+            is_generator,
         }),
         provenance,
     ))
@@ -899,6 +931,7 @@ fn type_expression<'a>(
 ) -> Result<AstNode<'a>, ParseError> {
     let next = next_token(source, cursor, "expected type")?;
     let node = match next.value {
+        TokenValue::Void => AstNode::new(AstNodeValue::VoidType, next.range),
         ptr @ (TokenValue::Unique | TokenValue::Ref) => {
             let subtype = type_expression(source, context, next.range.end())?;
             let end = subtype.provenance.end();
@@ -970,8 +1003,45 @@ fn type_expression<'a>(
                 SourceRange::new(next.range.start(), token.range.end()),
             )
         }
-        // TODO: reserve array word
-        TokenValue::Word(name) => AstNode::new(AstNodeValue::name(name), next.range),
+        TokenValue::Word(name) => {
+            if name == "generator" {
+                let token = assert_next_lexeme_eq(
+                    source,
+                    TokenValue::OpenSquare,
+                    next.range.end(),
+                    "expected [ after generator type",
+                )?;
+
+                let yield_ty = type_expression(source, context, token.range.end())?;
+                let cursor = yield_ty.provenance.end();
+                let yield_ty = add_node(context, yield_ty);
+
+                assert_next_lexeme_eq(
+                    source,
+                    TokenValue::Comma,
+                    cursor,
+                    "expected , after yield type",
+                )?;
+
+                let param_ty = type_expression(source, context, token.range.end())?;
+                let cursor = param_ty.provenance.end();
+                let param_ty = add_node(context, param_ty);
+
+                let token = assert_next_lexeme_eq(
+                    source,
+                    TokenValue::CloseSquare,
+                    cursor,
+                    "expected ] after generator type",
+                )?;
+
+                AstNode::new(
+                    AstNodeValue::GeneratorType { yield_ty, param_ty },
+                    SourceRange::new(next.range.start(), token.range.end()),
+                )
+            } else {
+                AstNode::new(AstNodeValue::name(name), next.range)
+            }
+        }
         _ => {
             return Err(ParseError::UnexpectedToken(
                 Box::new(next),
@@ -1048,6 +1118,19 @@ fn expression_pratt<'a>(
         TokenValue::CharacterLiteral(c) => AstNode::new(AstNodeValue::CharLiteral(c), range),
         TokenValue::StringLiteral(s) => AstNode::new(AstNodeValue::StringLiteral(s), range),
         TokenValue::Int(int) => try_decimal(source, int as i64, range)?,
+        TokenValue::Yield => {
+            let next = peek_token(source, cursor, "expected yielded value after yield")?;
+            if next.value == TokenValue::Void {
+                let next = already_peeked_token(source)?;
+                let range = SourceRange::new(start, next.range.end());
+                AstNode::new(AstNodeValue::Yield(None), range)
+            } else {
+                let inner = expression(source, context, cursor, true)?;
+                let range = SourceRange::new(start, inner.provenance.end());
+                let inner = context.alloc(inner);
+                AstNode::new(AstNodeValue::Yield(Some(inner)), range)
+            }
+        }
         // Prefix operator
         value => {
             let Some(((), right_binding)) = prefix_binding_power(&value) else {

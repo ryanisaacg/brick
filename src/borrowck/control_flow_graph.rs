@@ -215,6 +215,7 @@ fn create_graph_for_node<'a>(
         | Call(_, _)
         | VtableCall(_, _, _)
         | RuntimeCall(_, _)
+        | GeneratorResume(_, _)
         | TakeUnique(_)
         | TakeShared(_)
         | StructLiteral { .. }
@@ -248,7 +249,7 @@ fn create_graph_for_node<'a>(
 
             (start, current_node)
         }
-        Return(_) => {
+        Yield(_) | Return(_) => {
             let node = graph.add_node(IntermediateNode::Expression(current));
             graph.add_edge(node, function_exit, CfgEdge::Goto);
 

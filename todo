@@ -15,15 +15,12 @@ misc:
 - auto-dereference dot operator
 
 coroutines / generators / async:
-- syntax for declaring a coroutine:
-    - function header
-    - yield command
 - add yield to IR
-- add coroutine / sequence objects to type system, IR
 - support for coroutines in compilation:
     - identify suspend points in the coroutine body
     - save all current state when suspending
     - resume state and return to correct suspend point when resuming
+- generators on associated functions
 
 static data:
 - add some syntax for declaring global state
@@ -43,6 +40,7 @@ runtime:
 - possible exploration: runtime functions written in Rust or Zig?
 
 collections:
+- tuples
 - arrays:
     - allow empty arrays to typecheck (requires generic type syntax)
 - dicts:
@@ -79,6 +77,7 @@ syntax:
 - remove ; and , requirements?
 - keyword arguments
 - maybe separate syntax for i64 / f64 literals
+- `loop` construct
 
 import support:
 - allow imports to have nested paths (sugar for recursively expanding?)
@@ -166,10 +165,6 @@ errors:
 - try operator returns an error if one exists
 - functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
 - allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
-
-coroutines:
-- decide on some coroutine facility
-- coroutines hold parameter borrows for their lifetime
 
 extern:
 - opaque extern pointers

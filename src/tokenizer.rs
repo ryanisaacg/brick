@@ -74,6 +74,7 @@ pub enum TokenValue {
     True,
     False,
     Function,
+    Gen,
     Import,
     Struct,
     Union,
@@ -85,6 +86,8 @@ pub enum TokenValue {
     Dict,
     List,
     Interface,
+    Yield,
+    Void,
 
     // Comments
     LineComment(String),
@@ -135,6 +138,7 @@ impl fmt::Display for TokenValue {
             True => write!(f, "keyword true"),
             False => write!(f, "keyword false"),
             Function => write!(f, "keyword fn"),
+            Gen => write!(f, "keyword gen"),
             Import => write!(f, "keyword import"),
             Struct => write!(f, "keyword struct"),
             Union => write!(f, "keyword union"),
@@ -146,6 +150,8 @@ impl fmt::Display for TokenValue {
             Dict => write!(f, "keyword dict"),
             List => write!(f, "keyword list"),
             Interface => write!(f, "keyword interface"),
+            Yield => write!(f, "keyword yield"),
+            Void => write!(f, "keyword void"),
             LineComment(comment) => write!(f, "// {}", comment),
         }
     }
@@ -263,6 +269,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "false" => TokenValue::False,
                         "let" => TokenValue::Let,
                         "fn" => TokenValue::Function,
+                        "gen" => TokenValue::Gen,
                         "import" => TokenValue::Import,
                         "struct" => TokenValue::Struct,
                         "union" => TokenValue::Union,
@@ -276,6 +283,8 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "interface" => TokenValue::Interface,
                         "and" => TokenValue::BooleanAnd,
                         "or" => TokenValue::BooleanOr,
+                        "yield" => TokenValue::Yield,
+                        "void" => TokenValue::Void,
                         _ => TokenValue::Word(word),
                     }
                 }

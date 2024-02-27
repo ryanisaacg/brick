@@ -68,6 +68,7 @@ fn lower_function<'ast>(
         id: func.id,
         name: func.name,
         body,
+        is_generator: func.func.is_generator,
     }
 }
 
@@ -149,6 +150,9 @@ fn lower_node<'ast>(
 
         AstNodeValue::Return(inner) => {
             HirNodeValue::Return(inner.as_ref().map(|inner| lower_node_alloc(decls, inner)))
+        }
+        AstNodeValue::Yield(inner) => {
+            HirNodeValue::Yield(inner.as_ref().map(|inner| lower_node_alloc(decls, inner)))
         }
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let expr_ty = fully_dereference(left.ty.get().unwrap());
@@ -279,12 +283,21 @@ fn lower_node<'ast>(
             }
         }
         AstNodeValue::Call(func, params) => {
-            let func = lower_node_alloc(decls, func);
-            let params = params
-                .iter()
-                .map(|param| lower_node(decls, param))
-                .collect();
-            HirNodeValue::Call(func, params)
+            if let Some(ExpressionType::Generator { .. }) = &func.ty.get() {
+                let func = lower_node_alloc(decls, func);
+                let params = params
+                    .iter()
+                    .map(|param| lower_node(decls, param))
+                    .collect();
+                HirNodeValue::GeneratorResume(func, params)
+            } else {
+                let func = lower_node_alloc(decls, func);
+                let params = params
+                    .iter()
+                    .map(|param| lower_node(decls, param))
+                    .collect();
+                HirNodeValue::Call(func, params)
+            }
         }
         AstNodeValue::RecordLiteral { name, fields } => {
             let AstNodeValue::Name { referenced_id, .. } = &name.value else {
@@ -333,11 +346,13 @@ fn lower_node<'ast>(
         | AstNodeValue::InterfaceDeclaration(_)
         | AstNodeValue::Import(_)
         | AstNodeValue::UniqueType(_)
+        | AstNodeValue::VoidType
         | AstNodeValue::SharedType(_)
         | AstNodeValue::NullableType(_)
         | AstNodeValue::RequiredFunction(_)
         | AstNodeValue::DictType(_, _)
-        | AstNodeValue::ArrayType(_) => unreachable!("Can't have these in a function body"),
+        | AstNodeValue::ArrayType(_)
+        | AstNodeValue::GeneratorType { .. } => unreachable!("Can't have these in a function body"),
     };
 
     HirNode::from_ast(node, value, node.ty.get().expect("type filled").clone())

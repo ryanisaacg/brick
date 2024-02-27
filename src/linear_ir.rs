@@ -1087,6 +1087,8 @@ fn lower_expression(
                 Some(vec![LinearNode::new(LinearNodeValue::Byte(0))]),
             )
         }
+        HirNodeValue::Yield(_) => todo!(),
+        HirNodeValue::GeneratorResume(_, _) => todo!(),
     };
 
     LinearNode { value, provenance }
@@ -1139,6 +1141,7 @@ fn lower_lvalue(
         HirNodeValue::Comparison(_, _, _) => todo!(),
         HirNodeValue::BinaryLogical(_, _, _) => todo!(),
         HirNodeValue::Return(_) => todo!(),
+        HirNodeValue::Yield(_) => todo!(),
         HirNodeValue::Int(_) => todo!(),
         HirNodeValue::Float(_) => todo!(),
         HirNodeValue::Bool(_) => todo!(),
@@ -1163,6 +1166,7 @@ fn lower_lvalue(
         HirNodeValue::MakeNullable(_) => todo!(),
         HirNodeValue::NullableTraverse(_, _) => todo!(),
         HirNodeValue::RuntimeCall(_, _) => todo!(),
+        HirNodeValue::GeneratorResume(_, _) => todo!(),
     }
 }
 
@@ -1544,6 +1548,7 @@ fn expression_type_size(
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
+        ExpressionType::Generator { .. } => todo!(),
     }
 }
 
@@ -1763,6 +1768,7 @@ fn layout_type(
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
+        ExpressionType::Generator { .. } => todo!(),
     }
 }
 
@@ -1782,5 +1788,6 @@ fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
+        ExpressionType::Generator { .. } => todo!(),
     }
 }

@@ -202,7 +202,6 @@ pub fn resolve_type_expr(
     Ok(match &node.value {
         AstNodeValue::Name { value: name, .. } => match name.as_str() {
             "bool" => ExpressionType::Primitive(PrimitiveType::Bool),
-            "void" => ExpressionType::Void,
             "i32" => ExpressionType::Primitive(PrimitiveType::Int32),
             "f32" => ExpressionType::Primitive(PrimitiveType::Float32),
             "i64" => ExpressionType::Primitive(PrimitiveType::Int64),
@@ -215,6 +214,7 @@ pub fn resolve_type_expr(
                     .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?,
             ),
         },
+        AstNodeValue::VoidType => ExpressionType::Void,
         AstNodeValue::UniqueType(inner) => ExpressionType::Pointer(
             PointerKind::Unique,
             Box::new(resolve_type_expr(name_to_type_id, inner)?),
@@ -233,6 +233,10 @@ pub fn resolve_type_expr(
         AstNodeValue::NullableType(inner) => {
             ExpressionType::Nullable(Box::new(resolve_type_expr(name_to_type_id, inner)?))
         }
+        AstNodeValue::GeneratorType { yield_ty, param_ty } => ExpressionType::Generator {
+            yield_ty: Box::new(resolve_type_expr(name_to_type_id, yield_ty)?),
+            param_ty: Box::new(resolve_type_expr(name_to_type_id, param_ty)?),
+        },
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::RequiredFunction(_)
         | AstNodeValue::ExternFunctionBinding(_)
@@ -242,6 +246,7 @@ pub fn resolve_type_expr(
         | AstNodeValue::Declaration(_, _, _)
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
+        | AstNodeValue::Yield(_)
         | AstNodeValue::Statement(_)
         | AstNodeValue::Deref(_)
         | AstNodeValue::Int(_)
