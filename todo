@@ -20,6 +20,8 @@ coroutines / generators / async:
     - identify suspend points in the coroutine body
     - save all current state when suspending
     - resume state and return to correct suspend point when resuming
+- allow using a generator through a mutable reference to typecheck
+- either ban references from generator args or note that they're borrowed as long as the generator lives
 - generators on associated functions
 
 static data:
