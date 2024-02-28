@@ -183,7 +183,7 @@ pub struct FunctionDeclarationValue<'a> {
      * is available in the environment
      */
     pub is_extern: bool,
-    pub is_generator: bool,
+    pub is_coroutine: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -589,7 +589,7 @@ fn interface_or_struct_body<'a>(
                         returns,
                         body: add_node(context, body),
                         is_extern: true,
-                        is_generator: false,
+                        is_coroutine: false,
                     }),
                     SourceRange::new(start, cursor),
                 ));
@@ -727,7 +727,7 @@ fn extern_function_declaration<'a>(
                     returns,
                     body: add_node(context, body),
                     is_extern: true,
-                    is_generator: false,
+                    is_coroutine: false,
                 }),
                 end,
             )
@@ -774,7 +774,7 @@ fn function_declaration<'a>(
             returns,
             body: add_node(context, body),
             is_extern: false,
-            is_generator,
+            is_coroutine: is_generator,
         }),
         provenance,
     ))

@@ -143,6 +143,7 @@ fn resolve_declaration(
             returns,
             id,
             name,
+            is_coroutine,
             ..
         }) => StaticDeclaration::Func(FuncType {
             id: names_to_type_id
@@ -162,6 +163,7 @@ fn resolve_declaration(
                 .map(|returns| resolve_type_expr(names_to_type_id, returns))
                 .unwrap_or(Ok(ExpressionType::Void))?,
             is_associated,
+            is_coroutine: *is_coroutine,
         }),
         AstNodeValue::RequiredFunction(FunctionHeaderValue {
             params,
@@ -190,6 +192,7 @@ fn resolve_declaration(
                 .map(|returns| resolve_type_expr(names_to_type_id, returns))
                 .unwrap_or(Ok(ExpressionType::Void))?,
             is_associated,
+            is_coroutine: false,
         }),
         _ => panic!("internal compiler error: unexpected decl node"),
     })

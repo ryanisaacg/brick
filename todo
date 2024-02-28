@@ -15,13 +15,13 @@ misc:
 - auto-dereference dot operator
 
 coroutines / generators / async:
-- add yield to IR
 - support for coroutines in compilation:
     - identify suspend points in the coroutine body
     - save all current state when suspending
     - resume state and return to correct suspend point when resuming
 - either ban references from generator args or note that they're borrowed as long as the generator lives
 - generators on associated functions
+- non-infinite generators
 
 static data:
 - add some syntax for declaring global state

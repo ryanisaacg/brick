@@ -1,6 +1,27 @@
 use brick::eval_types;
 
 #[test]
+fn yield_once() {
+    eval_types(
+        r#"
+gen fn once(): generator[i32, void] {
+    let x = 1200 + 34;
+
+    yield x;
+
+    // Ensure this code doesn't execute by forcing a panic
+    let arr = list[1];
+    arr[1000];
+}
+
+let seq = once();
+seq()
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
 fn count_up() {
     eval_types(
         r#"

@@ -189,6 +189,7 @@ pub struct FuncType {
     pub params: Vec<ExpressionType>,
     pub returns: ExpressionType,
     pub is_associated: bool,
+    pub is_coroutine: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -428,7 +429,7 @@ fn typecheck_function<'a>(
         .map(|((id, name), param)| (name.name.clone(), ((*id).into(), param.clone())))
         .collect();
 
-    if function.is_generator {
+    if function.is_coroutine {
         let ExpressionType::Generator { param_ty, .. } = &function_type.returns else {
             todo!()
         };

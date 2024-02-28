@@ -166,10 +166,12 @@ fn find_moves_in_node(
         | HirNodeValue::Float(_)
         | HirNodeValue::Bool(_)
         | HirNodeValue::Null
+        | HirNodeValue::ResumePoint
         | HirNodeValue::CharLiteral(_)
         | HirNodeValue::StringLiteral(_)
         | HirNodeValue::Int(_)
-        | HirNodeValue::Yield(None)
+        | HirNodeValue::PointerSize(_)
+        | HirNodeValue::Yield(_, None)
         | HirNodeValue::Return(None) => {}
         HirNodeValue::TakeUnique(val) | HirNodeValue::TakeShared(val) => {
             find_references_in_node(liveness, errors, declarations, val);
@@ -181,6 +183,7 @@ fn find_moves_in_node(
         }
         HirNodeValue::VtableCall(_, _, params)
         | HirNodeValue::GeneratorResume(_, params)
+        | HirNodeValue::CoroutineStart(_, params)
         | HirNodeValue::Call(_, params)
         | HirNodeValue::RuntimeCall(_, params)
         | HirNodeValue::ArrayLiteral(params) => {
@@ -234,7 +237,7 @@ fn find_moves_in_node(
         }
         HirNodeValue::UnionLiteral(_, _, child)
         | HirNodeValue::Return(Some(child))
-        | HirNodeValue::Yield(Some(child))
+        | HirNodeValue::Yield(_, Some(child))
         | HirNodeValue::Assignment(_, child) => {
             find_moves_in_node(liveness, errors, declarations, child);
         }

@@ -24,10 +24,14 @@ pub fn linearize_function(
     let HirNodeValue::Sequence(block) = function.body.value else {
         unreachable!()
     };
+    let mut initial_offset = std::mem::size_of::<usize>();
+    if function.is_generator {
+        initial_offset += std::mem::size_of::<usize>();
+    }
     let body = linearize_nodes(
         declarations,
         &mut HashMap::new(),
-        &mut std::mem::size_of::<usize>(),
+        &mut initial_offset,
         block.into(),
     );
     LinearFunction {
@@ -403,9 +407,16 @@ fn lower_expression(
     } = expression;
     let value = match value {
         HirNodeValue::Int(x) => LinearNodeValue::Int(x),
+        HirNodeValue::PointerSize(x) => LinearNodeValue::Size(x),
         HirNodeValue::Float(x) => LinearNodeValue::Float(x),
         HirNodeValue::Bool(x) => LinearNodeValue::Byte(if x { 1 } else { 0 }),
         HirNodeValue::Null => LinearNodeValue::Byte(0),
+        // TODO: store resume points somewhere else?
+        HirNodeValue::ResumePoint => LinearNodeValue::ReadMemory {
+            location: Box::new(LinearNode::new(LinearNodeValue::TopOfStack)),
+            offset: std::mem::size_of::<usize>(),
+            ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+        },
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
         HirNodeValue::StringLiteral(_x) => todo!(),
 
@@ -1087,8 +1098,13 @@ fn lower_expression(
                 Some(vec![LinearNode::new(LinearNodeValue::Byte(0))]),
             )
         }
-        HirNodeValue::Yield(_) => todo!(),
+        // Set the resume point, memcpy the stack, and return the value
+        HirNodeValue::Yield(_, _) => todo!(),
+        // Load the function ID, resume point, and memcpy a stack. Then call the function
         HirNodeValue::GeneratorResume(_, _) => todo!(),
+        // Instantiate a generator object then call the underlying function
+        // generator object is function ID, resume point, stack contents
+        HirNodeValue::CoroutineStart(_, _) => todo!(),
     };
 
     LinearNode { value, provenance }
@@ -1141,11 +1157,13 @@ fn lower_lvalue(
         HirNodeValue::Comparison(_, _, _) => todo!(),
         HirNodeValue::BinaryLogical(_, _, _) => todo!(),
         HirNodeValue::Return(_) => todo!(),
-        HirNodeValue::Yield(_) => todo!(),
+        HirNodeValue::Yield(_, _) => todo!(),
         HirNodeValue::Int(_) => todo!(),
+        HirNodeValue::PointerSize(_) => todo!(),
         HirNodeValue::Float(_) => todo!(),
         HirNodeValue::Bool(_) => todo!(),
         HirNodeValue::Null => todo!(),
+        HirNodeValue::ResumePoint => todo!(),
         HirNodeValue::CharLiteral(_) => todo!(),
         HirNodeValue::StringLiteral(_) => todo!(),
         HirNodeValue::TakeUnique(_) => todo!(),
@@ -1167,6 +1185,7 @@ fn lower_lvalue(
         HirNodeValue::NullableTraverse(_, _) => todo!(),
         HirNodeValue::RuntimeCall(_, _) => todo!(),
         HirNodeValue::GeneratorResume(_, _) => todo!(),
+        HirNodeValue::CoroutineStart(_, _) => todo!(),
     }
 }
 

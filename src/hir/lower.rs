@@ -68,7 +68,7 @@ fn lower_function<'ast>(
         id: func.id,
         name: func.name,
         body,
-        is_generator: func.func.is_generator,
+        is_generator: func.func.is_coroutine,
     }
 }
 
@@ -151,9 +151,10 @@ fn lower_node<'ast>(
         AstNodeValue::Return(inner) => {
             HirNodeValue::Return(inner.as_ref().map(|inner| lower_node_alloc(decls, inner)))
         }
-        AstNodeValue::Yield(inner) => {
-            HirNodeValue::Yield(inner.as_ref().map(|inner| lower_node_alloc(decls, inner)))
-        }
+        AstNodeValue::Yield(inner) => HirNodeValue::Yield(
+            0,
+            inner.as_ref().map(|inner| lower_node_alloc(decls, inner)),
+        ),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
             let expr_ty = fully_dereference(left.ty.get().unwrap());
             let AstNodeValue::Name { value: name, .. } = &right.value else {

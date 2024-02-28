@@ -28,11 +28,15 @@ pub fn lower_module<'ast>(
 
     module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
     coroutines::take_coroutine_references(&mut module);
+    coroutines::add_resumes(&mut module);
 
     interface_conversion_pass::rewrite(&mut module, declarations);
     auto_deref_dot::auto_deref_dot(&mut module);
     auto_numeric_cast::auto_numeric_cast(&mut module, declarations);
     widen_null::widen_null(&mut module, declarations);
+
+    // Intentionally after interface conversion, associated function rewrites
+    coroutines::coroutine_calls(&mut module, declarations);
 
     simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
     simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
@@ -141,15 +145,18 @@ impl HirNode {
             | HirNodeValue::VariableReference(_)
             | HirNodeValue::Declaration(_)
             | HirNodeValue::Int(_)
+            | HirNodeValue::PointerSize(_)
             | HirNodeValue::Float(_)
             | HirNodeValue::Bool(_)
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
             | HirNodeValue::Null
-            | HirNodeValue::Yield(None)
+            | HirNodeValue::ResumePoint
+            | HirNodeValue::Yield(_, None)
             | HirNodeValue::Return(None) => {}
             HirNodeValue::Call(lhs, params)
             | HirNodeValue::VtableCall(lhs, _, params)
+            | HirNodeValue::CoroutineStart(lhs, params)
             | HirNodeValue::GeneratorResume(lhs, params) => {
                 callback(lhs);
                 for param in params.iter_mut() {
@@ -166,7 +173,7 @@ impl HirNode {
             | HirNodeValue::Dereference(child)
             | HirNodeValue::ArrayLiteralLength(child, _)
             | HirNodeValue::Return(Some(child))
-            | HirNodeValue::Yield(Some(child))
+            | HirNodeValue::Yield(_, Some(child))
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
             | HirNodeValue::StructToInterface { value: child, .. } => {
@@ -236,15 +243,18 @@ impl HirNode {
             | HirNodeValue::VariableReference(_)
             | HirNodeValue::Declaration(_)
             | HirNodeValue::Int(_)
+            | HirNodeValue::PointerSize(_)
             | HirNodeValue::Float(_)
             | HirNodeValue::Bool(_)
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
             | HirNodeValue::Null
-            | HirNodeValue::Yield(None)
+            | HirNodeValue::ResumePoint
+            | HirNodeValue::Yield(_, None)
             | HirNodeValue::Return(None) => {}
             HirNodeValue::Call(lhs, params)
             | HirNodeValue::VtableCall(lhs, _, params)
+            | HirNodeValue::CoroutineStart(lhs, params)
             | HirNodeValue::GeneratorResume(lhs, params) => {
                 callback(lhs);
                 for param in params.iter() {
@@ -260,7 +270,7 @@ impl HirNode {
             | HirNodeValue::Dereference(child)
             | HirNodeValue::UnaryLogical(_, child)
             | HirNodeValue::ArrayLiteralLength(child, _)
-            | HirNodeValue::Yield(Some(child))
+            | HirNodeValue::Yield(_, Some(child))
             | HirNodeValue::Return(Some(child))
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
@@ -315,9 +325,11 @@ impl HirNode {
         let callback = &mut callback;
         match &self.value {
             HirNodeValue::Int(_)
+            | HirNodeValue::PointerSize(_)
             | HirNodeValue::Float(_)
             | HirNodeValue::Bool(_)
             | HirNodeValue::Null
+            | HirNodeValue::ResumePoint
             | HirNodeValue::Parameter(_, _)
             | HirNodeValue::VariableReference(_)
             | HirNodeValue::Access(_, _)
@@ -366,7 +378,7 @@ impl HirNode {
                     callback(ty, &params[i]);
                 }
             }
-            HirNodeValue::Call(lhs, params) => {
+            HirNodeValue::CoroutineStart(lhs, params) | HirNodeValue::Call(lhs, params) => {
                 let ExpressionType::InstanceOf(id) = &lhs.ty else {
                     unreachable!()
                 };
@@ -378,7 +390,7 @@ impl HirNode {
                 }
             }
             HirNodeValue::GeneratorResume(lhs, params) => {
-                let ExpressionType::Generator { param_ty, .. } = &lhs.ty else {
+                let ExpressionType::Generator { param_ty, .. } = fully_dereference(&lhs.ty) else {
                     unreachable!()
                 };
                 if param_ty.as_ref() != &ExpressionType::Void {
@@ -396,7 +408,7 @@ impl HirNode {
             HirNodeValue::Assignment(lhs, rhs) => {
                 callback(&lhs.ty, rhs);
             }
-            HirNodeValue::Yield(_) | HirNodeValue::Return(_) => {
+            HirNodeValue::Yield(_, _) | HirNodeValue::Return(_) => {
                 // TODO: check return types
             }
             HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Sequence(_) => {
@@ -428,9 +440,11 @@ impl HirNode {
         let callback = &mut callback;
         match &mut self.value {
             HirNodeValue::Int(_)
+            | HirNodeValue::PointerSize(_)
             | HirNodeValue::Float(_)
             | HirNodeValue::Bool(_)
             | HirNodeValue::Null
+            | HirNodeValue::ResumePoint
             | HirNodeValue::Parameter(_, _)
             | HirNodeValue::VariableReference(_)
             | HirNodeValue::Access(_, _)
@@ -485,7 +499,7 @@ impl HirNode {
                     callback(ty, &mut params[i]);
                 }
             }
-            HirNodeValue::Call(lhs, params) => {
+            HirNodeValue::CoroutineStart(lhs, params) | HirNodeValue::Call(lhs, params) => {
                 let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id)) = &lhs.ty
                 else {
                     unreachable!()
@@ -516,7 +530,7 @@ impl HirNode {
             HirNodeValue::Assignment(lhs, rhs) => {
                 callback(&lhs.ty, rhs);
             }
-            HirNodeValue::Yield(_) | HirNodeValue::Return(_) => {
+            HirNodeValue::Yield(_, _) | HirNodeValue::Return(_) => {
                 // TODO: check return types
             }
             HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Sequence(_) => {
@@ -557,6 +571,7 @@ pub enum HirNodeValue {
 
     Call(Box<HirNode>, Vec<HirNode>),
     GeneratorResume(Box<HirNode>, Vec<HirNode>),
+    CoroutineStart(Box<HirNode>, Vec<HirNode>),
     // TODO: break this up into Union Access and Struct Access?
     Access(Box<HirNode>, String),
     NullableTraverse(Box<HirNode>, Vec<String>),
@@ -570,11 +585,12 @@ pub enum HirNodeValue {
     UnaryLogical(UnaryLogicalOp, Box<HirNode>),
 
     Return(Option<Box<HirNode>>),
-    Yield(Option<Box<HirNode>>),
+    Yield(usize, Option<Box<HirNode>>),
 
     Int(i64),
     Float(f64),
     Bool(bool),
+    PointerSize(usize),
     Null,
     CharLiteral(char),
     StringLiteral(String),
@@ -583,6 +599,7 @@ pub enum HirNodeValue {
         from: PrimitiveType,
         to: PrimitiveType,
     },
+    ResumePoint,
 
     TakeUnique(Box<HirNode>),
     TakeShared(Box<HirNode>),
