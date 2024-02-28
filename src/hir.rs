@@ -6,13 +6,14 @@ use crate::{
     provenance::SourceRange,
     runtime::{info_for_function, RuntimeFunction},
     typecheck::{
-        find_func, is_assignable_to, CollectionType, ExpressionType, PrimitiveType,
-        StaticDeclaration, StructType, TypecheckedFile, UnionType,
+        find_func, fully_dereference, is_assignable_to, CollectionType, ExpressionType,
+        PrimitiveType, StaticDeclaration, StructType, TypecheckedFile, UnionType,
     },
 };
 
 mod auto_deref_dot;
 mod auto_numeric_cast;
+mod coroutines;
 mod interface_conversion_pass;
 mod lower;
 mod rewrite_associated_functions;
@@ -26,19 +27,18 @@ pub fn lower_module<'ast>(
     let mut module = lower::lower_module(module, declarations);
 
     module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
-    widen_null::widen_null(&mut module, declarations);
+    coroutines::take_coroutine_references(&mut module);
+
     interface_conversion_pass::rewrite(&mut module, declarations);
     auto_deref_dot::auto_deref_dot(&mut module);
     auto_numeric_cast::auto_numeric_cast(&mut module, declarations);
+    widen_null::widen_null(&mut module, declarations);
+
     simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
     simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
 
-    // TODO: control flow graph for top-level statements
-
     module
 }
-
-// TODO: should the IR be a stack machine?
 
 pub struct HirModule {
     pub top_level_statements: HirNode,
@@ -498,7 +498,7 @@ impl HirNode {
                 }
             }
             HirNodeValue::GeneratorResume(lhs, params) => {
-                let ExpressionType::Generator { param_ty, .. } = &lhs.ty else {
+                let ExpressionType::Generator { param_ty, .. } = fully_dereference(&lhs.ty) else {
                     unreachable!()
                 };
                 if param_ty.as_ref() != &ExpressionType::Void {
