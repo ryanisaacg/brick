@@ -24,9 +24,9 @@ pub fn linearize_function(
     let HirNodeValue::Sequence(block) = function.body.value else {
         unreachable!()
     };
-    let mut initial_offset = std::mem::size_of::<usize>();
+    let mut initial_offset = POINTER_SIZE;
     if function.is_generator {
-        initial_offset += std::mem::size_of::<usize>();
+        initial_offset += POINTER_SIZE;
     }
     let body = linearize_nodes(
         declarations,
@@ -1100,11 +1100,53 @@ fn lower_expression(
         }
         // Set the resume point, memcpy the stack, and return the value
         HirNodeValue::Yield(_, _) => todo!(),
-        // Load the function ID, resume point, and memcpy a stack. Then call the function
+        // Load the function ID, resume point, and memcpy a stack. Then call the function with the
+        // saved parameters
         HirNodeValue::GeneratorResume(_, _) => todo!(),
         // Instantiate a generator object then call the underlying function
-        // generator object is function ID, resume point, stack contents
-        HirNodeValue::CoroutineStart(_, _) => todo!(),
+        // generator object is function ID, resume point, parameters, and stack contents
+        HirNodeValue::CoroutineStart(coroutine, params) => {
+            let HirNodeValue::VariableReference(fn_id) = coroutine.value else {
+                unreachable!("lhs of function call must be a function ID")
+            };
+            let params = params
+                .into_iter()
+                .map(|param| lower_expression(declarations, stack_entries, stack_offset, param))
+                .collect();
+
+            let generator_ptr = RegisterID::new();
+
+            // TODO: dynamic stack size for coroutines?
+
+            LinearNodeValue::Sequence(vec![
+                LinearNode::write_register(generator_ptr, LinearNode::heap_alloc_const(128)),
+                LinearNode::write_memory(
+                    LinearNode::read_register(generator_ptr),
+                    0,
+                    PhysicalType::FunctionPointer,
+                    LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn())),
+                ),
+                LinearNode::write_memory(
+                    LinearNode::read_register(generator_ptr),
+                    POINTER_SIZE,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                    LinearNode::size(0),
+                ),
+                LinearNode::write_memory(
+                    LinearNode::new(LinearNodeValue::StackFrame),
+                    // TODO: this isn't right at all
+                    POINTER_SIZE * 2,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                    LinearNode::read_register(generator_ptr),
+                ),
+                LinearNode::new(LinearNodeValue::Call(
+                    Box::new(LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))),
+                    params,
+                )),
+                LinearNode::read_register(generator_ptr),
+                LinearNode::kill_register(generator_ptr),
+            ])
+        }
     };
 
     LinearNode { value, provenance }
