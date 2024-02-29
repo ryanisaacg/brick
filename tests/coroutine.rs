@@ -1,8 +1,9 @@
-use brick::eval_types;
+use assert_matches::assert_matches;
+use brick::{eval, eval_types, Value};
 
 #[test]
 fn yield_once() {
-    eval_types(
+    let result = eval(
         r#"
 gen fn once(): generator[i32, void] {
     let x = 1200 + 34;
@@ -19,6 +20,7 @@ seq()
 "#,
     )
     .unwrap();
+    assert_matches!(&result[..], [Value::Int32(1234)]);
 }
 
 #[test]

@@ -412,11 +412,22 @@ fn lower_expression(
         HirNodeValue::Bool(x) => LinearNodeValue::Byte(if x { 1 } else { 0 }),
         HirNodeValue::Null => LinearNodeValue::Byte(0),
         // TODO: store resume points somewhere else?
-        HirNodeValue::ResumePoint => LinearNodeValue::ReadMemory {
-            location: Box::new(LinearNode::new(LinearNodeValue::TopOfStack)),
-            offset: std::mem::size_of::<usize>(),
-            ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-        },
+        // TODO: resume points aren't being found correctly
+        HirNodeValue::ResumePoint => {
+            LinearNodeValue::Debug(Box::new(LinearNode::new(LinearNodeValue::ReadMemory {
+                location: Box::new(LinearNode::debug(LinearNode::read_memory(
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Subtract,
+                        LinearNode::new(LinearNodeValue::StackFrame),
+                        LinearNode::size(POINTER_SIZE),
+                    ),
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                ))),
+                offset: POINTER_SIZE,
+                ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+            })))
+        }
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
         HirNodeValue::StringLiteral(_x) => todo!(),
 
@@ -1099,20 +1110,81 @@ fn lower_expression(
             )
         }
         // Set the resume point, memcpy the stack, and return the value
-        HirNodeValue::Yield(_, _) => todo!(),
+        HirNodeValue::Yield(resume_point, value) => {
+            let value = value.map(|expr| {
+                Box::new(lower_expression(
+                    declarations,
+                    stack_entries,
+                    stack_offset,
+                    *expr,
+                ))
+            });
+            // TODO: read resume value if necesary
+            // TODO: memcpy the stack
+            LinearNodeValue::Sequence(vec![
+                LinearNode::write_memory(
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Subtract,
+                        LinearNode::new(LinearNodeValue::StackFrame),
+                        LinearNode::size(POINTER_SIZE * 2),
+                    ),
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                    LinearNode::size(resume_point),
+                ),
+                LinearNode::new(LinearNodeValue::Return(value)),
+                LinearNode::debug(LinearNode::size(0xDEADBEEF)),
+            ])
+        }
         // Load the function ID, resume point, and memcpy a stack. Then call the function with the
         // saved parameters
-        HirNodeValue::GeneratorResume(_, _) => todo!(),
+        HirNodeValue::GeneratorResume(generator, _param) => {
+            let generator = lower_expression(declarations, stack_entries, stack_offset, *generator);
+
+            let generator_ptr = RegisterID::new();
+            LinearNodeValue::Sequence(vec![
+                LinearNode::write_register(
+                    generator_ptr,
+                    LinearNode::read_memory(
+                        generator,
+                        0,
+                        PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                    ),
+                ),
+                // TODO: memcpy a stack
+                // TODO: load the existing arguments
+                // TODO: write the resume parameter
+                LinearNode::write_memory(
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Subtract,
+                        LinearNode::new(LinearNodeValue::StackFrame),
+                        LinearNode::size(*stack_offset + POINTER_SIZE),
+                    ),
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                    LinearNode::read_register(generator_ptr),
+                ),
+                LinearNode::new(LinearNodeValue::Call(
+                    Box::new(LinearNode::read_memory(
+                        LinearNode::read_register(generator_ptr),
+                        0,
+                        PhysicalType::FunctionPointer,
+                    )),
+                    vec![],
+                )),
+                LinearNode::kill_register(generator_ptr),
+            ])
+        }
         // Instantiate a generator object then call the underlying function
         // generator object is function ID, resume point, parameters, and stack contents
         HirNodeValue::CoroutineStart(coroutine, params) => {
             let HirNodeValue::VariableReference(fn_id) = coroutine.value else {
                 unreachable!("lhs of function call must be a function ID")
             };
-            let params = params
-                .into_iter()
-                .map(|param| lower_expression(declarations, stack_entries, stack_offset, param))
-                .collect();
+            /*let params = params
+            .into_iter()
+            .map(|param| lower_expression(declarations, stack_entries, stack_offset, param))
+            .collect();*/
 
             let generator_ptr = RegisterID::new();
 
@@ -1133,16 +1205,15 @@ fn lower_expression(
                     LinearNode::size(0),
                 ),
                 LinearNode::write_memory(
-                    LinearNode::new(LinearNodeValue::StackFrame),
-                    // TODO: this isn't right at all
-                    POINTER_SIZE * 2,
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Subtract,
+                        LinearNode::new(LinearNodeValue::StackFrame),
+                        LinearNode::size(POINTER_SIZE * 2),
+                    ),
+                    0,
                     PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                     LinearNode::read_register(generator_ptr),
                 ),
-                LinearNode::new(LinearNodeValue::Call(
-                    Box::new(LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))),
-                    params,
-                )),
                 LinearNode::read_register(generator_ptr),
                 LinearNode::kill_register(generator_ptr),
             ])
@@ -1609,7 +1680,7 @@ fn expression_type_size(
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => todo!(),
+        ExpressionType::Generator { .. } => POINTER_SIZE,
     }
 }
 
@@ -1849,6 +1920,6 @@ fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => todo!(),
+        ExpressionType::Generator { .. } => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
     }
 }
