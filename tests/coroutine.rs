@@ -2,6 +2,23 @@ use assert_matches::assert_matches;
 use brick::{eval, eval_types, Value};
 
 #[test]
+fn yield_basic() {
+    let result = eval(
+        r#"
+gen fn basic(): generator[i32, void] {
+    yield 1;
+    yield 2;
+}
+
+let seq = basic();
+seq() + seq()
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(3)]);
+}
+
+#[test]
 fn yield_once() {
     let result = eval(
         r#"
