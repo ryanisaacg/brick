@@ -16,10 +16,15 @@ misc:
 
 coroutines / generators / async:
 - compile two separate functions, one for creating the generator object and one for running the generator
-- support for coroutines in compilation:
-    - identify suspend points in the coroutine body
-    - save all current state when suspending
-    - resume state and return to correct suspend point when resuming
+    - desugar generators in HIR:
+        - generators are a struct: { function_id, resume_point, stack_ptr }
+        - yields are suspend + return, plus a label for GOTOs
+        - resume call
+    - linear IR:
+        - on resume, GOTO label
+        - on resume, copy the stack
+        - on suspend, write label
+        - on suspend, write stack
 - either ban references from generator args or note that they're borrowed as long as the generator lives
 - generators on associated functions
 - non-infinite generators
