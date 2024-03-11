@@ -15,6 +15,7 @@ misc:
 - auto-dereference dot operator
 
 coroutines / generators / async:
+- compile two separate functions, one for creating the generator object and one for running the generator
 - support for coroutines in compilation:
     - identify suspend points in the coroutine body
     - save all current state when suspending

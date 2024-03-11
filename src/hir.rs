@@ -70,9 +70,8 @@ impl HirModule {
 #[derive(Clone, Debug)]
 pub struct HirFunction {
     pub id: FunctionID,
-    pub name: String,
+    pub name: Option<String>,
     pub body: HirNode,
-    pub is_generator: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -157,7 +156,7 @@ impl HirNode {
             HirNodeValue::Call(lhs, params)
             | HirNodeValue::VtableCall(lhs, _, params)
             | HirNodeValue::CoroutineStart(lhs, params)
-            | HirNodeValue::GeneratorResume(lhs, params) => {
+            | HirNodeValue::CallGenerator(lhs, params) => {
                 callback(lhs);
                 for param in params.iter_mut() {
                     callback(param);
@@ -255,7 +254,7 @@ impl HirNode {
             HirNodeValue::Call(lhs, params)
             | HirNodeValue::VtableCall(lhs, _, params)
             | HirNodeValue::CoroutineStart(lhs, params)
-            | HirNodeValue::GeneratorResume(lhs, params) => {
+            | HirNodeValue::CallGenerator(lhs, params) => {
                 callback(lhs);
                 for param in params.iter() {
                     callback(param);
@@ -389,7 +388,7 @@ impl HirNode {
                     callback(ty, &params[i]);
                 }
             }
-            HirNodeValue::GeneratorResume(lhs, params) => {
+            HirNodeValue::CallGenerator(lhs, params) => {
                 let ExpressionType::Generator { param_ty, .. } = fully_dereference(&lhs.ty) else {
                     unreachable!()
                 };
@@ -511,7 +510,7 @@ impl HirNode {
                     callback(ty, &mut params[i]);
                 }
             }
-            HirNodeValue::GeneratorResume(lhs, params) => {
+            HirNodeValue::CallGenerator(lhs, params) => {
                 let ExpressionType::Generator { param_ty, .. } = fully_dereference(&lhs.ty) else {
                     unreachable!()
                 };
@@ -570,8 +569,11 @@ pub enum HirNodeValue {
     Declaration(VariableID),
 
     Call(Box<HirNode>, Vec<HirNode>),
-    GeneratorResume(Box<HirNode>, Vec<HirNode>),
-    CoroutineStart(Box<HirNode>, Vec<HirNode>),
+    GeneratorCreate {
+        generator_function: FunctionID,
+        args: Vec<HirNode>,
+    },
+    CallGenerator(Box<HirNode>, Vec<HirNode>),
     // TODO: break this up into Union Access and Struct Access?
     Access(Box<HirNode>, String),
     NullableTraverse(Box<HirNode>, Vec<String>),
@@ -599,7 +601,6 @@ pub enum HirNodeValue {
         from: PrimitiveType,
         to: PrimitiveType,
     },
-    ResumePoint,
 
     TakeUnique(Box<HirNode>),
     TakeShared(Box<HirNode>),

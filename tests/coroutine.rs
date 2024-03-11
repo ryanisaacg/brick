@@ -24,6 +24,29 @@ seq()
 }
 
 #[test]
+fn yield_twice() {
+    let result = eval(
+        r#"
+gen fn once(): generator[i32, void] {
+    let x = 1200 + 34;
+
+    yield x;
+
+    let y = x + 1;
+
+    yield y;
+}
+
+let seq = once();
+seq();
+seq()
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(1235)]);
+}
+
+#[test]
 fn count_up() {
     eval_types(
         r#"

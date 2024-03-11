@@ -9,7 +9,7 @@ use super::{ComparisonOp, HirModule, HirNode, HirNodeValue};
 
 pub fn take_coroutine_references(module: &mut HirModule) {
     module.visit_mut(|node| {
-        let HirNodeValue::GeneratorResume(gen, _) = &mut node.value else {
+        let HirNodeValue::CallGenerator(gen, _) = &mut node.value else {
             return;
         };
         if !matches!(&gen.ty, &ExpressionType::Generator { .. }) {

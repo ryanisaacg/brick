@@ -202,11 +202,9 @@ fn create_graph_for_node<'a>(
     match &current.value {
         VariableReference(_)
         | Int(_)
-        | PointerSize(_)
         | Float(_)
         | Bool(_)
         | Null
-        | ResumePoint
         | CharLiteral(_)
         | StringLiteral(_)
         | Declaration(_)
@@ -217,8 +215,7 @@ fn create_graph_for_node<'a>(
         | Call(_, _)
         | VtableCall(_, _, _)
         | RuntimeCall(_, _)
-        | GeneratorResume(_, _)
-        | CoroutineStart(_, _)
+        | CallGenerator(_, _)
         | TakeUnique(_)
         | TakeShared(_)
         | StructLiteral { .. }
@@ -252,7 +249,7 @@ fn create_graph_for_node<'a>(
 
             (start, current_node)
         }
-        Yield(_, _) | Return(_) => {
+        Yield(_) | Return(_) => {
             let node = graph.add_node(IntermediateNode::Expression(current));
             graph.add_edge(node, function_exit, CfgEdge::Goto);
 
