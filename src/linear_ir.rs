@@ -25,9 +25,6 @@ pub fn linearize_function(
         unreachable!()
     };
     let mut initial_offset = POINTER_SIZE;
-    if function.is_generator {
-        initial_offset += POINTER_SIZE;
-    }
     let body = linearize_nodes(
         declarations,
         &mut HashMap::new(),
@@ -411,13 +408,6 @@ fn lower_expression(
         HirNodeValue::Float(x) => LinearNodeValue::Float(x),
         HirNodeValue::Bool(x) => LinearNodeValue::Byte(if x { 1 } else { 0 }),
         HirNodeValue::Null => LinearNodeValue::Byte(0),
-        // TODO: store resume points somewhere else?
-        // TODO: resume points aren't being found correctly
-        HirNodeValue::ResumePoint => LinearNodeValue::ReadMemory {
-            location: Box::new(LinearNode::size(500)),
-            offset: POINTER_SIZE,
-            ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-        },
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
         HirNodeValue::StringLiteral(_x) => todo!(),
 
@@ -1099,108 +1089,15 @@ fn lower_expression(
                 Some(vec![LinearNode::new(LinearNodeValue::Byte(0))]),
             )
         }
-        // Set the resume point, memcpy the stack, and return the value
-        HirNodeValue::Yield(resume_point, value) => {
-            let value = value.map(|expr| {
-                Box::new(lower_expression(
-                    declarations,
-                    stack_entries,
-                    stack_offset,
-                    *expr,
-                ))
-            });
-            // TODO: read resume value if necesary
-            // TODO: memcpy the stack
-            LinearNodeValue::Sequence(vec![
-                LinearNode::write_memory(
-                    LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Subtract,
-                        LinearNode::new(LinearNodeValue::StackFrame),
-                        LinearNode::size(POINTER_SIZE * 2),
-                    ),
-                    0,
-                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-                    LinearNode::size(resume_point),
-                ),
-                LinearNode::new(LinearNodeValue::Return(value)),
-                LinearNode::debug(LinearNode::size(0xDEADBEEF)),
-            ])
-        }
-        // Load the function ID, resume point, and memcpy a stack. Then call the function with the
-        // saved parameters
-        HirNodeValue::CallGenerator(generator, _param) => {
-            let generator = lower_expression(declarations, stack_entries, stack_offset, *generator);
-
-            let generator_ptr = RegisterID::new();
-            LinearNodeValue::Sequence(vec![
-                LinearNode::write_register(generator_ptr, LinearNode::size(500)),
-                // TODO: memcpy a stack
-                // TODO: load the existing arguments
-                // TODO: write the resume parameter
-                LinearNode::write_memory(
-                    LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Subtract,
-                        LinearNode::new(LinearNodeValue::StackFrame),
-                        LinearNode::size(*stack_offset + POINTER_SIZE),
-                    ),
-                    0,
-                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-                    LinearNode::read_register(generator_ptr),
-                ),
-                LinearNode::new(LinearNodeValue::Call(
-                    Box::new(LinearNode::read_memory(
-                        LinearNode::read_register(generator_ptr),
-                        0,
-                        PhysicalType::FunctionPointer,
-                    )),
-                    vec![],
-                )),
-                LinearNode::kill_register(generator_ptr),
-            ])
-        }
-        // Instantiate a generator object then call the underlying function
-        // generator object is function ID, resume point, parameters, and stack contents
-        HirNodeValue::CoroutineStart(coroutine, params) => {
-            let HirNodeValue::VariableReference(fn_id) = coroutine.value else {
-                unreachable!("lhs of function call must be a function ID")
-            };
-            /*let params = params
-            .into_iter()
-            .map(|param| lower_expression(declarations, stack_entries, stack_offset, param))
-            .collect();*/
-
-            let generator_ptr = RegisterID::new();
-
-            // TODO: dynamic stack size for coroutines?
-
-            LinearNodeValue::Sequence(vec![
-                LinearNode::write_register(generator_ptr, LinearNode::size(500)),
-                LinearNode::write_memory(
-                    LinearNode::read_register(generator_ptr),
-                    0,
-                    PhysicalType::FunctionPointer,
-                    LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn())),
-                ),
-                LinearNode::write_memory(
-                    LinearNode::read_register(generator_ptr),
-                    POINTER_SIZE,
-                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-                    LinearNode::size(0),
-                ),
-                LinearNode::write_memory(
-                    LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Subtract,
-                        LinearNode::new(LinearNodeValue::StackFrame),
-                        LinearNode::size(POINTER_SIZE * 2),
-                    ),
-                    0,
-                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-                    LinearNode::read_register(generator_ptr),
-                ),
-                LinearNode::read_register(generator_ptr),
-                LinearNode::kill_register(generator_ptr),
-            ])
-        }
+        HirNodeValue::CallGenerator(_, _) => todo!(),
+        HirNodeValue::Yield(_) => todo!(),
+        HirNodeValue::GeneratorSuspend(_, _) => todo!(),
+        HirNodeValue::GotoLabel(_) => todo!(),
+        HirNodeValue::GeneratorResume(_) => todo!(),
+        HirNodeValue::GeneratorCreate {
+            generator_function,
+            args,
+        } => todo!(),
     };
 
     LinearNode { value, provenance }
@@ -1253,13 +1150,11 @@ fn lower_lvalue(
         HirNodeValue::Comparison(_, _, _) => todo!(),
         HirNodeValue::BinaryLogical(_, _, _) => todo!(),
         HirNodeValue::Return(_) => todo!(),
-        HirNodeValue::Yield(_, _) => todo!(),
         HirNodeValue::Int(_) => todo!(),
         HirNodeValue::PointerSize(_) => todo!(),
         HirNodeValue::Float(_) => todo!(),
         HirNodeValue::Bool(_) => todo!(),
         HirNodeValue::Null => todo!(),
-        HirNodeValue::ResumePoint => todo!(),
         HirNodeValue::CharLiteral(_) => todo!(),
         HirNodeValue::StringLiteral(_) => todo!(),
         HirNodeValue::TakeUnique(_) => todo!(),
@@ -1279,9 +1174,13 @@ fn lower_lvalue(
         HirNodeValue::NullCoalesce(_, _) => todo!(),
         HirNodeValue::MakeNullable(_) => todo!(),
         HirNodeValue::NullableTraverse(_, _) => todo!(),
-        HirNodeValue::RuntimeCall(_, _) => todo!(),
         HirNodeValue::CallGenerator(_, _) => todo!(),
-        HirNodeValue::CoroutineStart(_, _) => todo!(),
+        HirNodeValue::Yield(_) => todo!(),
+        HirNodeValue::RuntimeCall(_, _) => todo!(),
+        HirNodeValue::GeneratorSuspend(_, _) => todo!(),
+        HirNodeValue::GotoLabel(_) => todo!(),
+        HirNodeValue::GeneratorResume(_) => todo!(),
+        HirNodeValue::GeneratorCreate { .. } => todo!(),
     }
 }
 

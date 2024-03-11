@@ -27,7 +27,7 @@ coroutines / generators / async:
         - on suspend, write stack
 - either ban references from generator args or note that they're borrowed as long as the generator lives
 - generators on associated functions
-- non-infinite generators
+- non-infinite generators (e.g. generators should return Next(value) | Exhausted)
 - error when `yield`ing outside of a coroutine
 
 static data:

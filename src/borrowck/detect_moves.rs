@@ -249,6 +249,14 @@ fn find_moves_in_node(
         // TODO
         HirNodeValue::InterfaceAddress(_) => {}
         HirNodeValue::StructToInterface { .. } => {}
+        HirNodeValue::PointerSize(_) => todo!(),
+        HirNodeValue::GeneratorSuspend(_, _) => todo!(),
+        HirNodeValue::GotoLabel(_) => todo!(),
+        HirNodeValue::GeneratorResume(_) => todo!(),
+        HirNodeValue::GeneratorCreate {
+            generator_function,
+            args,
+        } => todo!(),
     }
 }
 

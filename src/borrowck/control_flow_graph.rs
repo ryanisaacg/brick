@@ -309,5 +309,13 @@ fn create_graph_for_node<'a>(
 
             (start_condition, virtual_next)
         }
+        PointerSize(_) => todo!(),
+        GeneratorSuspend(_, _) => todo!(),
+        GotoLabel(_) => todo!(),
+        GeneratorResume(_) => todo!(),
+        GeneratorCreate {
+            generator_function,
+            args,
+        } => todo!(),
     }
 }
