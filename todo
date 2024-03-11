@@ -28,6 +28,7 @@ coroutines / generators / async:
 - either ban references from generator args or note that they're borrowed as long as the generator lives
 - generators on associated functions
 - non-infinite generators
+- error when `yield`ing outside of a coroutine
 
 static data:
 - add some syntax for declaring global state
