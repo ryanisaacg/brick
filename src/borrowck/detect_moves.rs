@@ -235,6 +235,7 @@ fn find_moves_in_node(
         HirNodeValue::UnionLiteral(_, _, child)
         | HirNodeValue::Return(Some(child))
         | HirNodeValue::Yield(Some(child))
+        | HirNodeValue::GeneratorSuspend(child, _)
         | HirNodeValue::Assignment(_, child) => {
             find_moves_in_node(liveness, errors, declarations, child);
         }
@@ -250,13 +251,9 @@ fn find_moves_in_node(
         HirNodeValue::InterfaceAddress(_) => {}
         HirNodeValue::StructToInterface { .. } => {}
         HirNodeValue::PointerSize(_) => todo!(),
-        HirNodeValue::GeneratorSuspend(_, _) => todo!(),
-        HirNodeValue::GotoLabel(_) => todo!(),
-        HirNodeValue::GeneratorResume(_) => todo!(),
-        HirNodeValue::GeneratorCreate {
-            generator_function,
-            args,
-        } => todo!(),
+        HirNodeValue::GotoLabel(_) => {}
+        HirNodeValue::GeneratorResume(_) => {}
+        HirNodeValue::GeneratorCreate { .. } => {}
     }
 }
 

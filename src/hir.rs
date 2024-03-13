@@ -245,7 +245,9 @@ impl HirNode {
             }
             HirNodeValue::Call(lhs, args) => {
                 let params = declarations.map(|declarations| {
-                    let ExpressionType::InstanceOf(id) = &lhs.ty else {
+                    let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id)) =
+                        &lhs.ty
+                    else {
                         unreachable!()
                     };
                     let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
@@ -356,9 +358,18 @@ impl HirNode {
             | HirNodeValue::StructToInterface { value: child, .. } => {
                 callback(None, child);
             }
-            HirNodeValue::GeneratorSuspend(_, _) => todo!(),
-            HirNodeValue::GeneratorResume(_) => todo!(),
-            HirNodeValue::GeneratorCreate { .. } => todo!(),
+            HirNodeValue::GeneratorSuspend(yielded, _) => {
+                // TODO: check types
+                callback(None, yielded);
+            }
+            HirNodeValue::GeneratorResume(child) => {
+                callback(None, child);
+            }
+            HirNodeValue::GeneratorCreate { args, .. } => {
+                for arg in args.iter() {
+                    callback(None, arg);
+                }
+            }
         }
     }
 
@@ -429,7 +440,9 @@ impl HirNode {
             }
             HirNodeValue::Call(lhs, args) => {
                 let params = declarations.map(|declarations| {
-                    let ExpressionType::InstanceOf(id) = &lhs.ty else {
+                    let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id)) =
+                        &lhs.ty
+                    else {
                         unreachable!()
                     };
                     let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
@@ -540,9 +553,18 @@ impl HirNode {
             | HirNodeValue::StructToInterface { value: child, .. } => {
                 callback(None, child);
             }
-            HirNodeValue::GeneratorSuspend(_, _) => todo!(),
-            HirNodeValue::GeneratorResume(_) => todo!(),
-            HirNodeValue::GeneratorCreate { .. } => todo!(),
+            HirNodeValue::GeneratorSuspend(yielded, _) => {
+                // TODO: check types
+                callback(None, yielded);
+            }
+            HirNodeValue::GeneratorResume(child) => {
+                callback(None, child);
+            }
+            HirNodeValue::GeneratorCreate { args, .. } => {
+                for arg in args.iter_mut() {
+                    callback(None, arg);
+                }
+            }
         }
     }
 }

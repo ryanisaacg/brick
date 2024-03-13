@@ -232,6 +232,13 @@ fn create_graph_for_node<'a>(
         | DictLiteral(_)
         | MakeNullable(_)
         | UnionLiteral(_, _, _)
+        // Technically control flow leaves *and then comes back*. not sure how to express that here
+        // yet
+        | GeneratorSuspend(_, _)
+        // the start of the function can jump to these, but only sort of?
+        | GotoLabel(_)
+        | GeneratorResume(_)
+        | GeneratorCreate { .. }
         | InterfaceAddress(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));
 
@@ -310,12 +317,5 @@ fn create_graph_for_node<'a>(
             (start_condition, virtual_next)
         }
         PointerSize(_) => todo!(),
-        GeneratorSuspend(_, _) => todo!(),
-        GotoLabel(_) => todo!(),
-        GeneratorResume(_) => todo!(),
-        GeneratorCreate {
-            generator_function,
-            args,
-        } => todo!(),
     }
 }
