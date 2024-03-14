@@ -302,5 +302,7 @@ fn is_affine(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &Expression
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => true,
+        // TODO: is this correct
+        ExpressionType::FunctionReference { .. } => false,
     }
 }

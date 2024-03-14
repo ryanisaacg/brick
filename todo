@@ -20,7 +20,6 @@ coroutines / generators / async:
         - generators are a struct: { function_id, resume_point, stack_ptr }
         - yields are suspend + return, plus a label for GOTOs
         - resume call
-        - calling generators should just be a plain function call
     - linear IR:
         - on resume, GOTO label
         - on resume, copy the stack

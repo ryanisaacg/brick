@@ -432,16 +432,15 @@ impl HirNode {
                 }
             }
             HirNodeValue::Call(lhs, args) => {
-                let params = declarations.map(|declarations| {
-                    let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id)) =
-                        &lhs.ty
-                    else {
-                        unreachable!()
-                    };
-                    let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
-                        unreachable!()
-                    };
-                    &func.params
+                let params = declarations.map(|declarations| match &lhs.ty {
+                    ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id) => {
+                        let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
+                            unreachable!()
+                        };
+                        &func.params
+                    }
+                    ExpressionType::FunctionReference { parameters, .. } => parameters,
+                    ty => unreachable!("illegal type: {:?}", ty),
                 });
                 for (i, arg) in args.iter_mut().enumerate() {
                     callback(params.map(|params| &params[i]), arg);

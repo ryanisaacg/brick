@@ -1558,6 +1558,7 @@ fn expression_type_size(
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => POINTER_SIZE,
+        ExpressionType::FunctionReference { .. } => FUNCTION_ID_SIZE,
     }
 }
 
@@ -1778,6 +1779,9 @@ fn layout_type(
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => todo!(),
+        ExpressionType::FunctionReference { .. } => {
+            (PhysicalType::FunctionPointer, FUNCTION_ID_SIZE)
+        }
     }
 }
 
@@ -1798,5 +1802,6 @@ fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+        ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,
     }
 }
