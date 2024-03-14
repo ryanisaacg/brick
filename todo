@@ -15,22 +15,23 @@ misc:
 - auto-dereference dot operator
 
 coroutines / generators / async:
-- compile two separate functions, one for creating the generator object and one for running the generator
-    - desugar generators in HIR:
-        - generators are a struct: { function_id, resume_point, stack_ptr }
-    - linear IR:
-        - on resume, copy the stack
-        - on suspend, write stack
-- instead of copying the stack back and forth, maybe store the "stack" (local values) in the generator itself, and read/write them directly?
-    - if this works well, it means that coroutines don't require any runtime tricks (it's basically what Rust does with futures)
+- stackless coroutines
+    - rewrite generator bodies to use generator-relative locations instead of stack-relative
+    - strip HeapAllocs and use them to calculate how large the generator must be
+    - alloc that amount in the coroutine when creating the generator
 - support goto labels inside non-top blocks
-- extract yield to temporaries if necessary
-- allow values to be returned from yields in the HIR
-- either ban references from generator args or note that they're borrowed as long as the generator lives
-- require coroutines to return generators
+- allow values to be returned from yields
+    - extract yield to temporaries if necessary
+    - add a new HIR instruction to retrieve passed-down generator values
+    - type yield returns correctly
+    - pass down values when resuming from a generator
+- support arguments to coroutines
+    - either ban references from coroutine args or note that they're borrowed as long as the generator lives
 - generators on associated functions
 - non-infinite generators (e.g. generators should return Next(value) | Exhausted)
-- error when `yield`ing outside of a coroutine
+- error guardrails:
+    - require coroutines to return generators
+    - error when `yield`ing outside of a coroutine
 
 static data:
 - add some syntax for declaring global state
