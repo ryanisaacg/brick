@@ -119,6 +119,7 @@ pub fn rewrite(declarations: &HashMap<TypeID, &StaticDeclaration>, root: &mut Hi
                 ),
             );
         }
-        _ => unreachable!("illegal lhs of function call"),
+        ExpressionType::Generator { .. } => {}
+        ty => unreachable!("illegal lhs of function call: {:?}", ty),
     }
 }

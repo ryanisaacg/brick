@@ -25,9 +25,6 @@ pub fn linearize_function(
         unreachable!()
     };
     let mut initial_offset = POINTER_SIZE;
-    if function.is_generator {
-        initial_offset += POINTER_SIZE;
-    }
     let body = linearize_nodes(
         declarations,
         &mut HashMap::new(),
@@ -237,6 +234,8 @@ pub enum LinearNodeValue {
     Loop(Vec<LinearNode>),
     // TODO: stack unwind?
     Abort,
+    Goto(Box<LinearNode>),
+    GotoLabel(usize),
 
     Sequence(Vec<LinearNode>),
     WriteRegister(RegisterID, Box<LinearNode>),
@@ -411,12 +410,6 @@ fn lower_expression(
         HirNodeValue::Float(x) => LinearNodeValue::Float(x),
         HirNodeValue::Bool(x) => LinearNodeValue::Byte(if x { 1 } else { 0 }),
         HirNodeValue::Null => LinearNodeValue::Byte(0),
-        // TODO: store resume points somewhere else?
-        HirNodeValue::ResumePoint => LinearNodeValue::ReadMemory {
-            location: Box::new(LinearNode::new(LinearNodeValue::TopOfStack)),
-            offset: std::mem::size_of::<usize>(),
-            ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-        },
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
         HirNodeValue::StringLiteral(_x) => todo!(),
 
@@ -498,17 +491,16 @@ fn lower_expression(
             }
         }
         HirNodeValue::Call(lhs, params) => {
-            let HirNodeValue::VariableReference(fn_id) = lhs.value else {
-                unreachable!("lhs of function call must be a function ID")
-            };
             let params = params
                 .into_iter()
                 .map(|param| lower_expression(declarations, stack_entries, stack_offset, param))
                 .collect();
-            LinearNodeValue::Call(
-                Box::new(LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))),
-                params,
-            )
+            let lhs = if let HirNodeValue::VariableReference(fn_id) = lhs.value {
+                LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))
+            } else {
+                lower_expression(declarations, stack_entries, stack_offset, *lhs)
+            };
+            LinearNodeValue::Call(Box::new(lhs), params)
         }
         HirNodeValue::Access(lhs, rhs) => {
             if let Some(ty) = lhs.ty.id().and_then(|id| match &declarations[id].value {
@@ -535,6 +527,20 @@ fn lower_expression(
                     ]),
                     None,
                 )])
+            } else if matches!(&lhs.ty, ExpressionType::Generator { .. }) {
+                let (location, mut offset) =
+                    lower_lvalue(declarations, stack_entries, stack_offset, *lhs);
+                offset += match rhs.as_str() {
+                    "function" => 0,
+                    "resume_point" => POINTER_SIZE,
+                    "stack_ptr" => POINTER_SIZE * 2,
+                    rhs => unreachable!("illegal rhs: {}", rhs),
+                };
+                LinearNodeValue::ReadMemory {
+                    location: Box::new(location),
+                    offset,
+                    ty: expr_ty_to_physical(&ty),
+                }
             } else {
                 let (location, offset) =
                     access_location(declarations, stack_entries, stack_offset, *lhs, rhs);
@@ -1098,55 +1104,32 @@ fn lower_expression(
                 Some(vec![LinearNode::new(LinearNodeValue::Byte(0))]),
             )
         }
-        // Set the resume point, memcpy the stack, and return the value
-        HirNodeValue::Yield(_, _) => todo!(),
-        // Load the function ID, resume point, and memcpy a stack. Then call the function with the
-        // saved parameters
-        HirNodeValue::GeneratorResume(_, _) => todo!(),
-        // Instantiate a generator object then call the underlying function
-        // generator object is function ID, resume point, parameters, and stack contents
-        HirNodeValue::CoroutineStart(coroutine, params) => {
-            let HirNodeValue::VariableReference(fn_id) = coroutine.value else {
-                unreachable!("lhs of function call must be a function ID")
-            };
-            let params = params
-                .into_iter()
-                .map(|param| lower_expression(declarations, stack_entries, stack_offset, param))
-                .collect();
-
-            let generator_ptr = RegisterID::new();
-
-            // TODO: dynamic stack size for coroutines?
-
+        HirNodeValue::GeneratorSuspend(generator, label) => {
+            let location = lower_expression(declarations, stack_entries, stack_offset, *generator);
+            LinearNodeValue::WriteMemory {
+                location: Box::new(location),
+                offset: POINTER_SIZE,
+                ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                value: Box::new(LinearNode::size(label)),
+            }
+        }
+        HirNodeValue::GotoLabel(label) => LinearNodeValue::GotoLabel(label),
+        HirNodeValue::GeneratorResume(generator) => {
+            let resume_point =
+                lower_expression(declarations, stack_entries, stack_offset, *generator);
+            LinearNodeValue::Goto(Box::new(resume_point))
+        }
+        HirNodeValue::GeneratorCreate {
+            generator_function, ..
+        } => {
+            // TODO: care about args
             LinearNodeValue::Sequence(vec![
-                LinearNode::write_register(generator_ptr, LinearNode::heap_alloc_const(128)),
-                LinearNode::write_memory(
-                    LinearNode::read_register(generator_ptr),
-                    0,
-                    PhysicalType::FunctionPointer,
-                    LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn())),
-                ),
-                LinearNode::write_memory(
-                    LinearNode::read_register(generator_ptr),
-                    POINTER_SIZE,
-                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-                    LinearNode::size(0),
-                ),
-                LinearNode::write_memory(
-                    LinearNode::new(LinearNodeValue::StackFrame),
-                    // TODO: this isn't right at all
-                    POINTER_SIZE * 2,
-                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-                    LinearNode::read_register(generator_ptr),
-                ),
-                LinearNode::new(LinearNodeValue::Call(
-                    Box::new(LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))),
-                    params,
-                )),
-                LinearNode::read_register(generator_ptr),
-                LinearNode::kill_register(generator_ptr),
+                LinearNode::heap_alloc_const(64), // TODO: allocate a statically sized stack frame
+                LinearNode::size(0),
+                LinearNode::new(LinearNodeValue::FunctionID(generator_function)),
             ])
         }
+        HirNodeValue::Yield(_) => unreachable!("yields should be rewritten in HIR"),
     };
 
     LinearNode { value, provenance }
@@ -1199,13 +1182,11 @@ fn lower_lvalue(
         HirNodeValue::Comparison(_, _, _) => todo!(),
         HirNodeValue::BinaryLogical(_, _, _) => todo!(),
         HirNodeValue::Return(_) => todo!(),
-        HirNodeValue::Yield(_, _) => todo!(),
         HirNodeValue::Int(_) => todo!(),
         HirNodeValue::PointerSize(_) => todo!(),
         HirNodeValue::Float(_) => todo!(),
         HirNodeValue::Bool(_) => todo!(),
         HirNodeValue::Null => todo!(),
-        HirNodeValue::ResumePoint => todo!(),
         HirNodeValue::CharLiteral(_) => todo!(),
         HirNodeValue::StringLiteral(_) => todo!(),
         HirNodeValue::TakeUnique(_) => todo!(),
@@ -1225,9 +1206,12 @@ fn lower_lvalue(
         HirNodeValue::NullCoalesce(_, _) => todo!(),
         HirNodeValue::MakeNullable(_) => todo!(),
         HirNodeValue::NullableTraverse(_, _) => todo!(),
+        HirNodeValue::Yield(_) => todo!(),
         HirNodeValue::RuntimeCall(_, _) => todo!(),
-        HirNodeValue::GeneratorResume(_, _) => todo!(),
-        HirNodeValue::CoroutineStart(_, _) => todo!(),
+        HirNodeValue::GeneratorSuspend(_, _) => todo!(),
+        HirNodeValue::GotoLabel(_) => todo!(),
+        HirNodeValue::GeneratorResume(_) => todo!(),
+        HirNodeValue::GeneratorCreate { .. } => todo!(),
     }
 }
 
@@ -1590,6 +1574,7 @@ const UNION_TAG_SIZE: usize = 8;
 pub const NULL_TAG_SIZE: usize = 4;
 const FUNCTION_ID_SIZE: usize = 4;
 
+// TODO: delete this?
 fn expression_type_size(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     expr: &ExpressionType,
@@ -1609,7 +1594,8 @@ fn expression_type_size(
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => todo!(),
+        ExpressionType::Generator { .. } => POINTER_SIZE * 3,
+        ExpressionType::FunctionReference { .. } => FUNCTION_ID_SIZE,
     }
 }
 
@@ -1678,6 +1664,8 @@ pub enum PhysicalType {
     Pointer,
     FunctionPointer,
     Collection(PhysicalCollection),
+    /// [function ID, resume point, stack ptr]
+    Generator,
 }
 
 #[derive(Clone, Debug)]
@@ -1697,6 +1685,7 @@ impl PhysicalType {
                 PhysicalCollection::Array => POINTER_SIZE * 3,
                 PhysicalCollection::Dict => POINTER_SIZE * 3,
             },
+            PhysicalType::Generator => POINTER_SIZE * 3,
         }
     }
 }
@@ -1730,7 +1719,8 @@ fn layout_static_decl(
                 .fields
                 .iter()
                 .map(|(name, field)| {
-                    let (field, field_size) = layout_type(declarations, layouts, field);
+                    let field = layout_type(declarations, layouts, field);
+                    let field_size = field.size(layouts);
                     let offset = size;
                     size += field_size;
                     (name.clone(), offset, field)
@@ -1769,7 +1759,8 @@ fn layout_static_decl(
                 .iter()
                 .enumerate()
                 .map(|(idx, (name, ty))| {
-                    let (variant, variant_size) = layout_type(declarations, layouts, ty);
+                    let variant = layout_type(declarations, layouts, ty);
+                    let variant_size = variant.size(layouts);
                     if variant_size > largest_variant {
                         largest_variant = variant_size;
                     }
@@ -1799,37 +1790,32 @@ fn layout_type(
     declarations: &HashMap<TypeID, &StaticDeclaration>,
     layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
     ty: &ExpressionType,
-) -> (PhysicalType, usize) {
+) -> PhysicalType {
     match ty {
         ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
         ExpressionType::Primitive(p) => {
             let p = primitive_to_physical(*p);
-            let size = primitive_type_size(p);
-            (PhysicalType::Primitive(p), size)
+            PhysicalType::Primitive(p)
         }
         ExpressionType::InstanceOf(id) => {
-            let size = layout_static_decl(declarations, layouts, declarations[id]);
-            (PhysicalType::Referenced(*id), size)
+            layout_static_decl(declarations, layouts, declarations[id]);
+            PhysicalType::Referenced(*id)
         }
-        ExpressionType::Pointer(_, _) => (PhysicalType::Pointer, POINTER_SIZE),
-        ExpressionType::Collection(CollectionType::Array(_)) => (
-            PhysicalType::Collection(PhysicalCollection::Array),
-            POINTER_SIZE,
-        ),
-        ExpressionType::Collection(CollectionType::Dict(_, _)) => (
-            PhysicalType::Collection(PhysicalCollection::Dict),
-            POINTER_SIZE,
-        ),
+        ExpressionType::Pointer(_, _) => PhysicalType::Pointer,
+        ExpressionType::Collection(CollectionType::Array(_)) => {
+            PhysicalType::Collection(PhysicalCollection::Array)
+        }
+        ExpressionType::Collection(CollectionType::Dict(_, _)) => {
+            PhysicalType::Collection(PhysicalCollection::Dict)
+        }
         ExpressionType::Nullable(inner) => {
-            let (inner, size) = layout_type(declarations, layouts, inner);
-            (
-                PhysicalType::Nullable(Box::new(inner)),
-                size + NULL_TAG_SIZE,
-            )
+            let inner = layout_type(declarations, layouts, inner);
+            PhysicalType::Nullable(Box::new(inner))
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => todo!(),
+        ExpressionType::Generator { .. } => PhysicalType::Generator,
+        ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,
     }
 }
 
@@ -1849,6 +1835,7 @@ fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => todo!(),
+        ExpressionType::Generator { .. } => PhysicalType::Generator,
+        ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,
     }
 }

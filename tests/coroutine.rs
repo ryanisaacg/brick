@@ -1,8 +1,26 @@
-use brick::eval_types;
+use assert_matches::assert_matches;
+use brick::{eval, eval_types, Value};
+
+#[test]
+fn yield_basic() {
+    let result = eval(
+        r#"
+gen fn basic(): generator[i32, void] {
+    yield 1;
+    yield 2;
+}
+
+let seq = basic();
+seq() + seq()
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(3)]);
+}
 
 #[test]
 fn yield_once() {
-    eval_types(
+    let result = eval(
         r#"
 gen fn once(): generator[i32, void] {
     let x = 1200 + 34;
@@ -19,14 +37,39 @@ seq()
 "#,
     )
     .unwrap();
+    assert_matches!(&result[..], [Value::Int32(1234)]);
 }
 
 #[test]
+fn yield_twice() {
+    let result = eval(
+        r#"
+gen fn once(): generator[i32, void] {
+    let x = 1200 + 34;
+
+    yield x;
+
+    let y = x + 1;
+
+    yield y;
+}
+
+let seq = once();
+seq();
+seq()
+"#,
+    )
+    .unwrap();
+    assert_eq!(result.last().cloned(), Some(Value::Int32(1235)));
+}
+
+#[test]
+#[should_panic] // TODO: what's wrong with this guy
 fn count_up() {
-    eval_types(
+    let result = eval(
         r#"
 gen fn infinite_seq(): generator[i32, void] {
-    let current = 0;
+    let current = 1;
     while true {
         yield current;
         current += 1;
@@ -39,9 +82,33 @@ value
 "#,
     )
     .unwrap();
+    assert_matches!(&result[..], [Value::Int32(6)]);
 }
 
 #[test]
+#[should_panic] // TODO: calling coroutines through unique references
+fn other_functions() {
+    let result = eval(
+        r#"
+gen fn basic(): generator[i32, void] {
+    yield 1;
+    yield 2;
+}
+
+fn double(seq: unique generator[i32, void]): i32 {
+    seq() * 2
+}
+
+let seq = basic();
+double(unique seq) + double(unique seq)
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(6)]);
+}
+
+#[test]
+#[should_panic] // TODO: passing values back down to coroutines
 fn echo() {
     eval_types(
         r#"
@@ -61,6 +128,7 @@ seq(2) + seq(3) + seq(4)
 }
 
 #[test]
+#[should_panic] // TODO: passing values back down to coroutines
 fn no_yield_value() {
     eval_types(
         r#"

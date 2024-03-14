@@ -202,11 +202,9 @@ fn create_graph_for_node<'a>(
     match &current.value {
         VariableReference(_)
         | Int(_)
-        | PointerSize(_)
         | Float(_)
         | Bool(_)
         | Null
-        | ResumePoint
         | CharLiteral(_)
         | StringLiteral(_)
         | Declaration(_)
@@ -217,8 +215,6 @@ fn create_graph_for_node<'a>(
         | Call(_, _)
         | VtableCall(_, _, _)
         | RuntimeCall(_, _)
-        | GeneratorResume(_, _)
-        | CoroutineStart(_, _)
         | TakeUnique(_)
         | TakeShared(_)
         | StructLiteral { .. }
@@ -235,6 +231,13 @@ fn create_graph_for_node<'a>(
         | DictLiteral(_)
         | MakeNullable(_)
         | UnionLiteral(_, _, _)
+        // Technically control flow leaves *and then comes back*. not sure how to express that here
+        // yet
+        | GeneratorSuspend(_, _)
+        // the start of the function can jump to these, but only sort of?
+        | GotoLabel(_)
+        | GeneratorResume(_)
+        | GeneratorCreate { .. }
         | InterfaceAddress(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));
 
@@ -252,7 +255,7 @@ fn create_graph_for_node<'a>(
 
             (start, current_node)
         }
-        Yield(_, _) | Return(_) => {
+        Yield(_) | Return(_) => {
             let node = graph.add_node(IntermediateNode::Expression(current));
             graph.add_edge(node, function_exit, CfgEdge::Goto);
 
@@ -312,5 +315,6 @@ fn create_graph_for_node<'a>(
 
             (start_condition, virtual_next)
         }
+        PointerSize(_) => todo!(),
     }
 }

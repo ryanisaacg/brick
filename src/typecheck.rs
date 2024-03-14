@@ -32,6 +32,10 @@ pub enum ExpressionType {
         yield_ty: Box<ExpressionType>,
         param_ty: Box<ExpressionType>,
     },
+    FunctionReference {
+        parameters: Vec<ExpressionType>,
+        returns: Box<ExpressionType>,
+    },
 }
 
 impl ExpressionType {
@@ -46,7 +50,8 @@ impl ExpressionType {
             | ExpressionType::Null
             | ExpressionType::Nullable(_)
             | ExpressionType::TypeParameterReference(_)
-            | ExpressionType::Generator { .. } => None,
+            | ExpressionType::Generator { .. }
+            | ExpressionType::FunctionReference { .. } => None,
         }
     }
 }
@@ -1495,6 +1500,10 @@ fn find_generic_bindings(
             find_generic_bindings(generic_args, left_yield_ty, right_yield_ty);
             find_generic_bindings(generic_args, left_param_ty, right_param_ty);
         }
+        (ExpressionType::FunctionReference { .. }, _)
+        | (_, ExpressionType::FunctionReference { .. }) => {
+            todo!("function references only exist within the compiler")
+        }
         (ExpressionType::Collection(CollectionType::Dict(..) | CollectionType::Array(_)), _)
         | (ExpressionType::Pointer(_, _), _)
         | (ExpressionType::Generator { .. }, _) => {}
@@ -1650,6 +1659,11 @@ pub fn is_assignable_to(
             Collection(CollectionType::Dict(right_key, right_value)),
         ) => left_key == right_key && left_value == right_value,
         (Collection(_), Collection(_)) => false,
+
+        (ExpressionType::FunctionReference { .. }, _)
+        | (_, ExpressionType::FunctionReference { .. }) => {
+            todo!("function references only exist within the compiler")
+        }
 
         // TODO: type references can't ever be in assignments right
         (ReferenceTo(_), _) | (_, ReferenceTo(_)) => todo!("{:?} = {:?}", left, right),

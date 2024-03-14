@@ -96,7 +96,7 @@ fn find_drop_points_node(
                 // TODO: can this ever happen to the exit node?
                 // TODO: can blocks end up empty?
                 let CfgNode::Block { expressions, .. } = cfg.node_weight(node).unwrap() else {
-                    todo!()
+                    todo!("{:?}", cfg.node_weight(node))
                 };
                 map.entry(expressions[0].id).or_default().push(*variable);
             } else {

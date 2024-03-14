@@ -73,6 +73,7 @@ pub struct VM {
     pub base_ptr: usize,
     pub stack_ptr: usize,
     pub heap_ptr: usize,
+    pub in_progress_goto: Option<usize>,
 }
 
 impl VM {
@@ -86,6 +87,7 @@ impl VM {
             base_ptr: memory.len(),
             stack_ptr: memory.len(),
             heap_ptr: std::mem::size_of::<usize>(),
+            in_progress_goto: None,
         }
     }
 }
@@ -140,6 +142,16 @@ pub fn evaluate_block(
     vm: &mut VM,
     node: &LinearNode,
 ) -> Result<(), Unwind> {
+    if let Some(target_label) = vm.in_progress_goto {
+        match &node.value {
+            LinearNodeValue::GotoLabel(current_label) if *current_label == target_label => {
+                vm.in_progress_goto = None;
+            }
+            _ => {
+                return Ok(());
+            }
+        }
+    }
     match &node.value {
         LinearNodeValue::Sequence(seq) => {
             for node in seq.iter() {
@@ -491,6 +503,14 @@ pub fn evaluate_block(
             };
             vm.memory.copy_within(source..source + size, dest);
         }
+        LinearNodeValue::GotoLabel(_) => {}
+        LinearNodeValue::Goto(label) => {
+            evaluate_block(fns, params, vm, label)?;
+            let Value::Size(label) = vm.op_stack.pop().unwrap() else {
+                unreachable!()
+            };
+            vm.in_progress_goto = Some(label);
+        }
     }
 
     Ok(())
@@ -537,13 +557,12 @@ fn write(
                 write(op_stack, layouts, memory, location + offset, variant);
             }
         },
-        PhysicalType::Collection(ty) => match ty {
-            PhysicalCollection::Array | PhysicalCollection::Dict => {
-                write_primitive(op_stack, memory, location);
-                write_primitive(op_stack, memory, location + 8);
-                write_primitive(op_stack, memory, location + 16);
-            }
-        },
+        PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
+        | PhysicalType::Generator => {
+            write_primitive(op_stack, memory, location);
+            write_primitive(op_stack, memory, location + 8);
+            write_primitive(op_stack, memory, location + 16);
+        }
         PhysicalType::Pointer | PhysicalType::FunctionPointer => {
             write_primitive(op_stack, memory, location);
         }
@@ -617,23 +636,22 @@ fn read(
                 TypeLayoutValue::Union(_) => todo!(),
             }
         }
-        PhysicalType::Collection(ty) => match ty {
-            PhysicalCollection::Array | PhysicalCollection::Dict => {
-                read_primitive(
-                    op_stack,
-                    memory,
-                    location + 16,
-                    PhysicalPrimitive::PointerSize,
-                );
-                read_primitive(
-                    op_stack,
-                    memory,
-                    location + 8,
-                    PhysicalPrimitive::PointerSize,
-                );
-                read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
-            }
-        },
+        PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
+        | PhysicalType::Generator => {
+            read_primitive(
+                op_stack,
+                memory,
+                location + 16,
+                PhysicalPrimitive::PointerSize,
+            );
+            read_primitive(
+                op_stack,
+                memory,
+                location + 8,
+                PhysicalPrimitive::PointerSize,
+            );
+            read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
+        }
         PhysicalType::Pointer => {
             read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
         }

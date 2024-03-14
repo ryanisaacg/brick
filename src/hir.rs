@@ -6,8 +6,8 @@ use crate::{
     provenance::SourceRange,
     runtime::{info_for_function, RuntimeFunction},
     typecheck::{
-        find_func, fully_dereference, is_assignable_to, CollectionType, ExpressionType,
-        PrimitiveType, StaticDeclaration, StructType, TypecheckedFile, UnionType,
+        find_func, is_assignable_to, ExpressionType, PrimitiveType, StaticDeclaration,
+        TypecheckedFile,
     },
 };
 
@@ -26,17 +26,16 @@ pub fn lower_module<'ast>(
 ) -> HirModule {
     let mut module = lower::lower_module(module, declarations);
 
-    module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
-    coroutines::take_coroutine_references(&mut module);
-    coroutines::add_resumes(&mut module);
+    // Important that this comes before ANY pass that uses the declarations
+    coroutines::rewrite_generator_calls(&mut module);
 
+    module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
+
+    coroutines::rewrite_yields(&mut module);
     interface_conversion_pass::rewrite(&mut module, declarations);
     auto_deref_dot::auto_deref_dot(&mut module);
     auto_numeric_cast::auto_numeric_cast(&mut module, declarations);
     widen_null::widen_null(&mut module, declarations);
-
-    // Intentionally after interface conversion, associated function rewrites
-    coroutines::coroutine_calls(&mut module, declarations);
 
     simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
     simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
@@ -70,9 +69,9 @@ impl HirModule {
 #[derive(Clone, Debug)]
 pub struct HirFunction {
     pub id: FunctionID,
-    pub name: String,
+    pub name: Option<String>,
     pub body: HirNode,
-    pub is_generator: bool,
+    generator: Option<(VariableID, ExpressionType)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -135,89 +134,6 @@ impl HirNode {
         callback(self);
     }
 
-    pub fn children_mut<'a>(&'a mut self, mut callback: impl FnMut(&'a mut HirNode)) {
-        self.children_recursive_mut(&mut callback);
-    }
-
-    fn children_recursive_mut<'a>(&'a mut self, callback: &mut impl FnMut(&'a mut HirNode)) {
-        match &mut self.value {
-            HirNodeValue::Parameter(_, _)
-            | HirNodeValue::VariableReference(_)
-            | HirNodeValue::Declaration(_)
-            | HirNodeValue::Int(_)
-            | HirNodeValue::PointerSize(_)
-            | HirNodeValue::Float(_)
-            | HirNodeValue::Bool(_)
-            | HirNodeValue::CharLiteral(_)
-            | HirNodeValue::StringLiteral(_)
-            | HirNodeValue::Null
-            | HirNodeValue::ResumePoint
-            | HirNodeValue::Yield(_, None)
-            | HirNodeValue::Return(None) => {}
-            HirNodeValue::Call(lhs, params)
-            | HirNodeValue::VtableCall(lhs, _, params)
-            | HirNodeValue::CoroutineStart(lhs, params)
-            | HirNodeValue::GeneratorResume(lhs, params) => {
-                callback(lhs);
-                for param in params.iter_mut() {
-                    callback(param);
-                }
-            }
-            HirNodeValue::Access(child, _)
-            | HirNodeValue::NullableTraverse(child, _)
-            | HirNodeValue::UnaryLogical(_, child)
-            | HirNodeValue::UnionLiteral(_, _, child)
-            | HirNodeValue::InterfaceAddress(child)
-            | HirNodeValue::TakeUnique(child)
-            | HirNodeValue::TakeShared(child)
-            | HirNodeValue::Dereference(child)
-            | HirNodeValue::ArrayLiteralLength(child, _)
-            | HirNodeValue::Return(Some(child))
-            | HirNodeValue::Yield(_, Some(child))
-            | HirNodeValue::NumericCast { value: child, .. }
-            | HirNodeValue::MakeNullable(child)
-            | HirNodeValue::StructToInterface { value: child, .. } => {
-                callback(child);
-            }
-            HirNodeValue::DictLiteral(children) => {
-                for (key, value) in children.iter_mut() {
-                    callback(key);
-                    callback(value);
-                }
-            }
-            HirNodeValue::Assignment(lhs, rhs)
-            | HirNodeValue::ArrayIndex(lhs, rhs)
-            | HirNodeValue::DictIndex(lhs, rhs)
-            | HirNodeValue::While(lhs, rhs)
-            | HirNodeValue::Arithmetic(_, lhs, rhs)
-            | HirNodeValue::Comparison(_, lhs, rhs)
-            | HirNodeValue::BinaryLogical(_, lhs, rhs)
-            | HirNodeValue::NullCoalesce(lhs, rhs) => {
-                callback(lhs);
-                callback(rhs);
-            }
-            HirNodeValue::Sequence(children)
-            | HirNodeValue::ArrayLiteral(children)
-            | HirNodeValue::RuntimeCall(_, children) => {
-                for child in children.iter_mut() {
-                    callback(child);
-                }
-            }
-            HirNodeValue::If(cond, if_branch, else_branch) => {
-                callback(cond);
-                callback(if_branch);
-                if let Some(else_branch) = else_branch {
-                    callback(else_branch);
-                }
-            }
-            HirNodeValue::StructLiteral(_, fields) => {
-                for field in fields.values_mut() {
-                    callback(field);
-                }
-            }
-        }
-    }
-
     pub fn visit(&self, mut callback: impl FnMut(Option<&HirNode>, &HirNode)) {
         self.visit_recursive(None, &mut callback);
     }
@@ -234,11 +150,187 @@ impl HirNode {
     }
 
     pub fn children<'a>(&'a self, mut callback: impl FnMut(&'a HirNode)) {
-        self.children_recursive(&mut callback);
+        self.children_impl(None, |_, node| callback(node));
     }
 
-    fn children_recursive<'a>(&'a self, callback: &mut impl FnMut(&'a HirNode)) {
+    pub fn children_mut<'a>(&'a mut self, mut callback: impl FnMut(&'a mut HirNode)) {
+        self.children_mut_impl(None, |_, node| callback(node));
+    }
+
+    // TODO: could use a better name
+    pub fn walk_expected_types_for_children(
+        &self,
+        declarations: &HashMap<TypeID, &StaticDeclaration>,
+        mut callback: impl FnMut(&ExpressionType, &HirNode),
+    ) {
+        self.children_impl(Some(declarations), |ty, node| {
+            if let Some(ty) = ty {
+                callback(ty, node);
+            }
+        });
+    }
+
+    pub fn walk_expected_types_for_children_mut(
+        &mut self,
+        declarations: &HashMap<TypeID, &StaticDeclaration>,
+        mut callback: impl FnMut(&ExpressionType, &mut HirNode),
+    ) {
+        self.children_mut_impl(Some(declarations), |ty, node| {
+            if let Some(ty) = ty {
+                callback(ty, node);
+            }
+        });
+    }
+
+    fn children_impl<'a>(
+        &'a self,
+        declarations: Option<&HashMap<TypeID, &StaticDeclaration>>,
+        mut callback: impl FnMut(Option<&ExpressionType>, &'a HirNode),
+    ) {
+        let callback = &mut callback;
         match &self.value {
+            HirNodeValue::DictIndex(lhs, rhs) => {
+                callback(None, lhs);
+                // TODO: expect dictionary keys
+                callback(None, rhs);
+            }
+            HirNodeValue::ArrayIndex(_, idx) => {
+                callback(
+                    Some(&ExpressionType::Primitive(PrimitiveType::PointerSize)),
+                    idx,
+                );
+            }
+            HirNodeValue::UnionLiteral(ty, variant, child) => {
+                let variant_ty = declarations.map(|declarations| {
+                    let StaticDeclaration::Union(ty) = declarations[ty as &TypeID] else {
+                        unreachable!()
+                    };
+                    &ty.variants[variant as &String]
+                });
+                callback(variant_ty, child);
+            }
+            HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
+                if let Some(declarations) = declarations {
+                    if is_assignable_to(declarations, None, &lhs.ty, &rhs.ty) {
+                        callback(Some(&lhs.ty), rhs);
+                        callback(None, lhs);
+                    } else {
+                        callback(Some(&rhs.ty), lhs);
+                        callback(None, rhs);
+                    }
+                } else {
+                    callback(None, lhs);
+                    callback(None, rhs);
+                }
+            }
+            HirNodeValue::NullCoalesce(lhs, rhs) => {
+                callback(Some(&self.ty), rhs);
+                callback(
+                    Some(&ExpressionType::Nullable(Box::new(self.ty.clone()))),
+                    lhs,
+                );
+            }
+            HirNodeValue::BinaryLogical(_, lhs, rhs) => {
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), lhs);
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), rhs);
+            }
+            HirNodeValue::UnaryLogical(_, child) => {
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), child)
+            }
+            HirNodeValue::VtableCall(vtable, fn_id, args) => {
+                callback(None, vtable);
+                let params = declarations.map(|declarations| {
+                    let func = find_func(declarations, *fn_id).unwrap();
+                    &func.params
+                });
+                for (i, arg) in args.iter().enumerate() {
+                    callback(params.map(|params| &params[i]), arg);
+                }
+            }
+            HirNodeValue::Call(lhs, args) => {
+                let params = declarations.map(|declarations| {
+                    let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id)) =
+                        &lhs.ty
+                    else {
+                        unreachable!()
+                    };
+                    let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
+                        unreachable!()
+                    };
+                    &func.params
+                });
+                for (i, arg) in args.iter().enumerate() {
+                    callback(params.map(|params| &params[i]), arg);
+                }
+                callback(None, lhs);
+            }
+            HirNodeValue::RuntimeCall(runtime_fn, args) => {
+                let StaticDeclaration::Func(func) = &info_for_function(runtime_fn).decl else {
+                    unreachable!()
+                };
+                for (i, arg) in args.iter().enumerate() {
+                    callback(Some(&func.params[i]), arg);
+                }
+            }
+            HirNodeValue::Assignment(lhs, rhs) => {
+                callback(Some(&lhs.ty), rhs);
+                callback(None, lhs);
+            }
+            HirNodeValue::Yield(child) | HirNodeValue::Return(child) => {
+                if let Some(child) = child {
+                    // TODO: check return types
+                    callback(None, child);
+                }
+            }
+            // TODO: check return types of blocks
+            HirNodeValue::If(cond, if_branch, else_branch) => {
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), cond);
+                callback(None, if_branch);
+                if let Some(else_branch) = else_branch {
+                    callback(None, else_branch);
+                }
+            }
+            // TODO: check return types of blocks
+            HirNodeValue::While(cond, body) => {
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), cond);
+                callback(None, body);
+            }
+            // TODO: check return types of blocks
+            HirNodeValue::Sequence(children) => {
+                for child in children.iter() {
+                    callback(None, child);
+                }
+            }
+            HirNodeValue::StructLiteral(ty_id, fields) => {
+                let ty = declarations.map(|declarations| {
+                    let Some(StaticDeclaration::Struct(ty)) = declarations.get(ty_id) else {
+                        unreachable!();
+                    };
+                    ty
+                });
+                for (name, field) in fields.iter() {
+                    callback(ty.map(|ty| &ty.fields[name]), field);
+                }
+            }
+            HirNodeValue::DictLiteral(children) => {
+                // TODO: check types for dicts
+                for (key, value) in children.iter() {
+                    callback(None, key);
+                    callback(None, value);
+                }
+            }
+            // TODO: heterogenous collections
+            HirNodeValue::ArrayLiteral(children) => {
+                for child in children.iter() {
+                    callback(None, child);
+                }
+            }
+            HirNodeValue::ArrayLiteralLength(_, len) => {
+                callback(
+                    Some(&ExpressionType::Primitive(PrimitiveType::PointerSize)),
+                    len,
+                );
+            }
             HirNodeValue::Parameter(_, _)
             | HirNodeValue::VariableReference(_)
             | HirNodeValue::Declaration(_)
@@ -249,312 +341,214 @@ impl HirNode {
             | HirNodeValue::CharLiteral(_)
             | HirNodeValue::StringLiteral(_)
             | HirNodeValue::Null
-            | HirNodeValue::ResumePoint
-            | HirNodeValue::Yield(_, None)
-            | HirNodeValue::Return(None) => {}
-            HirNodeValue::Call(lhs, params)
-            | HirNodeValue::VtableCall(lhs, _, params)
-            | HirNodeValue::CoroutineStart(lhs, params)
-            | HirNodeValue::GeneratorResume(lhs, params) => {
-                callback(lhs);
-                for param in params.iter() {
-                    callback(param);
-                }
-            }
+            | HirNodeValue::GotoLabel(_) => {}
             HirNodeValue::Access(child, _)
             | HirNodeValue::NullableTraverse(child, _)
-            | HirNodeValue::UnionLiteral(_, _, child)
             | HirNodeValue::InterfaceAddress(child)
             | HirNodeValue::TakeUnique(child)
             | HirNodeValue::TakeShared(child)
             | HirNodeValue::Dereference(child)
-            | HirNodeValue::UnaryLogical(_, child)
-            | HirNodeValue::ArrayLiteralLength(child, _)
-            | HirNodeValue::Yield(_, Some(child))
-            | HirNodeValue::Return(Some(child))
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
             | HirNodeValue::StructToInterface { value: child, .. } => {
-                callback(child);
+                callback(None, child);
             }
-            HirNodeValue::Assignment(lhs, rhs)
-            | HirNodeValue::ArrayIndex(lhs, rhs)
-            | HirNodeValue::DictIndex(lhs, rhs)
-            | HirNodeValue::While(lhs, rhs)
-            | HirNodeValue::Arithmetic(_, lhs, rhs)
-            | HirNodeValue::Comparison(_, lhs, rhs)
-            | HirNodeValue::BinaryLogical(_, lhs, rhs)
-            | HirNodeValue::NullCoalesce(lhs, rhs) => {
-                callback(lhs);
-                callback(rhs);
+            HirNodeValue::GeneratorSuspend(yielded, _) => {
+                // TODO: check types
+                callback(None, yielded);
             }
-            HirNodeValue::Sequence(children)
-            | HirNodeValue::ArrayLiteral(children)
-            | HirNodeValue::RuntimeCall(_, children) => {
-                for child in children.iter() {
-                    callback(child);
-                }
+            HirNodeValue::GeneratorResume(child) => {
+                callback(None, child);
             }
-            HirNodeValue::If(cond, if_branch, else_branch) => {
-                callback(cond);
-                callback(if_branch);
-                if let Some(else_branch) = else_branch {
-                    callback(else_branch);
-                }
-            }
-            HirNodeValue::StructLiteral(_, fields) => {
-                for field in fields.values() {
-                    callback(field);
-                }
-            }
-            HirNodeValue::DictLiteral(children) => {
-                for (key, value) in children.iter() {
-                    callback(key);
-                    callback(value);
+            HirNodeValue::GeneratorCreate { args, .. } => {
+                for arg in args.iter() {
+                    callback(None, arg);
                 }
             }
         }
     }
 
-    // TODO: could use a better name
-    pub fn walk_expected_types_for_children(
-        &self,
-        declarations: &HashMap<TypeID, &StaticDeclaration>,
-        mut callback: impl FnMut(&ExpressionType, &HirNode),
-    ) {
-        let callback = &mut callback;
-        match &self.value {
-            HirNodeValue::Int(_)
-            | HirNodeValue::PointerSize(_)
-            | HirNodeValue::Float(_)
-            | HirNodeValue::Bool(_)
-            | HirNodeValue::Null
-            | HirNodeValue::ResumePoint
-            | HirNodeValue::Parameter(_, _)
-            | HirNodeValue::VariableReference(_)
-            | HirNodeValue::Access(_, _)
-            | HirNodeValue::NullableTraverse(_, _)
-            | HirNodeValue::CharLiteral(_)
-            | HirNodeValue::StringLiteral(_)
-            | HirNodeValue::TakeUnique(_)
-            | HirNodeValue::TakeShared(_)
-            | HirNodeValue::Dereference(_)
-            | HirNodeValue::InterfaceAddress(_)
-            | HirNodeValue::NumericCast { .. }
-            | HirNodeValue::MakeNullable(_)
-            | HirNodeValue::StructToInterface { .. }
-            | HirNodeValue::Declaration(_) => {}
-            HirNodeValue::ArrayIndex(_, idx) => {
-                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), idx);
-            }
-            HirNodeValue::UnionLiteral(ty, variant, child) => {
-                let StaticDeclaration::Union(ty) = declarations[ty] else {
-                    unreachable!()
-                };
-                let variant_ty = &ty.variants[variant];
-                callback(variant_ty, child);
-            }
-            HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
-                if is_assignable_to(declarations, None, &lhs.ty, &rhs.ty) {
-                    callback(&lhs.ty, rhs);
-                } else {
-                    callback(&rhs.ty, lhs);
-                }
-            }
-            HirNodeValue::NullCoalesce(lhs, rhs) => {
-                callback(&self.ty, rhs);
-                callback(&ExpressionType::Nullable(Box::new(self.ty.clone())), lhs);
-            }
-            HirNodeValue::BinaryLogical(_, lhs, rhs) => {
-                callback(&ExpressionType::Primitive(PrimitiveType::Bool), lhs);
-                callback(&ExpressionType::Primitive(PrimitiveType::Bool), rhs);
-            }
-            HirNodeValue::UnaryLogical(_, child) => {
-                callback(&ExpressionType::Primitive(PrimitiveType::Bool), child)
-            }
-            HirNodeValue::VtableCall(_, fn_id, params) => {
-                let func = find_func(declarations, *fn_id).unwrap();
-                for (i, ty) in func.params.iter().enumerate() {
-                    callback(ty, &params[i]);
-                }
-            }
-            HirNodeValue::CoroutineStart(lhs, params) | HirNodeValue::Call(lhs, params) => {
-                let ExpressionType::InstanceOf(id) = &lhs.ty else {
-                    unreachable!()
-                };
-                let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
-                    unreachable!()
-                };
-                for (i, ty) in func.params.iter().enumerate() {
-                    callback(ty, &params[i]);
-                }
-            }
-            HirNodeValue::GeneratorResume(lhs, params) => {
-                let ExpressionType::Generator { param_ty, .. } = fully_dereference(&lhs.ty) else {
-                    unreachable!()
-                };
-                if param_ty.as_ref() != &ExpressionType::Void {
-                    callback(param_ty.as_ref(), params.last().unwrap());
-                }
-            }
-            HirNodeValue::RuntimeCall(runtime_fn, params) => {
-                let StaticDeclaration::Func(func) = &info_for_function(runtime_fn).decl else {
-                    unreachable!()
-                };
-                for (i, ty) in func.params.iter().enumerate() {
-                    callback(ty, &params[i]);
-                }
-            }
-            HirNodeValue::Assignment(lhs, rhs) => {
-                callback(&lhs.ty, rhs);
-            }
-            HirNodeValue::Yield(_, _) | HirNodeValue::Return(_) => {
-                // TODO: check return types
-            }
-            HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Sequence(_) => {
-                // TODO: check return types
-            }
-            HirNodeValue::StructLiteral(ty_id, fields) => {
-                let Some(StaticDeclaration::Struct(ty)) = declarations.get(ty_id) else {
-                    unreachable!();
-                };
-                for (name, field) in fields.iter() {
-                    callback(&ty.fields[name], field);
-                }
-            }
-            // TODO: heterogenous collections
-            HirNodeValue::ArrayLiteral(_) => {}
-            HirNodeValue::ArrayLiteralLength(_, len) => {
-                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), len);
-            }
-            HirNodeValue::DictIndex(_, _) => todo!(),
-            HirNodeValue::DictLiteral(_) => todo!(),
-        }
-    }
-
-    pub fn walk_expected_types_for_children_mut(
-        &mut self,
-        declarations: &HashMap<TypeID, &StaticDeclaration>,
-        mut callback: impl FnMut(&ExpressionType, &mut HirNode),
+    fn children_mut_impl<'a>(
+        &'a mut self,
+        declarations: Option<&HashMap<TypeID, &StaticDeclaration>>,
+        mut callback: impl FnMut(Option<&ExpressionType>, &'a mut HirNode),
     ) {
         let callback = &mut callback;
         match &mut self.value {
-            HirNodeValue::Int(_)
-            | HirNodeValue::PointerSize(_)
-            | HirNodeValue::Float(_)
-            | HirNodeValue::Bool(_)
-            | HirNodeValue::Null
-            | HirNodeValue::ResumePoint
-            | HirNodeValue::Parameter(_, _)
-            | HirNodeValue::VariableReference(_)
-            | HirNodeValue::Access(_, _)
-            | HirNodeValue::NullableTraverse(_, _)
-            | HirNodeValue::CharLiteral(_)
-            | HirNodeValue::StringLiteral(_)
-            | HirNodeValue::TakeUnique(_)
-            | HirNodeValue::TakeShared(_)
-            | HirNodeValue::Dereference(_)
-            | HirNodeValue::InterfaceAddress(_)
-            | HirNodeValue::NumericCast { .. }
-            | HirNodeValue::MakeNullable(_)
-            | HirNodeValue::StructToInterface { .. }
-            | HirNodeValue::Declaration(_) => {}
-            HirNodeValue::ArrayIndex(_, idx) => {
-                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), idx);
+            HirNodeValue::DictIndex(lhs, rhs) => {
+                callback(None, lhs);
+                // TODO: expect dictionary keys
+                callback(None, rhs);
             }
-            HirNodeValue::DictIndex(dict, idx) => {
-                let ExpressionType::Collection(CollectionType::Dict(key_ty, _)) = &dict.ty else {
-                    unreachable!()
-                };
-                callback(key_ty, idx);
+            HirNodeValue::ArrayIndex(_, idx) => {
+                callback(
+                    Some(&ExpressionType::Primitive(PrimitiveType::PointerSize)),
+                    idx,
+                );
+            }
+            HirNodeValue::UnionLiteral(ty, variant, child) => {
+                let variant_ty = declarations.map(|declarations| {
+                    let StaticDeclaration::Union(ty) = declarations[ty as &TypeID] else {
+                        unreachable!()
+                    };
+                    &ty.variants[variant as &String]
+                });
+                callback(variant_ty, child);
             }
             HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
-                if is_assignable_to(declarations, None, &lhs.ty, &rhs.ty) {
-                    callback(&lhs.ty, rhs);
+                if let Some(declarations) = declarations {
+                    if is_assignable_to(declarations, None, &lhs.ty, &rhs.ty) {
+                        callback(Some(&lhs.ty), rhs);
+                        callback(None, lhs);
+                    } else {
+                        callback(Some(&rhs.ty), lhs);
+                        callback(None, rhs);
+                    }
                 } else {
-                    callback(&rhs.ty, lhs);
+                    callback(None, lhs);
+                    callback(None, rhs);
                 }
             }
             HirNodeValue::NullCoalesce(lhs, rhs) => {
-                callback(&self.ty, rhs);
-                callback(&ExpressionType::Nullable(Box::new(self.ty.clone())), lhs);
+                callback(Some(&self.ty), rhs);
+                callback(
+                    Some(&ExpressionType::Nullable(Box::new(self.ty.clone()))),
+                    lhs,
+                );
             }
             HirNodeValue::BinaryLogical(_, lhs, rhs) => {
-                callback(&ExpressionType::Primitive(PrimitiveType::Bool), lhs);
-                callback(&ExpressionType::Primitive(PrimitiveType::Bool), rhs);
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), lhs);
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), rhs);
             }
             HirNodeValue::UnaryLogical(_, child) => {
-                callback(&ExpressionType::Primitive(PrimitiveType::Bool), child)
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), child)
             }
-            HirNodeValue::UnionLiteral(ty, variant, child) => {
-                let StaticDeclaration::Union(ty) = declarations[ty] else {
-                    unreachable!()
-                };
-                let variant_ty = &ty.variants[variant];
-                callback(variant_ty, child);
-            }
-            HirNodeValue::VtableCall(_, fn_id, params) => {
-                let func = find_func(declarations, *fn_id).unwrap();
-                for (i, ty) in func.params.iter().enumerate() {
-                    callback(ty, &mut params[i]);
+            HirNodeValue::VtableCall(vtable, fn_id, args) => {
+                callback(None, vtable);
+                let params = declarations.map(|declarations| {
+                    let func = find_func(declarations, *fn_id).unwrap();
+                    &func.params
+                });
+                for (i, arg) in args.iter_mut().enumerate() {
+                    callback(params.map(|params| &params[i]), arg);
                 }
             }
-            HirNodeValue::CoroutineStart(lhs, params) | HirNodeValue::Call(lhs, params) => {
-                let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id)) = &lhs.ty
-                else {
-                    unreachable!()
-                };
-                let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
-                    unreachable!()
-                };
-                for (i, ty) in func.params.iter().enumerate() {
-                    callback(ty, &mut params[i]);
+            HirNodeValue::Call(lhs, args) => {
+                let params = declarations.map(|declarations| match &lhs.ty {
+                    ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id) => {
+                        let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
+                            unreachable!()
+                        };
+                        &func.params
+                    }
+                    ExpressionType::FunctionReference { parameters, .. } => parameters,
+                    ty => unreachable!("illegal type: {:?}", ty),
+                });
+                for (i, arg) in args.iter_mut().enumerate() {
+                    callback(params.map(|params| &params[i]), arg);
                 }
+                callback(None, lhs);
             }
-            HirNodeValue::GeneratorResume(lhs, params) => {
-                let ExpressionType::Generator { param_ty, .. } = fully_dereference(&lhs.ty) else {
-                    unreachable!()
-                };
-                if param_ty.as_ref() != &ExpressionType::Void {
-                    callback(param_ty.as_ref(), params.last_mut().unwrap());
-                }
-            }
-            HirNodeValue::RuntimeCall(runtime_fn, params) => {
+            HirNodeValue::RuntimeCall(runtime_fn, args) => {
                 let StaticDeclaration::Func(func) = &info_for_function(runtime_fn).decl else {
                     unreachable!()
                 };
-                for (i, ty) in func.params.iter().enumerate() {
-                    callback(ty, &mut params[i]);
+                for (i, arg) in args.iter_mut().enumerate() {
+                    callback(Some(&func.params[i]), arg);
                 }
             }
             HirNodeValue::Assignment(lhs, rhs) => {
-                callback(&lhs.ty, rhs);
+                callback(Some(&lhs.ty), rhs);
+                callback(None, lhs);
             }
-            HirNodeValue::Yield(_, _) | HirNodeValue::Return(_) => {
-                // TODO: check return types
+            HirNodeValue::Yield(child) | HirNodeValue::Return(child) => {
+                if let Some(child) = child {
+                    // TODO: check return types
+                    callback(None, child);
+                }
             }
-            HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Sequence(_) => {
-                // TODO: check return types
+            // TODO: check return types of blocks
+            HirNodeValue::If(cond, if_branch, else_branch) => {
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), cond);
+                callback(None, if_branch);
+                if let Some(else_branch) = else_branch {
+                    callback(None, else_branch);
+                }
+            }
+            // TODO: check return types of blocks
+            HirNodeValue::While(cond, body) => {
+                callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), cond);
+                callback(None, body);
+            }
+            // TODO: check return types of blocks
+            HirNodeValue::Sequence(children) => {
+                for child in children.iter_mut() {
+                    callback(None, child);
+                }
             }
             HirNodeValue::StructLiteral(ty_id, fields) => {
-                let (StaticDeclaration::Struct(StructType {
-                    fields: ty_fields, ..
-                })
-                | StaticDeclaration::Union(UnionType {
-                    variants: ty_fields,
-                    ..
-                })) = declarations.get(ty_id).unwrap()
-                else {
-                    unreachable!();
-                };
+                let ty = declarations.map(|declarations| {
+                    let Some(StaticDeclaration::Struct(ty)) = declarations.get(ty_id) else {
+                        unreachable!();
+                    };
+                    ty
+                });
                 for (name, field) in fields.iter_mut() {
-                    callback(&ty_fields[name], field);
+                    callback(ty.map(|ty| &ty.fields[name]), field);
+                }
+            }
+            HirNodeValue::DictLiteral(children) => {
+                // TODO: check types for dicts
+                for (key, value) in children.iter_mut() {
+                    callback(None, key);
+                    callback(None, value);
                 }
             }
             // TODO: heterogenous collections
-            HirNodeValue::ArrayLiteral(_) | HirNodeValue::DictLiteral(_) => {}
+            HirNodeValue::ArrayLiteral(children) => {
+                for child in children.iter_mut() {
+                    callback(None, child);
+                }
+            }
             HirNodeValue::ArrayLiteralLength(_, len) => {
-                callback(&ExpressionType::Primitive(PrimitiveType::PointerSize), len);
+                callback(
+                    Some(&ExpressionType::Primitive(PrimitiveType::PointerSize)),
+                    len,
+                );
+            }
+            HirNodeValue::Parameter(_, _)
+            | HirNodeValue::VariableReference(_)
+            | HirNodeValue::Declaration(_)
+            | HirNodeValue::Int(_)
+            | HirNodeValue::PointerSize(_)
+            | HirNodeValue::Float(_)
+            | HirNodeValue::Bool(_)
+            | HirNodeValue::CharLiteral(_)
+            | HirNodeValue::StringLiteral(_)
+            | HirNodeValue::Null
+            | HirNodeValue::GotoLabel(_) => {}
+            HirNodeValue::Access(child, _)
+            | HirNodeValue::NullableTraverse(child, _)
+            | HirNodeValue::InterfaceAddress(child)
+            | HirNodeValue::TakeUnique(child)
+            | HirNodeValue::TakeShared(child)
+            | HirNodeValue::Dereference(child)
+            | HirNodeValue::NumericCast { value: child, .. }
+            | HirNodeValue::MakeNullable(child)
+            | HirNodeValue::StructToInterface { value: child, .. } => {
+                callback(None, child);
+            }
+            HirNodeValue::GeneratorSuspend(yielded, _) => {
+                // TODO: check types
+                callback(None, yielded);
+            }
+            HirNodeValue::GeneratorResume(child) => {
+                callback(None, child);
+            }
+            HirNodeValue::GeneratorCreate { args, .. } => {
+                for arg in args.iter_mut() {
+                    callback(None, arg);
+                }
             }
         }
     }
@@ -570,8 +564,6 @@ pub enum HirNodeValue {
     Declaration(VariableID),
 
     Call(Box<HirNode>, Vec<HirNode>),
-    GeneratorResume(Box<HirNode>, Vec<HirNode>),
-    CoroutineStart(Box<HirNode>, Vec<HirNode>),
     // TODO: break this up into Union Access and Struct Access?
     Access(Box<HirNode>, String),
     NullableTraverse(Box<HirNode>, Vec<String>),
@@ -585,7 +577,8 @@ pub enum HirNodeValue {
     UnaryLogical(UnaryLogicalOp, Box<HirNode>),
 
     Return(Option<Box<HirNode>>),
-    Yield(usize, Option<Box<HirNode>>),
+    /// Desugared out of existence, but hard to do before lowering to HIR
+    Yield(Option<Box<HirNode>>),
 
     Int(i64),
     Float(f64),
@@ -599,7 +592,6 @@ pub enum HirNodeValue {
         from: PrimitiveType,
         to: PrimitiveType,
     },
-    ResumePoint,
 
     TakeUnique(Box<HirNode>),
     TakeShared(Box<HirNode>),
@@ -619,6 +611,7 @@ pub enum HirNodeValue {
     DictLiteral(Vec<(HirNode, HirNode)>),
 
     // Instructions only generated by IR passes
+    /// Look up the given virtual function ID in the LHS vtable
     VtableCall(Box<HirNode>, FunctionID, Vec<HirNode>),
     RuntimeCall(RuntimeFunction, Vec<HirNode>),
     InterfaceAddress(Box<HirNode>),
@@ -627,6 +620,14 @@ pub enum HirNodeValue {
         vtable: HashMap<FunctionID, FunctionID>,
     },
     MakeNullable(Box<HirNode>),
+    // Generator instructions, all created during HIR
+    GeneratorSuspend(Box<HirNode>, usize),
+    GotoLabel(usize),
+    GeneratorResume(Box<HirNode>),
+    GeneratorCreate {
+        generator_function: FunctionID,
+        args: Vec<HirNode>,
+    },
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

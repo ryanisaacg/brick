@@ -166,12 +166,10 @@ fn find_moves_in_node(
         | HirNodeValue::Float(_)
         | HirNodeValue::Bool(_)
         | HirNodeValue::Null
-        | HirNodeValue::ResumePoint
         | HirNodeValue::CharLiteral(_)
         | HirNodeValue::StringLiteral(_)
         | HirNodeValue::Int(_)
-        | HirNodeValue::PointerSize(_)
-        | HirNodeValue::Yield(_, None)
+        | HirNodeValue::Yield(None)
         | HirNodeValue::Return(None) => {}
         HirNodeValue::TakeUnique(val) | HirNodeValue::TakeShared(val) => {
             find_references_in_node(liveness, errors, declarations, val);
@@ -182,8 +180,6 @@ fn find_moves_in_node(
             }
         }
         HirNodeValue::VtableCall(_, _, params)
-        | HirNodeValue::GeneratorResume(_, params)
-        | HirNodeValue::CoroutineStart(_, params)
         | HirNodeValue::Call(_, params)
         | HirNodeValue::RuntimeCall(_, params)
         | HirNodeValue::ArrayLiteral(params) => {
@@ -237,7 +233,7 @@ fn find_moves_in_node(
         }
         HirNodeValue::UnionLiteral(_, _, child)
         | HirNodeValue::Return(Some(child))
-        | HirNodeValue::Yield(_, Some(child))
+        | HirNodeValue::Yield(Some(child))
         | HirNodeValue::Assignment(_, child) => {
             find_moves_in_node(liveness, errors, declarations, child);
         }
@@ -252,6 +248,11 @@ fn find_moves_in_node(
         // TODO
         HirNodeValue::InterfaceAddress(_) => {}
         HirNodeValue::StructToInterface { .. } => {}
+        HirNodeValue::PointerSize(_) => todo!(),
+        HirNodeValue::GotoLabel(_) => {}
+        HirNodeValue::GeneratorResume(_) => {}
+        HirNodeValue::GeneratorSuspend(_, _) => {}
+        HirNodeValue::GeneratorCreate { .. } => {}
     }
 }
 
@@ -301,5 +302,7 @@ fn is_affine(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &Expression
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => true,
+        // TODO: is this correct
+        ExpressionType::FunctionReference { .. } => false,
     }
 }
