@@ -1105,11 +1105,10 @@ fn lower_expression(
             )
         }
         HirNodeValue::GeneratorSuspend(generator, label) => {
-            let (location, offset) =
-                lower_lvalue(declarations, stack_entries, stack_offset, *generator);
+            let location = lower_expression(declarations, stack_entries, stack_offset, *generator);
             LinearNodeValue::WriteMemory {
                 location: Box::new(location),
-                offset: offset + POINTER_SIZE,
+                offset: POINTER_SIZE,
                 ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                 value: Box::new(LinearNode::size(label)),
             }
@@ -1575,6 +1574,7 @@ const UNION_TAG_SIZE: usize = 8;
 pub const NULL_TAG_SIZE: usize = 4;
 const FUNCTION_ID_SIZE: usize = 4;
 
+// TODO: delete this?
 fn expression_type_size(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     expr: &ExpressionType,
@@ -1594,7 +1594,7 @@ fn expression_type_size(
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => POINTER_SIZE,
+        ExpressionType::Generator { .. } => POINTER_SIZE * 3,
         ExpressionType::FunctionReference { .. } => FUNCTION_ID_SIZE,
     }
 }

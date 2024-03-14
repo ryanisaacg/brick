@@ -73,6 +73,7 @@ pub struct VM {
     pub base_ptr: usize,
     pub stack_ptr: usize,
     pub heap_ptr: usize,
+    pub in_progress_goto: Option<usize>,
 }
 
 impl VM {
@@ -86,6 +87,7 @@ impl VM {
             base_ptr: memory.len(),
             stack_ptr: memory.len(),
             heap_ptr: std::mem::size_of::<usize>(),
+            in_progress_goto: None,
         }
     }
 }
@@ -140,6 +142,16 @@ pub fn evaluate_block(
     vm: &mut VM,
     node: &LinearNode,
 ) -> Result<(), Unwind> {
+    if let Some(target_label) = vm.in_progress_goto {
+        match &node.value {
+            LinearNodeValue::GotoLabel(current_label) if *current_label == target_label => {
+                vm.in_progress_goto = None;
+            }
+            _ => {
+                return Ok(());
+            }
+        }
+    }
     match &node.value {
         LinearNodeValue::Sequence(seq) => {
             for node in seq.iter() {
@@ -492,7 +504,13 @@ pub fn evaluate_block(
             vm.memory.copy_within(source..source + size, dest);
         }
         LinearNodeValue::GotoLabel(_) => {}
-        LinearNodeValue::Goto(_) => todo!(),
+        LinearNodeValue::Goto(label) => {
+            evaluate_block(fns, params, vm, label)?;
+            let Value::Size(label) = vm.op_stack.pop().unwrap() else {
+                unreachable!()
+            };
+            vm.in_progress_goto = Some(label);
+        }
     }
 
     Ok(())

@@ -11,7 +11,9 @@ gen fn basic(): generator[i32, void] {
 }
 
 let seq = basic();
-seq() + seq()
+let a = seq();
+let b = seq();
+a + b
 "#,
     )
     .unwrap();
