@@ -491,6 +491,8 @@ pub fn evaluate_block(
             };
             vm.memory.copy_within(source..source + size, dest);
         }
+        LinearNodeValue::GotoLabel(_) => {}
+        LinearNodeValue::Goto(_) => todo!(),
     }
 
     Ok(())

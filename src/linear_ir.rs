@@ -234,6 +234,8 @@ pub enum LinearNodeValue {
     Loop(Vec<LinearNode>),
     // TODO: stack unwind?
     Abort,
+    Goto(Box<LinearNode>),
+    GotoLabel(usize),
 
     Sequence(Vec<LinearNode>),
     WriteRegister(RegisterID, Box<LinearNode>),
@@ -489,17 +491,16 @@ fn lower_expression(
             }
         }
         HirNodeValue::Call(lhs, params) => {
-            let HirNodeValue::VariableReference(fn_id) = lhs.value else {
-                unreachable!("lhs of function call must be a function ID")
-            };
             let params = params
                 .into_iter()
                 .map(|param| lower_expression(declarations, stack_entries, stack_offset, param))
                 .collect();
-            LinearNodeValue::Call(
-                Box::new(LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))),
-                params,
-            )
+            let lhs = if let HirNodeValue::VariableReference(fn_id) = lhs.value {
+                LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))
+            } else {
+                lower_expression(declarations, stack_entries, stack_offset, *lhs)
+            };
+            LinearNodeValue::Call(Box::new(lhs), params)
         }
         HirNodeValue::Access(lhs, rhs) => {
             if let Some(ty) = lhs.ty.id().and_then(|id| match &declarations[id].value {
@@ -526,6 +527,20 @@ fn lower_expression(
                     ]),
                     None,
                 )])
+            } else if matches!(&lhs.ty, ExpressionType::Generator { .. }) {
+                let (location, mut offset) =
+                    lower_lvalue(declarations, stack_entries, stack_offset, *lhs);
+                offset += match rhs.as_str() {
+                    "function" => 0,
+                    "resume_point" => POINTER_SIZE,
+                    "stack_ptr" => POINTER_SIZE * 2,
+                    rhs => unreachable!("illegal rhs: {}", rhs),
+                };
+                LinearNodeValue::ReadMemory {
+                    location: Box::new(location),
+                    offset,
+                    ty: expr_ty_to_physical(&ty),
+                }
             } else {
                 let (location, offset) =
                     access_location(declarations, stack_entries, stack_offset, *lhs, rhs);
@@ -1089,10 +1104,22 @@ fn lower_expression(
                 Some(vec![LinearNode::new(LinearNodeValue::Byte(0))]),
             )
         }
-        HirNodeValue::Yield(_) => todo!(),
-        HirNodeValue::GeneratorSuspend(_, _) => todo!(),
-        HirNodeValue::GotoLabel(_) => todo!(),
-        HirNodeValue::GeneratorResume(_) => todo!(),
+        HirNodeValue::GeneratorSuspend(generator, label) => {
+            let (location, offset) =
+                lower_lvalue(declarations, stack_entries, stack_offset, *generator);
+            LinearNodeValue::WriteMemory {
+                location: Box::new(location),
+                offset: offset + POINTER_SIZE,
+                ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                value: Box::new(LinearNode::size(label)),
+            }
+        }
+        HirNodeValue::GotoLabel(label) => LinearNodeValue::GotoLabel(label),
+        HirNodeValue::GeneratorResume(generator) => {
+            let resume_point =
+                lower_expression(declarations, stack_entries, stack_offset, *generator);
+            LinearNodeValue::Goto(Box::new(resume_point))
+        }
         HirNodeValue::GeneratorCreate {
             generator_function, ..
         } => {
@@ -1103,6 +1130,7 @@ fn lower_expression(
                 LinearNode::new(LinearNodeValue::FunctionID(generator_function)),
             ])
         }
+        HirNodeValue::Yield(_) => unreachable!("yields should be rewritten in HIR"),
     };
 
     LinearNode { value, provenance }
@@ -1636,6 +1664,7 @@ pub enum PhysicalType {
     Pointer,
     FunctionPointer,
     Collection(PhysicalCollection),
+    /// [function ID, resume point, stack ptr]
     Generator,
 }
 
