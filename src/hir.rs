@@ -6,8 +6,8 @@ use crate::{
     provenance::SourceRange,
     runtime::{info_for_function, RuntimeFunction},
     typecheck::{
-        find_func, fully_dereference, is_assignable_to, ExpressionType, PrimitiveType,
-        StaticDeclaration, TypecheckedFile,
+        find_func, is_assignable_to, ExpressionType, PrimitiveType, StaticDeclaration,
+        TypecheckedFile,
     },
 };
 
@@ -26,8 +26,10 @@ pub fn lower_module<'ast>(
 ) -> HirModule {
     let mut module = lower::lower_module(module, declarations);
 
+    // Important that this comes before ANY pass that uses the declarations
+    coroutines::rewrite_generator_calls(&mut module);
+
     module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
-    coroutines::take_coroutine_references(&mut module);
 
     interface_conversion_pass::rewrite(&mut module, declarations);
     auto_deref_dot::auto_deref_dot(&mut module);
@@ -260,15 +262,6 @@ impl HirNode {
                 }
                 callback(None, lhs);
             }
-            HirNodeValue::CallGenerator(lhs, params) => {
-                let ExpressionType::Generator { param_ty, .. } = fully_dereference(&lhs.ty) else {
-                    unreachable!()
-                };
-                if param_ty.as_ref() != &ExpressionType::Void {
-                    callback(Some(param_ty.as_ref()), params.last().unwrap());
-                }
-                callback(None, lhs);
-            }
             HirNodeValue::RuntimeCall(runtime_fn, args) => {
                 let StaticDeclaration::Func(func) = &info_for_function(runtime_fn).decl else {
                     unreachable!()
@@ -455,15 +448,6 @@ impl HirNode {
                 }
                 callback(None, lhs);
             }
-            HirNodeValue::CallGenerator(lhs, params) => {
-                let ExpressionType::Generator { param_ty, .. } = fully_dereference(&lhs.ty) else {
-                    unreachable!()
-                };
-                if param_ty.as_ref() != &ExpressionType::Void {
-                    callback(Some(param_ty.as_ref()), params.last_mut().unwrap());
-                }
-                callback(None, lhs);
-            }
             HirNodeValue::RuntimeCall(runtime_fn, args) => {
                 let StaticDeclaration::Func(func) = &info_for_function(runtime_fn).decl else {
                     unreachable!()
@@ -579,7 +563,6 @@ pub enum HirNodeValue {
     Declaration(VariableID),
 
     Call(Box<HirNode>, Vec<HirNode>),
-    CallGenerator(Box<HirNode>, Vec<HirNode>),
     // TODO: break this up into Union Access and Struct Access?
     Access(Box<HirNode>, String),
     NullableTraverse(Box<HirNode>, Vec<String>),

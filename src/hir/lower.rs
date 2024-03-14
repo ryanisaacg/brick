@@ -336,21 +336,12 @@ fn lower_node(decls: &HashMap<TypeID, &StaticDeclaration>, node: &AstNode<'_>) -
             }
         }
         AstNodeValue::Call(func, params) => {
-            if let Some(ExpressionType::Generator { .. }) = &func.ty.get() {
-                let func = lower_node_alloc(decls, func);
-                let params = params
-                    .iter()
-                    .map(|param| lower_node(decls, param))
-                    .collect();
-                HirNodeValue::CallGenerator(func, params)
-            } else {
-                let func = lower_node_alloc(decls, func);
-                let params = params
-                    .iter()
-                    .map(|param| lower_node(decls, param))
-                    .collect();
-                HirNodeValue::Call(func, params)
-            }
+            let func = lower_node_alloc(decls, func);
+            let params = params
+                .iter()
+                .map(|param| lower_node(decls, param))
+                .collect();
+            HirNodeValue::Call(func, params)
         }
         AstNodeValue::RecordLiteral { name, fields } => {
             let AstNodeValue::Name { referenced_id, .. } = &name.value else {

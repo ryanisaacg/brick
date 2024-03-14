@@ -1089,15 +1089,11 @@ fn lower_expression(
                 Some(vec![LinearNode::new(LinearNodeValue::Byte(0))]),
             )
         }
-        HirNodeValue::CallGenerator(_, _) => todo!(),
         HirNodeValue::Yield(_) => todo!(),
         HirNodeValue::GeneratorSuspend(_, _) => todo!(),
         HirNodeValue::GotoLabel(_) => todo!(),
         HirNodeValue::GeneratorResume(_) => todo!(),
-        HirNodeValue::GeneratorCreate {
-            generator_function,
-            args,
-        } => todo!(),
+        HirNodeValue::GeneratorCreate { .. } => todo!(),
     };
 
     LinearNode { value, provenance }
@@ -1174,7 +1170,6 @@ fn lower_lvalue(
         HirNodeValue::NullCoalesce(_, _) => todo!(),
         HirNodeValue::MakeNullable(_) => todo!(),
         HirNodeValue::NullableTraverse(_, _) => todo!(),
-        HirNodeValue::CallGenerator(_, _) => todo!(),
         HirNodeValue::Yield(_) => todo!(),
         HirNodeValue::RuntimeCall(_, _) => todo!(),
         HirNodeValue::GeneratorSuspend(_, _) => todo!(),

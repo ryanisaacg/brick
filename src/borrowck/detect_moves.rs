@@ -180,7 +180,6 @@ fn find_moves_in_node(
             }
         }
         HirNodeValue::VtableCall(_, _, params)
-        | HirNodeValue::CallGenerator(_, params)
         | HirNodeValue::Call(_, params)
         | HirNodeValue::RuntimeCall(_, params)
         | HirNodeValue::ArrayLiteral(params) => {
