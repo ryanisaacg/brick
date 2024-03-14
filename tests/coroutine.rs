@@ -60,15 +60,15 @@ seq()
 "#,
     )
     .unwrap();
-    assert_matches!(&result[..], [Value::Int32(1235)]);
+    assert_eq!(result.last().cloned(), Some(Value::Int32(1235)));
 }
 
 #[test]
 fn count_up() {
-    eval_types(
+    let result = eval(
         r#"
 gen fn infinite_seq(): generator[i32, void] {
-    let current = 0;
+    let current = 1;
     while true {
         yield current;
         current += 1;
@@ -81,6 +81,28 @@ value
 "#,
     )
     .unwrap();
+    assert_matches!(&result[..], [Value::Int32(6)]);
+}
+
+#[test]
+fn other_functions() {
+    let result = eval(
+        r#"
+gen fn basic(): generator[i32, void] {
+    yield 1;
+    yield 2;
+}
+
+fn double(seq: unique generator[i32, void]): i32 {
+    seq() * 2
+}
+
+let seq = basic();
+double(unique seq) + double(unique seq)
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(6)]);
 }
 
 #[test]
