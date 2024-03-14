@@ -1093,7 +1093,16 @@ fn lower_expression(
         HirNodeValue::GeneratorSuspend(_, _) => todo!(),
         HirNodeValue::GotoLabel(_) => todo!(),
         HirNodeValue::GeneratorResume(_) => todo!(),
-        HirNodeValue::GeneratorCreate { .. } => todo!(),
+        HirNodeValue::GeneratorCreate {
+            generator_function, ..
+        } => {
+            // TODO: care about args
+            LinearNodeValue::Sequence(vec![
+                LinearNode::heap_alloc_const(64), // TODO: allocate a statically sized stack frame
+                LinearNode::size(0),
+                LinearNode::new(LinearNodeValue::FunctionID(generator_function)),
+            ])
+        }
     };
 
     LinearNode { value, provenance }
@@ -1627,6 +1636,7 @@ pub enum PhysicalType {
     Pointer,
     FunctionPointer,
     Collection(PhysicalCollection),
+    Generator,
 }
 
 #[derive(Clone, Debug)]
@@ -1646,6 +1656,7 @@ impl PhysicalType {
                 PhysicalCollection::Array => POINTER_SIZE * 3,
                 PhysicalCollection::Dict => POINTER_SIZE * 3,
             },
+            PhysicalType::Generator => POINTER_SIZE * 3,
         }
     }
 }
@@ -1679,7 +1690,8 @@ fn layout_static_decl(
                 .fields
                 .iter()
                 .map(|(name, field)| {
-                    let (field, field_size) = layout_type(declarations, layouts, field);
+                    let field = layout_type(declarations, layouts, field);
+                    let field_size = field.size(layouts);
                     let offset = size;
                     size += field_size;
                     (name.clone(), offset, field)
@@ -1718,7 +1730,8 @@ fn layout_static_decl(
                 .iter()
                 .enumerate()
                 .map(|(idx, (name, ty))| {
-                    let (variant, variant_size) = layout_type(declarations, layouts, ty);
+                    let variant = layout_type(declarations, layouts, ty);
+                    let variant_size = variant.size(layouts);
                     if variant_size > largest_variant {
                         largest_variant = variant_size;
                     }
@@ -1748,40 +1761,32 @@ fn layout_type(
     declarations: &HashMap<TypeID, &StaticDeclaration>,
     layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
     ty: &ExpressionType,
-) -> (PhysicalType, usize) {
+) -> PhysicalType {
     match ty {
         ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
         ExpressionType::Primitive(p) => {
             let p = primitive_to_physical(*p);
-            let size = primitive_type_size(p);
-            (PhysicalType::Primitive(p), size)
+            PhysicalType::Primitive(p)
         }
         ExpressionType::InstanceOf(id) => {
-            let size = layout_static_decl(declarations, layouts, declarations[id]);
-            (PhysicalType::Referenced(*id), size)
+            layout_static_decl(declarations, layouts, declarations[id]);
+            PhysicalType::Referenced(*id)
         }
-        ExpressionType::Pointer(_, _) => (PhysicalType::Pointer, POINTER_SIZE),
-        ExpressionType::Collection(CollectionType::Array(_)) => (
-            PhysicalType::Collection(PhysicalCollection::Array),
-            POINTER_SIZE,
-        ),
-        ExpressionType::Collection(CollectionType::Dict(_, _)) => (
-            PhysicalType::Collection(PhysicalCollection::Dict),
-            POINTER_SIZE,
-        ),
+        ExpressionType::Pointer(_, _) => PhysicalType::Pointer,
+        ExpressionType::Collection(CollectionType::Array(_)) => {
+            PhysicalType::Collection(PhysicalCollection::Array)
+        }
+        ExpressionType::Collection(CollectionType::Dict(_, _)) => {
+            PhysicalType::Collection(PhysicalCollection::Dict)
+        }
         ExpressionType::Nullable(inner) => {
-            let (inner, size) = layout_type(declarations, layouts, inner);
-            (
-                PhysicalType::Nullable(Box::new(inner)),
-                size + NULL_TAG_SIZE,
-            )
+            let inner = layout_type(declarations, layouts, inner);
+            PhysicalType::Nullable(Box::new(inner))
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => todo!(),
-        ExpressionType::FunctionReference { .. } => {
-            (PhysicalType::FunctionPointer, FUNCTION_ID_SIZE)
-        }
+        ExpressionType::Generator { .. } => PhysicalType::Generator,
+        ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,
     }
 }
 
@@ -1801,7 +1806,7 @@ fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         }
         ExpressionType::ReferenceTo(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+        ExpressionType::Generator { .. } => PhysicalType::Generator,
         ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,
     }
 }

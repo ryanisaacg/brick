@@ -537,13 +537,12 @@ fn write(
                 write(op_stack, layouts, memory, location + offset, variant);
             }
         },
-        PhysicalType::Collection(ty) => match ty {
-            PhysicalCollection::Array | PhysicalCollection::Dict => {
-                write_primitive(op_stack, memory, location);
-                write_primitive(op_stack, memory, location + 8);
-                write_primitive(op_stack, memory, location + 16);
-            }
-        },
+        PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
+        | PhysicalType::Generator => {
+            write_primitive(op_stack, memory, location);
+            write_primitive(op_stack, memory, location + 8);
+            write_primitive(op_stack, memory, location + 16);
+        }
         PhysicalType::Pointer | PhysicalType::FunctionPointer => {
             write_primitive(op_stack, memory, location);
         }
@@ -617,23 +616,22 @@ fn read(
                 TypeLayoutValue::Union(_) => todo!(),
             }
         }
-        PhysicalType::Collection(ty) => match ty {
-            PhysicalCollection::Array | PhysicalCollection::Dict => {
-                read_primitive(
-                    op_stack,
-                    memory,
-                    location + 16,
-                    PhysicalPrimitive::PointerSize,
-                );
-                read_primitive(
-                    op_stack,
-                    memory,
-                    location + 8,
-                    PhysicalPrimitive::PointerSize,
-                );
-                read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
-            }
-        },
+        PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
+        | PhysicalType::Generator => {
+            read_primitive(
+                op_stack,
+                memory,
+                location + 16,
+                PhysicalPrimitive::PointerSize,
+            );
+            read_primitive(
+                op_stack,
+                memory,
+                location + 8,
+                PhysicalPrimitive::PointerSize,
+            );
+            read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
+        }
         PhysicalType::Pointer => {
             read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
         }
