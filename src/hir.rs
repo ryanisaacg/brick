@@ -31,6 +31,7 @@ pub fn lower_module<'ast>(
 
     module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
 
+    coroutines::rewrite_yields(&mut module);
     interface_conversion_pass::rewrite(&mut module, declarations);
     auto_deref_dot::auto_deref_dot(&mut module);
     auto_numeric_cast::auto_numeric_cast(&mut module, declarations);
@@ -70,6 +71,7 @@ pub struct HirFunction {
     pub id: FunctionID,
     pub name: Option<String>,
     pub body: HirNode,
+    generator: Option<(VariableID, ExpressionType)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

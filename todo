@@ -18,8 +18,6 @@ coroutines / generators / async:
 - compile two separate functions, one for creating the generator object and one for running the generator
     - desugar generators in HIR:
         - generators are a struct: { function_id, resume_point, stack_ptr }
-        - yields are suspend + return, plus a label for GOTOs
-        - resume call
     - linear IR:
         - on resume, GOTO label
         - on resume, copy the stack
@@ -28,6 +26,7 @@ coroutines / generators / async:
 - instead of copying the stack back and forth, maybe store the "stack" (local values) in the generator itself, and read/write them directly?
     - if this works well, it means that coroutines don't require any runtime tricks (it's basically what Rust does with futures)
 - extract yield to temporaries if necessary
+- allow values to be returned from yields in the HIR
 - either ban references from generator args or note that they're borrowed as long as the generator lives
 - require coroutines to return generators
 - generators on associated functions

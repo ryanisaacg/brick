@@ -234,7 +234,6 @@ fn find_moves_in_node(
         HirNodeValue::UnionLiteral(_, _, child)
         | HirNodeValue::Return(Some(child))
         | HirNodeValue::Yield(Some(child))
-        | HirNodeValue::GeneratorSuspend(child, _)
         | HirNodeValue::Assignment(_, child) => {
             find_moves_in_node(liveness, errors, declarations, child);
         }
@@ -252,6 +251,7 @@ fn find_moves_in_node(
         HirNodeValue::PointerSize(_) => todo!(),
         HirNodeValue::GotoLabel(_) => {}
         HirNodeValue::GeneratorResume(_) => {}
+        HirNodeValue::GeneratorSuspend(_, _) => {}
         HirNodeValue::GeneratorCreate { .. } => {}
     }
 }
