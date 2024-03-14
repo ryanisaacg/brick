@@ -4,8 +4,8 @@ use crate::{
     id::TypeID,
     runtime::{array_runtime_functions, dictionary_runtime_functions},
     typecheck::{
-        CollectionType, ExpressionType, InterfaceType, PointerKind, PrimitiveType,
-        StaticDeclaration, StructType,
+        fully_dereference, CollectionType, ExpressionType, InterfaceType, PointerKind,
+        PrimitiveType, StaticDeclaration, StructType,
     },
 };
 
@@ -19,7 +19,7 @@ pub fn rewrite(declarations: &HashMap<TypeID, &StaticDeclaration>, root: &mut Hi
     let HirNodeValue::Access(lhs, func_name) = &mut call_lhs.value else {
         return;
     };
-    match &lhs.ty {
+    match fully_dereference(&lhs.ty) {
         ExpressionType::InstanceOf(ty_id) | ExpressionType::ReferenceTo(ty_id) => {
             match declarations.get(ty_id) {
                 Some(StaticDeclaration::Struct(StructType {
@@ -120,6 +120,9 @@ pub fn rewrite(declarations: &HashMap<TypeID, &StaticDeclaration>, root: &mut Hi
             );
         }
         ExpressionType::Generator { .. } => {}
-        ty => unreachable!("illegal lhs of function call: {:?}", ty),
+        ty => unreachable!(
+            "illegal lhs of access in function call: {:?} in {:?}",
+            ty, lhs
+        ),
     }
 }

@@ -23,7 +23,6 @@ coroutines / generators / async:
         - on suspend, write stack
 - instead of copying the stack back and forth, maybe store the "stack" (local values) in the generator itself, and read/write them directly?
     - if this works well, it means that coroutines don't require any runtime tricks (it's basically what Rust does with futures)
-- allow calling generators through unique references
 - support goto labels inside non-top blocks
 - extract yield to temporaries if necessary
 - allow values to be returned from yields in the HIR
@@ -68,6 +67,7 @@ collections:
 - automatically convert types when assigning collections?
 
 borrow checker and lifetimes:
+- mutable references aren't moved when they're passed to functions
 - check borrows for function calls
 - handle assignments - both in terms of drop detection and borrow detection
 - allow disjoint borrows of struct fields

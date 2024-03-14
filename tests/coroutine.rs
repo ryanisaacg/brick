@@ -64,7 +64,7 @@ seq()
 }
 
 #[test]
-#[should_panic] // TODO: what's wrong with this guy
+#[should_panic] // TODO: support goto labels in non-top-level blocks
 fn count_up() {
     let result = eval(
         r#"
@@ -86,8 +86,26 @@ value
 }
 
 #[test]
-#[should_panic] // TODO: calling coroutines through unique references
-fn other_functions() {
+fn mutable_ref() {
+    let result = eval(
+        r#"
+gen fn basic(): generator[i32, void] {
+    yield 1;
+}
+
+let seq = basic();
+let seq_ref = unique seq;
+seq_ref()
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(1)]);
+}
+
+#[test]
+#[should_panic] // TODO: borrowck bug, mutable references are treated as afine when passed to
+                // functions
+fn mutable_ref_repeated() {
     let result = eval(
         r#"
 gen fn basic(): generator[i32, void] {
@@ -95,16 +113,51 @@ gen fn basic(): generator[i32, void] {
     yield 2;
 }
 
+let seq = basic();
+let seq_ref = unique seq;
+seq_ref() + seq_ref()
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(3)]);
+}
+
+#[test]
+#[should_panic]
+fn immutable_ref() {
+    eval(
+        r#"
+gen fn basic(): generator[i32, void] {
+    yield 1;
+    yield 2;
+}
+
+let seq = basic();
+let seq_ref = ref seq;
+seq_ref() + seq_ref()
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn other_functions() {
+    let result = eval(
+        r#"
+gen fn basic(): generator[i32, void] {
+    yield 1000;
+}
+
 fn double(seq: unique generator[i32, void]): i32 {
     seq() * 2
 }
 
 let seq = basic();
-double(unique seq) + double(unique seq)
+double(unique seq)
 "#,
     )
     .unwrap();
-    assert_matches!(&result[..], [Value::Int32(6)]);
+    assert_matches!(&result[..], [Value::Int32(2000)]);
 }
 
 #[test]

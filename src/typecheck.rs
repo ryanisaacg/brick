@@ -1023,13 +1023,13 @@ fn typecheck_expression<'a>(
             expr_ty
         }
         AstNodeValue::Call(func, args) => {
-            match typecheck_expression(
+            match fully_dereference(typecheck_expression(
                 func,
                 outer_scopes,
                 current_scope,
                 context,
                 generator_input_ty,
-            )? {
+            )?) {
                 ExpressionType::InstanceOf(func) | ExpressionType::ReferenceTo(func) => {
                     let func = context.id_to_func(func);
                     let params = if func.is_associated {
