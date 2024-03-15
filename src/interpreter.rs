@@ -147,9 +147,28 @@ pub fn evaluate_block(
             LinearNodeValue::GotoLabel(current_label) if *current_label == target_label => {
                 vm.in_progress_goto = None;
             }
-            _ => {
-                return Ok(());
+            LinearNodeValue::Sequence(children) | LinearNodeValue::Loop(children) => {
+                for node in children.iter() {
+                    evaluate_block(fns, params, vm, node)?;
+                }
             }
+            LinearNodeValue::If(_, if_branch, else_branch) => {
+                let mut found_goto = false;
+                for node in if_branch.iter() {
+                    evaluate_block(fns, params, vm, node)?;
+                    if vm.in_progress_goto.is_none() {
+                        found_goto = true;
+                    }
+                }
+                if !found_goto {
+                    if let Some(else_branch) = else_branch {
+                        for node in else_branch.iter() {
+                            evaluate_block(fns, params, vm, node)?;
+                        }
+                    }
+                }
+            }
+            _ => return Ok(()),
         }
     }
     match &node.value {

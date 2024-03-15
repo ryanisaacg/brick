@@ -64,7 +64,24 @@ seq()
 }
 
 #[test]
-#[should_panic] // TODO: support goto labels in non-top-level blocks
+fn infinite() {
+    let result = eval(
+        r#"
+gen fn infinite_seq(): generator[i32, void] {
+    while true {
+        yield 5;
+    }
+}
+
+let seq = infinite_seq();
+seq() + seq() + seq()
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(15)]);
+}
+
+#[test]
 fn count_up() {
     let result = eval(
         r#"

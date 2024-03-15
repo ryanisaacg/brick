@@ -19,7 +19,6 @@ coroutines / generators / async:
     - rewrite generator bodies to use generator-relative locations instead of stack-relative
     - strip HeapAllocs and use them to calculate how large the generator must be
     - alloc that amount in the coroutine when creating the generator
-- support goto labels inside non-top blocks
 - allow values to be returned from yields
     - extract yield to temporaries if necessary
     - add a new HIR instruction to retrieve passed-down generator values
