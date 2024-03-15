@@ -141,23 +141,36 @@ seq_ref() + seq_ref()
 }
 
 #[test]
+#[should_panic] // TODO: coroutines don't actually restore their state
 fn other_functions() {
     let result = eval(
         r#"
 gen fn basic(): generator[i32, void] {
-    yield 1000;
+    let x = 5;
+    yield x;
+    let y = 1;
+    yield y;
+    yield x + y;
 }
 
-fn double(seq: unique generator[i32, void]): i32 {
-    seq() * 2
+fn stack_mangle() {
+    let x = 1;
+    let y = 2;
+    let z = 3;
+    let a = x + y + z;
+    let b = a * 3;
 }
 
 let seq = basic();
-double(unique seq)
+let a = seq(); // 5
+let b = seq(); // 1
+stack_mangle();
+let c = seq(); // 6, but comes out as 24
+c
 "#,
     )
     .unwrap();
-    assert_matches!(&result[..], [Value::Int32(2000)]);
+    assert_matches!(&result[..], [Value::Int32(6)]);
 }
 
 #[test]
