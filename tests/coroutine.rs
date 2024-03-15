@@ -231,3 +231,31 @@ seq(3);
     )
     .unwrap();
 }
+
+#[test]
+#[should_panic] // TODO: probably a coroutine-save-state problem
+fn nested_coroutines() {
+    let result = eval(
+        r#"
+gen fn ones(): generator[i32, void] {
+    while true {
+        yield 1;
+    }
+}
+
+gen fn count_up(): generator[i32, void] {
+    let x = 0;
+    let seq = ones();
+    while true {
+        yield x;
+        x += seq();
+    }
+}
+
+let seq = count_up();
+seq() + seq() + seq()
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(6)]);
+}
