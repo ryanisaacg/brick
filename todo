@@ -11,9 +11,6 @@ linear IR:
 - (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
 - (maybe) AST rewrite the HIR to disambiguate between variable references and function references
 
-misc:
-- auto-dereference dot operator
-
 coroutines / generators / async:
 - stackless coroutines
     - rewrite generator bodies to use generator-relative locations instead of stack-relative
