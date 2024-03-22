@@ -47,7 +47,7 @@ pub fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
 
 pub fn eval_with_bindings(
     source: &str,
-    bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
+    bindings: HashMap<String, ExternBinding>,
 ) -> Result<Vec<Value>, CompileError> {
     let val = interpret_code("eval", source.to_string(), bindings)?;
 
@@ -57,7 +57,7 @@ pub fn eval_with_bindings(
 pub fn interpret_code(
     source_name: &'static str,
     contents: String,
-    mut bindings: HashMap<String, std::sync::Arc<ExternBinding>>,
+    mut bindings: HashMap<String, ExternBinding>,
 ) -> Result<Vec<Value>, CompileError> {
     // TODO: "main"?
     let CompilationResults {

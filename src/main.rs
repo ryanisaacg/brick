@@ -1,11 +1,11 @@
 use brick::{interpret_code, ExternBinding, Value};
-use std::{collections::HashMap, fs::read_to_string, sync::Arc};
+use std::{collections::HashMap, fs::read_to_string};
 
 fn main() {
-    let mut bindings: HashMap<String, Arc<ExternBinding>> = HashMap::new();
+    let mut bindings: HashMap<String, ExternBinding> = HashMap::new();
     bindings.insert(
         "set_fill".to_string(),
-        Arc::new(|_, values| {
+        Box::new(|_, values| {
             let Value::Float32(r) = values[0] else {
                 panic!("expected float");
             };
@@ -21,7 +21,7 @@ fn main() {
     );
     bindings.insert(
         "draw_rect".to_string(),
-        Arc::new(|_, values| {
+        Box::new(|_, values| {
             let Value::Float32(x) = values[0] else {
                 panic!("expected float");
             };
@@ -40,7 +40,7 @@ fn main() {
     );
     bindings.insert(
         "run".to_string(),
-        Arc::new(|vm, mut values| {
+        Box::new(|vm, mut values| {
             let generator = values.remove(0);
             for _ in 0..10 {
                 vm.resume_generator(generator.clone()).unwrap();

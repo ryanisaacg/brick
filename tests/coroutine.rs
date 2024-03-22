@@ -288,13 +288,13 @@ seq() + seq() + seq()
 
 #[test]
 fn externally_driven_coroutine() {
-    let mut bindings: HashMap<String, Arc<ExternBinding>> = HashMap::new();
+    let mut bindings: HashMap<String, ExternBinding> = HashMap::new();
     let results = Arc::new(Mutex::new(Vec::new()));
 
     let push_results = results.clone();
     bindings.insert(
         "push".to_string(),
-        Arc::new(move |_, mut args| {
+        Box::new(move |_, mut args| {
             let mut results = push_results.lock().unwrap();
             results.push(args.remove(0));
             None
@@ -302,7 +302,7 @@ fn externally_driven_coroutine() {
     );
     bindings.insert(
         "call_generator_times".to_string(),
-        Arc::new(|vm, mut args| {
+        Box::new(|vm, mut args| {
             let Value::Int32(times) = args.pop().unwrap() else {
                 unreachable!()
             };

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use brick::{eval, eval_with_bindings, interpret_code, ExternBinding, Value};
@@ -60,11 +59,11 @@ static mut INCR_VALUE: i32 = 0;
 
 #[test]
 fn extern_binding() {
-    let mut bindings: HashMap<String, Arc<ExternBinding>> = HashMap::new();
+    let mut bindings: HashMap<String, ExternBinding> = HashMap::new();
 
     bindings.insert(
         "next".to_string(),
-        Arc::new(|_, _| {
+        Box::new(|_, _| {
             let x = unsafe { INCR_VALUE };
             unsafe {
                 INCR_VALUE += 1;
@@ -113,10 +112,10 @@ add({
 
 #[test]
 fn extern_pointer() {
-    let mut funcs: HashMap<String, Arc<ExternBinding>> = HashMap::new();
+    let mut funcs: HashMap<String, ExternBinding> = HashMap::new();
     funcs.insert(
         "increment".to_string(),
-        Arc::new(|vm, mut stack| {
+        Box::new(|vm, mut stack| {
             let Value::Size(pointer) = stack.pop().unwrap() else {
                 unreachable!()
             };

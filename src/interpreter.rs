@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug};
 
 use crate::{
     hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
@@ -42,11 +42,11 @@ pub enum Numeric {
     Size(usize),
 }
 
-pub type ExternBinding = dyn Fn(&mut VM, Vec<Value>) -> Option<Value>;
+pub type ExternBinding = Box<dyn Fn(&mut VM, Vec<Value>) -> Option<Value>>;
 
 pub enum Function {
     Ir(LinearFunction),
-    Extern(Arc<ExternBinding>),
+    Extern(ExternBinding),
 }
 
 impl Debug for Function {
