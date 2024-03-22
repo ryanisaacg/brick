@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::{
     hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
-    id::{FunctionID, RegisterID, TypeID},
+    id::{FunctionID, RegisterID, TypeID, VariableID},
     linear_ir::{
         DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
         PhysicalPrimitive, PhysicalType, TypeLayoutValue, NULL_TAG_SIZE,
@@ -74,6 +74,7 @@ pub struct VM {
     pub stack_ptr: usize,
     pub heap_ptr: usize,
     pub in_progress_goto: Option<usize>,
+    pub variable_locations: Vec<HashMap<VariableID, (usize, PhysicalType)>>,
 }
 
 impl VM {
@@ -88,6 +89,7 @@ impl VM {
             stack_ptr: memory.len(),
             heap_ptr: std::mem::size_of::<usize>(),
             in_progress_goto: None,
+            variable_locations: Vec::new(),
         }
     }
 }
@@ -107,8 +109,10 @@ pub fn evaluate_function(
             vm.base_ptr = vm.stack_ptr;
             vm.stack_ptr -= base_ptr.len();
 
+            vm.variable_locations.push(HashMap::new());
+
             for node in function.body.iter() {
-                let result = evaluate_block(fns, params, vm, node);
+                let result = evaluate_node(fns, params, vm, node);
                 if let Err(Unwind::Return(val)) = result {
                     if let Some(val) = val {
                         vm.op_stack.push(val);
@@ -118,6 +122,8 @@ pub fn evaluate_function(
                     result?;
                 }
             }
+
+            vm.variable_locations.pop();
 
             let base_ptr = &vm.memory[(vm.base_ptr - base_ptr.len())..vm.base_ptr];
             let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
@@ -136,7 +142,7 @@ pub fn evaluate_function(
 }
 
 // Kinda a hack: when we return, unwind the stack via Result
-pub fn evaluate_block(
+pub fn evaluate_node(
     fns: &HashMap<FunctionID, Function>,
     params: &mut [Value],
     vm: &mut VM,
@@ -149,13 +155,13 @@ pub fn evaluate_block(
             }
             LinearNodeValue::Sequence(children) | LinearNodeValue::Loop(children) => {
                 for node in children.iter() {
-                    evaluate_block(fns, params, vm, node)?;
+                    evaluate_node(fns, params, vm, node)?;
                 }
             }
             LinearNodeValue::If(_, if_branch, else_branch) => {
                 let mut found_goto = false;
                 for node in if_branch.iter() {
-                    evaluate_block(fns, params, vm, node)?;
+                    evaluate_node(fns, params, vm, node)?;
                     if vm.in_progress_goto.is_none() {
                         found_goto = true;
                     }
@@ -163,7 +169,7 @@ pub fn evaluate_block(
                 if !found_goto {
                     if let Some(else_branch) = else_branch {
                         for node in else_branch.iter() {
-                            evaluate_block(fns, params, vm, node)?;
+                            evaluate_node(fns, params, vm, node)?;
                         }
                     }
                 }
@@ -174,20 +180,32 @@ pub fn evaluate_block(
     match &node.value {
         LinearNodeValue::Sequence(seq) => {
             for node in seq.iter() {
-                evaluate_block(fns, params, vm, node)?;
+                evaluate_node(fns, params, vm, node)?;
             }
         }
-        LinearNodeValue::StackFrame => {
-            vm.op_stack.push(Value::Size(vm.base_ptr));
+        LinearNodeValue::VariableInit(var_id, ty) => {
+            vm.stack_ptr -= ty.size(&vm.layouts);
+            vm.variable_locations
+                .last_mut()
+                .unwrap()
+                .insert(*var_id, (vm.stack_ptr, ty.clone()));
         }
-        LinearNodeValue::StackAlloc(amount) => {
-            vm.stack_ptr -= amount;
+        LinearNodeValue::VariableDestroy(var_id) => {
+            let (_location, ty) = vm
+                .variable_locations
+                .last_mut()
+                .unwrap()
+                .remove(var_id)
+                .unwrap();
+            vm.stack_ptr += ty.size(&vm.layouts);
         }
-        LinearNodeValue::StackDealloc(amount) => {
-            vm.stack_ptr += amount;
+        LinearNodeValue::VariableLocation(var_id) => {
+            vm.op_stack.push(Value::Size(
+                vm.variable_locations.last().unwrap().get(var_id).unwrap().0,
+            ));
         }
         LinearNodeValue::HeapAlloc(amount) => {
-            evaluate_block(fns, params, vm, amount)?;
+            evaluate_node(fns, params, vm, amount)?;
             let Some(Value::Size(amount)) = vm.op_stack.pop() else {
                 unreachable!()
             };
@@ -204,7 +222,7 @@ pub fn evaluate_block(
             offset,
             ty,
         } => {
-            evaluate_block(fns, params, vm, location)?;
+            evaluate_node(fns, params, vm, location)?;
             let Some(Value::Size(mut location)) = vm.op_stack.pop() else {
                 unreachable!()
             };
@@ -217,8 +235,8 @@ pub fn evaluate_block(
             value,
             ty,
         } => {
-            evaluate_block(fns, params, vm, value)?;
-            evaluate_block(fns, params, vm, location)?;
+            evaluate_node(fns, params, vm, value)?;
+            evaluate_node(fns, params, vm, location)?;
             let Some(Value::Size(mut location)) = vm.op_stack.pop() else {
                 unreachable!()
             };
@@ -226,13 +244,13 @@ pub fn evaluate_block(
             write(&mut vm.op_stack, &vm.layouts, &mut vm.memory, location, ty);
         }
         LinearNodeValue::Call(lhs, parameters) => {
-            evaluate_block(fns, params, vm, lhs)?;
+            evaluate_node(fns, params, vm, lhs)?;
             // TODO: should I figure out
             let Some(Value::FunctionID(fn_id)) = vm.op_stack.pop() else {
                 unreachable!()
             };
             for param in parameters.iter().rev() {
-                evaluate_block(fns, params, vm, param)?;
+                evaluate_node(fns, params, vm, param)?;
             }
             let mut parameters: Vec<_> = (0..parameters.len())
                 .map(|_| vm.op_stack.pop().unwrap())
@@ -242,7 +260,7 @@ pub fn evaluate_block(
         }
         LinearNodeValue::Return(expr) => {
             if let Some(expr) = expr {
-                evaluate_block(fns, params, vm, expr)?;
+                evaluate_node(fns, params, vm, expr)?;
                 // TODO: support wide returns
                 let val = vm.op_stack.pop().unwrap();
                 return Err(Unwind::Return(Some(val)));
@@ -251,24 +269,24 @@ pub fn evaluate_block(
             }
         }
         LinearNodeValue::If(cond, if_branch, else_branch) => {
-            evaluate_block(fns, params, vm, cond)?;
+            evaluate_node(fns, params, vm, cond)?;
             let Some(Value::Byte(cond)) = vm.op_stack.pop() else {
                 unreachable!()
             };
             if cond != 0 {
                 for node in if_branch.iter() {
-                    evaluate_block(fns, params, vm, node)?;
+                    evaluate_node(fns, params, vm, node)?;
                 }
             } else if let Some(else_branch) = else_branch {
                 for node in else_branch.iter() {
-                    evaluate_block(fns, params, vm, node)?;
+                    evaluate_node(fns, params, vm, node)?;
                 }
             }
         }
         LinearNodeValue::Break => return Err(Unwind::Break),
         LinearNodeValue::Loop(inner) => 'outer: loop {
             for node in inner.iter() {
-                match evaluate_block(fns, params, vm, node) {
+                match evaluate_node(fns, params, vm, node) {
                     Err(Unwind::Break) => break 'outer,
                     other @ Err(_) => return other,
                     Ok(_) => {}
@@ -276,15 +294,15 @@ pub fn evaluate_block(
             }
         },
         LinearNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, child) => {
-            evaluate_block(fns, params, vm, child)?;
+            evaluate_node(fns, params, vm, child)?;
             let Value::Byte(val) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
             };
             vm.op_stack.push(bool_value(val == 0));
         }
         LinearNodeValue::Arithmetic(op, _ty, lhs, rhs) => {
-            evaluate_block(fns, params, vm, rhs)?;
-            evaluate_block(fns, params, vm, lhs)?;
+            evaluate_node(fns, params, vm, rhs)?;
+            evaluate_node(fns, params, vm, lhs)?;
             let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let val = match (left, right) {
@@ -328,8 +346,8 @@ pub fn evaluate_block(
             lhs,
             rhs,
         ) => {
-            evaluate_block(fns, params, vm, rhs)?;
-            evaluate_block(fns, params, vm, lhs)?;
+            evaluate_node(fns, params, vm, rhs)?;
+            evaluate_node(fns, params, vm, lhs)?;
             let left = vm.op_stack.pop().unwrap();
             let right = vm.op_stack.pop().unwrap();
             vm.op_stack.push(bool_value(
@@ -337,8 +355,8 @@ pub fn evaluate_block(
             ));
         }
         LinearNodeValue::Comparison(op, _ty, lhs, rhs) => {
-            evaluate_block(fns, params, vm, rhs)?;
-            evaluate_block(fns, params, vm, lhs)?;
+            evaluate_node(fns, params, vm, rhs)?;
+            evaluate_node(fns, params, vm, lhs)?;
             let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
             let val = match (left, right) {
@@ -382,7 +400,7 @@ pub fn evaluate_block(
             vm.op_stack.push(val);
         }
         LinearNodeValue::BinaryLogical(op, lhs, rhs) => {
-            evaluate_block(fns, params, vm, lhs)?;
+            evaluate_node(fns, params, vm, lhs)?;
             let Value::Byte(left) = vm.op_stack.pop().unwrap() else {
                 unreachable!();
             };
@@ -390,7 +408,7 @@ pub fn evaluate_block(
             let result = match op {
                 BinaryLogicalOp::BooleanAnd => {
                     left && {
-                        evaluate_block(fns, params, vm, rhs)?;
+                        evaluate_node(fns, params, vm, rhs)?;
                         let Value::Byte(right) = vm.op_stack.pop().unwrap() else {
                             unreachable!();
                         };
@@ -399,7 +417,7 @@ pub fn evaluate_block(
                 }
                 BinaryLogicalOp::BooleanOr => {
                     left || {
-                        evaluate_block(fns, params, vm, rhs)?;
+                        evaluate_node(fns, params, vm, rhs)?;
                         let Value::Byte(right) = vm.op_stack.pop().unwrap() else {
                             unreachable!();
                         };
@@ -430,7 +448,7 @@ pub fn evaluate_block(
             vm.op_stack.push(Value::FunctionID(*x));
         }
         LinearNodeValue::WriteRegister(tmp, val) => {
-            evaluate_block(fns, params, vm, val)?;
+            evaluate_node(fns, params, vm, val)?;
             let Value::Size(val) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
             };
@@ -454,7 +472,7 @@ pub fn evaluate_block(
             return Err(Unwind::Aborted);
         }
         LinearNodeValue::Cast { value, from: _, to } => {
-            evaluate_block(fns, params, vm, value)?;
+            evaluate_node(fns, params, vm, value)?;
             let val = vm.op_stack.pop().unwrap();
             vm.op_stack.push(match val {
                 Value::FunctionID(_) => {
@@ -504,19 +522,19 @@ pub fn evaluate_block(
             });
         }
         LinearNodeValue::Debug(inner) => {
-            evaluate_block(fns, params, vm, inner)?;
+            evaluate_node(fns, params, vm, inner)?;
             println!("{:?}", vm.op_stack.last().unwrap());
         }
         LinearNodeValue::MemoryCopy { source, dest, size } => {
-            evaluate_block(fns, params, vm, source)?;
+            evaluate_node(fns, params, vm, source)?;
             let Value::Size(source) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
             };
-            evaluate_block(fns, params, vm, dest)?;
+            evaluate_node(fns, params, vm, dest)?;
             let Value::Size(dest) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
             };
-            evaluate_block(fns, params, vm, size)?;
+            evaluate_node(fns, params, vm, size)?;
             let Value::Size(size) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
             };
@@ -524,7 +542,7 @@ pub fn evaluate_block(
         }
         LinearNodeValue::GotoLabel(_) => {}
         LinearNodeValue::Goto(label) => {
-            evaluate_block(fns, params, vm, label)?;
+            evaluate_node(fns, params, vm, label)?;
             let Value::Size(label) = vm.op_stack.pop().unwrap() else {
                 unreachable!()
             };

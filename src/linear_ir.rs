@@ -31,6 +31,7 @@ pub fn linearize_function(
         &mut initial_offset,
         block.into(),
     );
+
     LinearFunction {
         id: function.id,
         body,
@@ -195,15 +196,14 @@ impl LinearNode {
 #[derive(Clone, Debug)]
 pub enum LinearNodeValue {
     // TODO: how to handle function parameters?
-
-    // Memory
-    StackFrame,
-    StackAlloc(usize),
-    StackDealloc(usize),
     /// Returns the heap pointer
     HeapAlloc(Box<LinearNode>),
     /// Each parameter may only appear once in a given method body
     Parameter(usize),
+    // TODO: do the variables obsolete the registers?
+    VariableInit(VariableID, PhysicalType),
+    VariableDestroy(VariableID),
+    VariableLocation(VariableID),
     ReadMemory {
         location: Box<LinearNode>,
         offset: usize,
@@ -221,7 +221,7 @@ pub enum LinearNodeValue {
         size: Box<LinearNode>,
     },
 
-    // TODO: just full stack machine?
+    // TODO: just full stack machine? OR split tuple instruction
     TopOfStack,
     Discard,
 
@@ -293,19 +293,18 @@ pub fn linearize_nodes(
                 }
             }
             HirNodeValue::Declaration(id) => {
-                let alloc_size = expression_type_size(declarations, &node.ty);
-                values.push(stack_alloc(stack_entries, stack_offset, alloc_size, id));
+                let ty = expr_ty_to_physical(&node.ty);
+                values.push(LinearNode::new(LinearNodeValue::VariableInit(id, ty)));
             }
             HirNodeValue::Parameter(idx, id) => {
-                let alloc_size = expression_type_size(declarations, &node.ty);
-                values.push(stack_alloc(stack_entries, stack_offset, alloc_size, id));
+                let ty = expr_ty_to_physical(&node.ty);
+                values.push(LinearNode::new(LinearNodeValue::VariableInit(id, ty)));
 
-                let (location, offset) = variable_location(stack_entries, id);
                 let ty = expr_ty_to_physical(&node.ty);
 
                 values.push(LinearNode::write_memory(
-                    location,
-                    offset,
+                    LinearNode::new(LinearNodeValue::VariableLocation(id)),
+                    0,
                     ty,
                     LinearNode::new(LinearNodeValue::Parameter(idx)),
                 ));
@@ -482,11 +481,12 @@ fn lower_expression(
             )),
         ),
         HirNodeValue::VariableReference(id) => {
-            let (location, offset) = variable_location(stack_entries, id.as_var());
             let ty = expr_ty_to_physical(&ty);
             LinearNodeValue::ReadMemory {
-                location: Box::new(location),
-                offset,
+                location: Box::new(LinearNode::new(LinearNodeValue::VariableLocation(
+                    id.as_var(),
+                ))),
+                offset: 0,
                 ty,
             }
         }
@@ -553,17 +553,13 @@ fn lower_expression(
         }
         HirNodeValue::NullableTraverse(lhs, rhs) => {
             let temp_id = VariableID::new();
-            let alloc_size = expression_type_size(declarations, &lhs.ty);
-            let alloc = stack_alloc(stack_entries, stack_offset, alloc_size, temp_id);
-            let (location, initial_offset) = variable_location(stack_entries, temp_id);
-            stack_entries.remove(&temp_id);
 
             let PhysicalType::Nullable(ty) = expr_ty_to_physical(&lhs.ty) else {
                 unreachable!();
             };
             let mut ty = *ty;
 
-            let mut read_offset = initial_offset + NULL_TAG_SIZE;
+            let mut read_offset = NULL_TAG_SIZE;
             for name in rhs {
                 let PhysicalType::Referenced(id) = ty else {
                     unreachable!()
@@ -591,27 +587,31 @@ fn lower_expression(
             let lhs_ty = expr_ty_to_physical(&lhs.ty);
 
             LinearNodeValue::Sequence(vec![
-                alloc,
+                LinearNode::new(LinearNodeValue::VariableInit(temp_id, lhs_ty.clone())),
                 LinearNode::write_memory(
-                    location.clone(),
-                    initial_offset,
+                    LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
+                    0,
                     lhs_ty,
                     lower_expression(declarations, stack_entries, stack_offset, *lhs),
                 ),
                 LinearNode::if_node(
                     LinearNode::read_memory(
-                        location.clone(),
-                        initial_offset,
+                        LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
+                        0,
                         PhysicalType::Primitive(PhysicalPrimitive::Byte),
                     ),
                     vec![
-                        LinearNode::read_memory(location, read_offset, ty),
+                        LinearNode::read_memory(
+                            LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
+                            read_offset,
+                            ty,
+                        ),
                         LinearNode::bool_value(true),
                     ],
                     Some(vec![LinearNode::bool_value(false)]),
                     provenance.clone(),
                 ),
-                LinearNode::new(LinearNodeValue::StackDealloc(alloc_size)),
+                LinearNode::new(LinearNodeValue::VariableDestroy(temp_id)),
             ])
         }
         HirNodeValue::ArrayIndex(arr, idx) => {
@@ -1003,20 +1003,20 @@ fn lower_expression(
             let value = lower_expression(declarations, stack_entries, stack_offset, value);
 
             let temp_key_id = VariableID::new();
-            let alloc = stack_alloc(stack_entries, stack_offset, key_size, temp_key_id);
-            let (temp_key_location, temp_key_offset) =
-                variable_location(stack_entries, temp_key_id);
 
             let ptr = RegisterID::new();
             let entry_register = RegisterID::new();
 
             LinearNodeValue::Sequence(vec![
-                alloc,
+                LinearNode::new(LinearNodeValue::VariableInit(
+                    temp_key_id,
+                    PhysicalType::Primitive(key_ty),
+                )),
                 // pointer to dict
                 LinearNode::write_register(ptr, dict_location),
                 LinearNode::write_memory(
-                    temp_key_location.clone(),
-                    temp_key_offset,
+                    LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
+                    0,
                     PhysicalType::Primitive(key_ty),
                     key.clone(),
                 ),
@@ -1027,8 +1027,8 @@ fn lower_expression(
                             dict_offset,
                             PhysicalType::Collection(PhysicalCollection::Dict),
                         ),
-                        temp_key_location,
-                        temp_key_offset,
+                        LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
+                        0,
                         key_ty,
                         entry_size,
                     ),
@@ -1071,6 +1071,7 @@ fn lower_expression(
                     ]),
                     provenance.clone(),
                 ),
+                LinearNode::new(LinearNodeValue::VariableDestroy(temp_key_id)),
                 LinearNode::kill_register(entry_register),
                 LinearNode::kill_register(ptr),
             ])
@@ -1135,17 +1136,6 @@ fn lower_expression(
     LinearNode { value, provenance }
 }
 
-fn stack_alloc(
-    stack_entries: &mut HashMap<VariableID, usize>,
-    stack_offset: &mut usize,
-    alloc_size: usize,
-    id: VariableID,
-) -> LinearNode {
-    *stack_offset += alloc_size;
-    stack_entries.insert(id, *stack_offset);
-    LinearNode::new(LinearNodeValue::StackAlloc(alloc_size))
-}
-
 fn lower_lvalue(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stack_entries: &mut HashMap<VariableID, usize>,
@@ -1153,7 +1143,10 @@ fn lower_lvalue(
     lvalue: HirNode,
 ) -> (LinearNode, usize) {
     match lvalue.value {
-        HirNodeValue::VariableReference(id) => variable_location(stack_entries, id.as_var()),
+        HirNodeValue::VariableReference(id) => (
+            LinearNode::new(LinearNodeValue::VariableLocation(id.as_var())),
+            0,
+        ),
         HirNodeValue::Access(lhs, rhs) => {
             access_location(declarations, stack_entries, stack_offset, *lhs, rhs)
         }
@@ -1213,20 +1206,6 @@ fn lower_lvalue(
         HirNodeValue::GeneratorResume(_) => todo!(),
         HirNodeValue::GeneratorCreate { .. } => todo!(),
     }
-}
-
-fn variable_location(
-    stack_entries: &HashMap<VariableID, usize>,
-    var_id: VariableID,
-) -> (LinearNode, usize) {
-    (
-        LinearNode::ptr_arithmetic(
-            ArithmeticOp::Subtract,
-            LinearNode::new(LinearNodeValue::StackFrame),
-            LinearNode::size(stack_entries[&var_id]),
-        ),
-        0,
-    )
 }
 
 fn access_location(
@@ -1327,7 +1306,8 @@ fn dict_index_location_or_abort(
     };
     let idx_ty = primitive_to_physical(*idx_ty);
 
-    let key_size = expression_type_size(declarations, key_ty);
+    let key_ty = expr_ty_to_physical(key_ty);
+    let key_size = key_ty.size(declarations);
     let value_size = expression_type_size(declarations, value_ty);
     let entry_size = key_size + value_size;
 
@@ -1335,22 +1315,26 @@ fn dict_index_location_or_abort(
     let idx = lower_expression(declarations, stack_entries, stack_offset, idx);
 
     let temp_key_id = VariableID::new();
-    let alloc = stack_alloc(stack_entries, stack_offset, key_size, temp_key_id);
-    let (key_location, key_offset) = variable_location(stack_entries, temp_key_id);
 
     (
         LinearNode::new(LinearNodeValue::Sequence(vec![
-            alloc,
+            LinearNode::new(LinearNodeValue::VariableInit(temp_key_id, key_ty)),
             LinearNode::write_memory(
-                key_location.clone(),
-                key_offset,
+                LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
+                0,
                 PhysicalType::Primitive(idx_ty),
                 idx,
             ),
             LinearNode::if_node(
-                dict_get_entry_for_key(dict, key_location, key_offset, idx_ty, entry_size),
+                dict_get_entry_for_key(
+                    dict,
+                    LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
+                    0,
+                    idx_ty,
+                    entry_size,
+                ),
                 vec![
-                    LinearNode::new(LinearNodeValue::StackDealloc(key_size)),
+                    LinearNode::new(LinearNodeValue::VariableDestroy(temp_key_id)),
                     LinearNode::new(LinearNodeValue::TopOfStack),
                 ],
                 Some(vec![LinearNode::new(LinearNodeValue::Abort)]),
@@ -1675,12 +1659,13 @@ pub enum PhysicalCollection {
 }
 
 impl PhysicalType {
-    fn size(&self, declarations: &HashMap<TypeID, DeclaredTypeLayout>) -> usize {
+    pub fn size(&self, declarations: &HashMap<TypeID, DeclaredTypeLayout>) -> usize {
         match self {
             PhysicalType::Primitive(p) => primitive_type_size(*p),
             PhysicalType::Referenced(id) => declarations[id].size(),
-            PhysicalType::Nullable(_) => todo!(),
-            PhysicalType::Pointer | PhysicalType::FunctionPointer => POINTER_SIZE,
+            PhysicalType::Nullable(ty) => NULL_TAG_SIZE + ty.size(declarations),
+            PhysicalType::Pointer => POINTER_SIZE,
+            PhysicalType::FunctionPointer => FUNCTION_ID_SIZE,
             PhysicalType::Collection(ty) => match ty {
                 PhysicalCollection::Array => POINTER_SIZE * 3,
                 PhysicalCollection::Dict => POINTER_SIZE * 3,
