@@ -11,6 +11,8 @@ use crate::{
     typecheck::{CollectionType, ExpressionType, PrimitiveType, StaticDeclaration},
 };
 
+mod generator_local_storage;
+
 #[derive(Debug)]
 pub struct LinearFunction {
     pub id: FunctionID,
@@ -25,12 +27,15 @@ pub fn linearize_function(
         unreachable!()
     };
     let mut initial_offset = POINTER_SIZE;
-    let body = linearize_nodes(
+    let mut body = linearize_nodes(
         declarations,
         &mut HashMap::new(),
         &mut initial_offset,
         block.into(),
     );
+    if let Some((generator_id, _)) = function.generator {
+        generator_local_storage::generator_local_storage(generator_id, declarations, &mut body[..]);
+    }
 
     LinearFunction {
         id: function.id,
@@ -272,6 +277,82 @@ pub enum LinearNodeValue {
     // Probably not keeping this around forever
     #[allow(dead_code)]
     Debug(Box<LinearNode>),
+}
+
+impl LinearNode {
+    fn visit_mut(&mut self, mut callback: impl FnMut(&mut LinearNode)) {
+        self.visit_mut_recursive(&mut callback);
+    }
+
+    fn visit_mut_recursive(&mut self, callback: &mut impl FnMut(&mut LinearNode)) {
+        callback(self);
+        self.children_mut(|child| child.visit_mut_recursive(callback));
+    }
+
+    fn children_mut(&mut self, mut callback: impl FnMut(&mut LinearNode)) {
+        match &mut self.value {
+            LinearNodeValue::HeapAlloc(child)
+            | LinearNodeValue::Debug(child)
+            | LinearNodeValue::ReadMemory {
+                location: child, ..
+            }
+            | LinearNodeValue::WriteRegister(_, child)
+            | LinearNodeValue::Goto(child)
+            | LinearNodeValue::UnaryLogical(_, child)
+            | LinearNodeValue::Cast { value: child, .. }
+            | LinearNodeValue::Return(Some(child)) => callback(child),
+            LinearNodeValue::WriteMemory {
+                location: a,
+                value: b,
+                ..
+            }
+            | LinearNodeValue::Arithmetic(_, _, a, b)
+            | LinearNodeValue::Comparison(_, _, a, b)
+            | LinearNodeValue::BinaryLogical(_, a, b) => {
+                callback(a);
+                callback(b);
+            }
+            LinearNodeValue::MemoryCopy { source, dest, size } => {
+                callback(source);
+                callback(dest);
+                callback(size);
+            }
+            LinearNodeValue::Call(func, args) => {
+                callback(func);
+                args.iter_mut().for_each(callback);
+            }
+            LinearNodeValue::If(cond, if_block, else_block) => {
+                callback(cond);
+                for node in if_block.iter_mut() {
+                    callback(node);
+                }
+                if let Some(else_block) = else_block {
+                    else_block.iter_mut().for_each(callback);
+                }
+            }
+            LinearNodeValue::Loop(children) | LinearNodeValue::Sequence(children) => {
+                children.iter_mut().for_each(callback);
+            }
+            LinearNodeValue::Size(_)
+            | LinearNodeValue::Int(_)
+            | LinearNodeValue::Float(_)
+            | LinearNodeValue::CharLiteral(_)
+            | LinearNodeValue::Byte(_)
+            | LinearNodeValue::FunctionID(_)
+            | LinearNodeValue::Parameter(_)
+            | LinearNodeValue::VariableInit(_, _)
+            | LinearNodeValue::VariableDestroy(_)
+            | LinearNodeValue::VariableLocation(_)
+            | LinearNodeValue::TopOfStack
+            | LinearNodeValue::Discard
+            | LinearNodeValue::Break
+            | LinearNodeValue::GotoLabel(_)
+            | LinearNodeValue::Abort
+            | LinearNodeValue::ReadRegister(_)
+            | LinearNodeValue::KillRegister(_)
+            | LinearNodeValue::Return(None) => {}
+        }
+    }
 }
 
 // TODO: produce a more CFG shaped result?

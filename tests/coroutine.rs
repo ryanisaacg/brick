@@ -41,7 +41,6 @@ seq()
 }
 
 #[test]
-#[should_panic] // TODO: broken by variable storage change
 fn yield_twice() {
     let result = eval(
         r#"
@@ -83,7 +82,6 @@ seq() + seq() + seq()
 }
 
 #[test]
-#[should_panic] // TODO: broken by variable storage change
 fn count_up() {
     let result = eval(
         r#"
@@ -102,6 +100,28 @@ value
     )
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(6)]);
+}
+
+#[test]
+fn multiple_generators() {
+    let result = eval(
+        r#"
+gen fn infinite_seq(): generator[i32, void] {
+    let current = 1;
+    while true {
+        yield current;
+        current += 1;
+    }
+}
+
+let seq1 = infinite_seq();
+let seq2 = infinite_seq();
+
+seq1() + seq1() + seq2()
+"#,
+    )
+    .unwrap();
+    assert_matches!(&result[..], [Value::Int32(4)]);
 }
 
 #[test]
@@ -160,7 +180,6 @@ seq_ref() + seq_ref()
 }
 
 #[test]
-#[should_panic] // TODO: coroutines don't actually restore their state
 fn other_functions() {
     let result = eval(
         r#"

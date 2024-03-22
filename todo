@@ -13,9 +13,7 @@ linear IR:
 
 coroutines / generators / async:
 - stackless coroutines
-    - rewrite generator bodies to use generator-relative locations instead of stack-relative
-    - strip HeapAllocs and use them to calculate how large the generator must be
-    - alloc that amount in the coroutine when creating the generator
+    - alloc the generator to match its proper size
 - allow values to be returned from yields
     - extract yield to temporaries if necessary
     - add a new HIR instruction to retrieve passed-down generator values
