@@ -7,7 +7,7 @@ use std::{
 
 use borrowck::BorrowError;
 use hir::HirModule;
-use interpreter::{evaluate_node, VM};
+use interpreter::VM;
 pub use interpreter::{ExternBinding, Value};
 use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;
@@ -104,15 +104,8 @@ pub fn interpret_code(
         statements.into(),
     );
 
-    let mut vm = VM::new(ty_declarations);
-    vm.variable_locations.push(HashMap::new());
-    for statement in statements {
-        // TODO
-        evaluate_node(&functions, &mut [], &mut vm, &statement).unwrap();
-    }
-    debug_assert_eq!(vm.temporaries.len(), 0);
-
-    Ok(vm.op_stack)
+    let vm = VM::new(ty_declarations, &functions);
+    Ok(vm.evaluate_top_level_statements(&statements[..]))
 }
 
 pub struct CompilationResults {

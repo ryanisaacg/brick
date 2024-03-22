@@ -65,20 +65,24 @@ pub enum Unwind {
     Aborted,
 }
 
-pub struct VM {
-    pub memory: [u8; 1024],
-    pub temporaries: HashMap<RegisterID, usize>,
-    pub layouts: HashMap<TypeID, DeclaredTypeLayout>,
-    pub op_stack: Vec<Value>,
-    pub base_ptr: usize,
-    pub stack_ptr: usize,
-    pub heap_ptr: usize,
-    pub in_progress_goto: Option<usize>,
-    pub variable_locations: Vec<HashMap<VariableID, (usize, PhysicalType)>>,
+pub struct VM<'a> {
+    memory: [u8; 1024],
+    temporaries: HashMap<RegisterID, usize>,
+    layouts: HashMap<TypeID, DeclaredTypeLayout>,
+    op_stack: Vec<Value>,
+    base_ptr: usize,
+    stack_ptr: usize,
+    heap_ptr: usize,
+    in_progress_goto: Option<usize>,
+    variable_locations: Vec<HashMap<VariableID, (usize, PhysicalType)>>,
+    fns: &'a HashMap<FunctionID, Function>,
 }
 
-impl VM {
-    pub fn new(layouts: HashMap<TypeID, DeclaredTypeLayout>) -> VM {
+impl<'a> VM<'a> {
+    pub fn new(
+        layouts: HashMap<TypeID, DeclaredTypeLayout>,
+        functions: &'a HashMap<FunctionID, Function>,
+    ) -> VM {
         let memory = [0; 1024];
         VM {
             memory,
@@ -89,468 +93,491 @@ impl VM {
             stack_ptr: memory.len(),
             heap_ptr: std::mem::size_of::<usize>(),
             in_progress_goto: None,
-            variable_locations: Vec::new(),
+            variable_locations: vec![HashMap::new()],
+            fns: functions,
         }
     }
-}
 
-pub fn evaluate_function(
-    fns: &HashMap<FunctionID, Function>,
-    params: &mut [Value],
-    vm: &mut VM,
-    fn_id: FunctionID,
-) -> Result<(), Unwind> {
-    let function = &fns[&fn_id];
-    match function {
-        Function::Ir(function) => {
-            // Write the current base ptr at the stack ptr location
-            let base_ptr = vm.base_ptr.to_le_bytes();
-            vm.memory[(vm.stack_ptr - base_ptr.len())..vm.stack_ptr].copy_from_slice(&base_ptr);
-            vm.base_ptr = vm.stack_ptr;
-            vm.stack_ptr -= base_ptr.len();
+    pub fn evaluate_function(
+        &mut self,
+        params: &mut [Value],
+        fn_id: FunctionID,
+    ) -> Result<(), Unwind> {
+        let function = &self.fns[&fn_id];
+        match function {
+            Function::Ir(function) => {
+                // Write the current base ptr at the stack ptr location
+                let base_ptr = self.base_ptr.to_le_bytes();
+                self.memory[(self.stack_ptr - base_ptr.len())..self.stack_ptr]
+                    .copy_from_slice(&base_ptr);
+                self.base_ptr = self.stack_ptr;
+                self.stack_ptr -= base_ptr.len();
 
-            vm.variable_locations.push(HashMap::new());
+                self.variable_locations.push(HashMap::new());
 
-            for node in function.body.iter() {
-                let result = evaluate_node(fns, params, vm, node);
-                if let Err(Unwind::Return(val)) = result {
-                    if let Some(val) = val {
-                        vm.op_stack.push(val);
+                for node in function.body.iter() {
+                    let result = self.evaluate_node(params, node);
+                    if let Err(Unwind::Return(val)) = result {
+                        if let Some(val) = val {
+                            self.op_stack.push(val);
+                        }
+                        break;
+                    } else {
+                        result?;
                     }
-                    break;
-                } else {
-                    result?;
                 }
+
+                self.variable_locations.pop();
+
+                let base_ptr = &self.memory[(self.base_ptr - base_ptr.len())..self.base_ptr];
+                let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
+                self.stack_ptr = self.base_ptr;
+                self.base_ptr = base_ptr;
+
+                Ok(())
             }
-
-            vm.variable_locations.pop();
-
-            let base_ptr = &vm.memory[(vm.base_ptr - base_ptr.len())..vm.base_ptr];
-            let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
-            vm.stack_ptr = vm.base_ptr;
-            vm.base_ptr = base_ptr;
-
-            Ok(())
-        }
-        Function::Extern(ext) => {
-            if let Some(returned) = ext(&mut vm.memory[..], params.to_vec()) {
-                vm.op_stack.push(returned);
+            Function::Extern(ext) => {
+                if let Some(returned) = ext(&mut self.memory[..], params.to_vec()) {
+                    self.op_stack.push(returned);
+                }
+                Ok(())
             }
-            Ok(())
         }
     }
-}
 
-// Kinda a hack: when we return, unwind the stack via Result
-pub fn evaluate_node(
-    fns: &HashMap<FunctionID, Function>,
-    params: &mut [Value],
-    vm: &mut VM,
-    node: &LinearNode,
-) -> Result<(), Unwind> {
-    if let Some(target_label) = vm.in_progress_goto {
-        match &node.value {
-            LinearNodeValue::GotoLabel(current_label) if *current_label == target_label => {
-                vm.in_progress_goto = None;
-            }
-            LinearNodeValue::Sequence(children) | LinearNodeValue::Loop(children) => {
-                for node in children.iter() {
-                    evaluate_node(fns, params, vm, node)?;
+    pub(crate) fn evaluate_top_level_statements(mut self, statements: &[LinearNode]) -> Vec<Value> {
+        for statement in statements.iter() {
+            self.evaluate_node(&mut [], statement).unwrap();
+        }
+        debug_assert_eq!(self.temporaries.len(), 0);
+
+        self.op_stack
+    }
+
+    // Kinda a hack: when we return, unwind the stack via Result
+    fn evaluate_node(&mut self, params: &mut [Value], node: &LinearNode) -> Result<(), Unwind> {
+        if let Some(target_label) = self.in_progress_goto {
+            match &node.value {
+                LinearNodeValue::GotoLabel(current_label) if *current_label == target_label => {
+                    self.in_progress_goto = None;
                 }
-            }
-            LinearNodeValue::If(_, if_branch, else_branch) => {
-                let mut found_goto = false;
-                for node in if_branch.iter() {
-                    evaluate_node(fns, params, vm, node)?;
-                    if vm.in_progress_goto.is_none() {
-                        found_goto = true;
+                LinearNodeValue::Sequence(children) | LinearNodeValue::Loop(children) => {
+                    for node in children.iter() {
+                        self.evaluate_node(params, node)?;
                     }
                 }
-                if !found_goto {
-                    if let Some(else_branch) = else_branch {
-                        for node in else_branch.iter() {
-                            evaluate_node(fns, params, vm, node)?;
+                LinearNodeValue::If(_, if_branch, else_branch) => {
+                    let mut found_goto = false;
+                    for node in if_branch.iter() {
+                        self.evaluate_node(params, node)?;
+                        if self.in_progress_goto.is_none() {
+                            found_goto = true;
+                        }
+                    }
+                    if !found_goto {
+                        if let Some(else_branch) = else_branch {
+                            for node in else_branch.iter() {
+                                self.evaluate_node(params, node)?;
+                            }
                         }
                     }
                 }
-            }
-            _ => return Ok(()),
-        }
-    }
-    match &node.value {
-        LinearNodeValue::Sequence(seq) => {
-            for node in seq.iter() {
-                evaluate_node(fns, params, vm, node)?;
+                _ => return Ok(()),
             }
         }
-        LinearNodeValue::VariableInit(var_id, ty) => {
-            vm.stack_ptr -= ty.size(&vm.layouts);
-            vm.variable_locations
-                .last_mut()
-                .unwrap()
-                .insert(*var_id, (vm.stack_ptr, ty.clone()));
-        }
-        LinearNodeValue::VariableDestroy(var_id) => {
-            let (_location, ty) = vm
-                .variable_locations
-                .last_mut()
-                .unwrap()
-                .remove(var_id)
-                .unwrap();
-            vm.stack_ptr += ty.size(&vm.layouts);
-        }
-        LinearNodeValue::VariableLocation(var_id) => {
-            vm.op_stack.push(Value::Size(
-                vm.variable_locations.last().unwrap().get(var_id).unwrap().0,
-            ));
-        }
-        LinearNodeValue::HeapAlloc(amount) => {
-            evaluate_node(fns, params, vm, amount)?;
-            let Some(Value::Size(amount)) = vm.op_stack.pop() else {
-                unreachable!()
-            };
-            vm.op_stack.push(Value::Size(vm.heap_ptr));
-            vm.heap_ptr += amount;
-        }
-        LinearNodeValue::Parameter(idx) => {
-            let mut temp = Value::Byte(0);
-            std::mem::swap(&mut temp, &mut params[*idx]);
-            vm.op_stack.push(temp);
-        }
-        LinearNodeValue::ReadMemory {
-            location,
-            offset,
-            ty,
-        } => {
-            evaluate_node(fns, params, vm, location)?;
-            let Some(Value::Size(mut location)) = vm.op_stack.pop() else {
-                unreachable!()
-            };
-            location += offset;
-            read(&mut vm.op_stack, &vm.layouts, &vm.memory, location, ty);
-        }
-        LinearNodeValue::WriteMemory {
-            location,
-            offset,
-            value,
-            ty,
-        } => {
-            evaluate_node(fns, params, vm, value)?;
-            evaluate_node(fns, params, vm, location)?;
-            let Some(Value::Size(mut location)) = vm.op_stack.pop() else {
-                unreachable!()
-            };
-            location += offset;
-            write(&mut vm.op_stack, &vm.layouts, &mut vm.memory, location, ty);
-        }
-        LinearNodeValue::Call(lhs, parameters) => {
-            evaluate_node(fns, params, vm, lhs)?;
-            // TODO: should I figure out
-            let Some(Value::FunctionID(fn_id)) = vm.op_stack.pop() else {
-                unreachable!()
-            };
-            for param in parameters.iter().rev() {
-                evaluate_node(fns, params, vm, param)?;
-            }
-            let mut parameters: Vec<_> = (0..parameters.len())
-                .map(|_| vm.op_stack.pop().unwrap())
-                .collect();
-
-            evaluate_function(fns, &mut parameters[..], vm, fn_id)?;
-        }
-        LinearNodeValue::Return(expr) => {
-            if let Some(expr) = expr {
-                evaluate_node(fns, params, vm, expr)?;
-                // TODO: support wide returns
-                let val = vm.op_stack.pop().unwrap();
-                return Err(Unwind::Return(Some(val)));
-            } else {
-                return Err(Unwind::Return(None));
-            }
-        }
-        LinearNodeValue::If(cond, if_branch, else_branch) => {
-            evaluate_node(fns, params, vm, cond)?;
-            let Some(Value::Byte(cond)) = vm.op_stack.pop() else {
-                unreachable!()
-            };
-            if cond != 0 {
-                for node in if_branch.iter() {
-                    evaluate_node(fns, params, vm, node)?;
-                }
-            } else if let Some(else_branch) = else_branch {
-                for node in else_branch.iter() {
-                    evaluate_node(fns, params, vm, node)?;
+        match &node.value {
+            LinearNodeValue::Sequence(seq) => {
+                for node in seq.iter() {
+                    self.evaluate_node(params, node)?;
                 }
             }
-        }
-        LinearNodeValue::Break => return Err(Unwind::Break),
-        LinearNodeValue::Loop(inner) => 'outer: loop {
-            for node in inner.iter() {
-                match evaluate_node(fns, params, vm, node) {
-                    Err(Unwind::Break) => break 'outer,
-                    other @ Err(_) => return other,
-                    Ok(_) => {}
-                }
+            LinearNodeValue::VariableInit(var_id, ty) => {
+                self.stack_ptr -= ty.size(&self.layouts);
+                self.variable_locations
+                    .last_mut()
+                    .unwrap()
+                    .insert(*var_id, (self.stack_ptr, ty.clone()));
             }
-        },
-        LinearNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, child) => {
-            evaluate_node(fns, params, vm, child)?;
-            let Value::Byte(val) = vm.op_stack.pop().unwrap() else {
-                unreachable!()
-            };
-            vm.op_stack.push(bool_value(val == 0));
-        }
-        LinearNodeValue::Arithmetic(op, _ty, lhs, rhs) => {
-            evaluate_node(fns, params, vm, rhs)?;
-            evaluate_node(fns, params, vm, lhs)?;
-            let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
-            let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
-            let val = match (left, right) {
-                (Numeric::Int32(left), Numeric::Int32(right)) => match op {
-                    ArithmeticOp::Add => Value::Int32(left + right),
-                    ArithmeticOp::Subtract => Value::Int32(left - right),
-                    ArithmeticOp::Multiply => Value::Int32(left * right),
-                    ArithmeticOp::Divide => Value::Int32(left / right),
-                },
-                (Numeric::Float32(left), Numeric::Float32(right)) => match op {
-                    ArithmeticOp::Add => Value::Float32(left + right),
-                    ArithmeticOp::Subtract => Value::Float32(left - right),
-                    ArithmeticOp::Multiply => Value::Float32(left * right),
-                    ArithmeticOp::Divide => Value::Float32(left / right),
-                },
-                (Numeric::Int64(left), Numeric::Int64(right)) => match op {
-                    ArithmeticOp::Add => Value::Int64(left + right),
-                    ArithmeticOp::Subtract => Value::Int64(left - right),
-                    ArithmeticOp::Multiply => Value::Int64(left * right),
-                    ArithmeticOp::Divide => Value::Int64(left / right),
-                },
-                (Numeric::Float64(left), Numeric::Float64(right)) => match op {
-                    ArithmeticOp::Add => Value::Float64(left + right),
-                    ArithmeticOp::Subtract => Value::Float64(left - right),
-                    ArithmeticOp::Multiply => Value::Float64(left * right),
-                    ArithmeticOp::Divide => Value::Float64(left / right),
-                },
-                (Numeric::Size(left), Numeric::Size(right)) => match op {
-                    ArithmeticOp::Add => Value::Size(left + right),
-                    ArithmeticOp::Subtract => Value::Size(left - right),
-                    ArithmeticOp::Multiply => Value::Size(left * right),
-                    ArithmeticOp::Divide => Value::Size(left / right),
-                },
-                (_, _) => unreachable!(),
-            };
-            vm.op_stack.push(val);
-        }
-        LinearNodeValue::Comparison(
-            op @ (ComparisonOp::EqualTo | ComparisonOp::NotEquals),
-            _ty,
-            lhs,
-            rhs,
-        ) => {
-            evaluate_node(fns, params, vm, rhs)?;
-            evaluate_node(fns, params, vm, lhs)?;
-            let left = vm.op_stack.pop().unwrap();
-            let right = vm.op_stack.pop().unwrap();
-            vm.op_stack.push(bool_value(
-                (*op == ComparisonOp::EqualTo) == (left == right),
-            ));
-        }
-        LinearNodeValue::Comparison(op, _ty, lhs, rhs) => {
-            evaluate_node(fns, params, vm, rhs)?;
-            evaluate_node(fns, params, vm, lhs)?;
-            let left = vm.op_stack.pop().unwrap().to_numeric().unwrap();
-            let right = vm.op_stack.pop().unwrap().to_numeric().unwrap();
-            let val = match (left, right) {
-                (Numeric::Int32(left), Numeric::Int32(right)) => match op {
-                    ComparisonOp::LessThan => bool_value(left < right),
-                    ComparisonOp::GreaterThan => bool_value(left > right),
-                    ComparisonOp::LessEqualThan => bool_value(left <= right),
-                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
-                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
-                },
-                (Numeric::Float32(left), Numeric::Float32(right)) => match op {
-                    ComparisonOp::LessThan => bool_value(left < right),
-                    ComparisonOp::GreaterThan => bool_value(left > right),
-                    ComparisonOp::LessEqualThan => bool_value(left <= right),
-                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
-                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
-                },
-                (Numeric::Int64(left), Numeric::Int64(right)) => match op {
-                    ComparisonOp::LessThan => bool_value(left < right),
-                    ComparisonOp::GreaterThan => bool_value(left > right),
-                    ComparisonOp::LessEqualThan => bool_value(left <= right),
-                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
-                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
-                },
-                (Numeric::Float64(left), Numeric::Float64(right)) => match op {
-                    ComparisonOp::LessThan => bool_value(left < right),
-                    ComparisonOp::GreaterThan => bool_value(left > right),
-                    ComparisonOp::LessEqualThan => bool_value(left <= right),
-                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
-                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
-                },
-                (Numeric::Size(left), Numeric::Size(right)) => match op {
-                    ComparisonOp::LessThan => bool_value(left < right),
-                    ComparisonOp::GreaterThan => bool_value(left > right),
-                    ComparisonOp::LessEqualThan => bool_value(left <= right),
-                    ComparisonOp::GreaterEqualThan => bool_value(left >= right),
-                    ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
-                },
-                (_, _) => unreachable!(),
-            };
-            vm.op_stack.push(val);
-        }
-        LinearNodeValue::BinaryLogical(op, lhs, rhs) => {
-            evaluate_node(fns, params, vm, lhs)?;
-            let Value::Byte(left) = vm.op_stack.pop().unwrap() else {
-                unreachable!();
-            };
-            let left = left != 0;
-            let result = match op {
-                BinaryLogicalOp::BooleanAnd => {
-                    left && {
-                        evaluate_node(fns, params, vm, rhs)?;
-                        let Value::Byte(right) = vm.op_stack.pop().unwrap() else {
-                            unreachable!();
-                        };
-                        right != 0
-                    }
-                }
-                BinaryLogicalOp::BooleanOr => {
-                    left || {
-                        evaluate_node(fns, params, vm, rhs)?;
-                        let Value::Byte(right) = vm.op_stack.pop().unwrap() else {
-                            unreachable!();
-                        };
-                        right != 0
-                    }
-                }
-            };
-
-            vm.op_stack.push(bool_value(result));
-        }
-        LinearNodeValue::Size(size) => {
-            vm.op_stack.push(Value::Size(*size));
-        }
-        LinearNodeValue::Int(x) => {
-            vm.op_stack.push(Value::Int32(*x as i32));
-        }
-        LinearNodeValue::Float(x) => {
-            vm.op_stack.push(Value::Float32(*x as f32));
-        }
-        LinearNodeValue::Byte(x) => {
-            vm.op_stack.push(Value::Byte(*x));
-        }
-        LinearNodeValue::CharLiteral(x) => {
-            // TODO: lossy conversion
-            vm.op_stack.push(Value::Byte(*x as u8));
-        }
-        LinearNodeValue::FunctionID(x) => {
-            vm.op_stack.push(Value::FunctionID(*x));
-        }
-        LinearNodeValue::WriteRegister(tmp, val) => {
-            evaluate_node(fns, params, vm, val)?;
-            let Value::Size(val) = vm.op_stack.pop().unwrap() else {
-                unreachable!()
-            };
-            vm.temporaries.insert(*tmp, val);
-        }
-        LinearNodeValue::ReadRegister(tmp) => {
-            vm.op_stack.push(Value::Size(
-                *vm.temporaries
-                    .get(tmp)
-                    .expect("temp to be defined before use"),
-            ));
-        }
-        LinearNodeValue::KillRegister(tmp) => {
-            vm.temporaries.remove(tmp);
-        }
-        LinearNodeValue::Discard => {
-            vm.op_stack.pop().unwrap();
-        }
-        LinearNodeValue::TopOfStack => {}
-        LinearNodeValue::Abort => {
-            return Err(Unwind::Aborted);
-        }
-        LinearNodeValue::Cast { value, from: _, to } => {
-            evaluate_node(fns, params, vm, value)?;
-            let val = vm.op_stack.pop().unwrap();
-            vm.op_stack.push(match val {
-                Value::FunctionID(_) => {
+            LinearNodeValue::VariableDestroy(var_id) => {
+                let (_location, ty) = self
+                    .variable_locations
+                    .last_mut()
+                    .unwrap()
+                    .remove(var_id)
+                    .unwrap();
+                self.stack_ptr += ty.size(&self.layouts);
+            }
+            LinearNodeValue::VariableLocation(var_id) => {
+                self.op_stack.push(Value::Size(
+                    self.variable_locations
+                        .last()
+                        .unwrap()
+                        .get(var_id)
+                        .unwrap()
+                        .0,
+                ));
+            }
+            LinearNodeValue::HeapAlloc(amount) => {
+                self.evaluate_node(params, amount)?;
+                let Some(Value::Size(amount)) = self.op_stack.pop() else {
                     unreachable!()
+                };
+                self.op_stack.push(Value::Size(self.heap_ptr));
+                self.heap_ptr += amount;
+            }
+            LinearNodeValue::Parameter(idx) => {
+                let mut temp = Value::Byte(0);
+                std::mem::swap(&mut temp, &mut params[*idx]);
+                self.op_stack.push(temp);
+            }
+            LinearNodeValue::ReadMemory {
+                location,
+                offset,
+                ty,
+            } => {
+                self.evaluate_node(params, location)?;
+                let Some(Value::Size(mut location)) = self.op_stack.pop() else {
+                    unreachable!()
+                };
+                location += offset;
+                read(
+                    &mut self.op_stack,
+                    &self.layouts,
+                    &self.memory,
+                    location,
+                    ty,
+                );
+            }
+            LinearNodeValue::WriteMemory {
+                location,
+                offset,
+                value,
+                ty,
+            } => {
+                self.evaluate_node(params, value)?;
+                self.evaluate_node(params, location)?;
+                let Some(Value::Size(mut location)) = self.op_stack.pop() else {
+                    unreachable!()
+                };
+                location += offset;
+                write(
+                    &mut self.op_stack,
+                    &self.layouts,
+                    &mut self.memory,
+                    location,
+                    ty,
+                );
+            }
+            LinearNodeValue::Call(lhs, parameters) => {
+                self.evaluate_node(params, lhs)?;
+                // TODO: should I figure out
+                let Some(Value::FunctionID(fn_id)) = self.op_stack.pop() else {
+                    unreachable!()
+                };
+                for param in parameters.iter().rev() {
+                    self.evaluate_node(params, param)?;
                 }
-                Value::Size(_) => todo!(),
-                Value::Byte(val) => match to {
-                    PhysicalPrimitive::Byte => Value::Byte(val),
-                    PhysicalPrimitive::Int32 => Value::Int32(val as i32),
-                    PhysicalPrimitive::Int64 => Value::Int64(val as i64),
-                    PhysicalPrimitive::Float32 => Value::Float32(val as f32),
-                    PhysicalPrimitive::Float64 => Value::Float64(val as f64),
-                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
-                },
-                Value::Int32(val) => match to {
-                    PhysicalPrimitive::Byte => Value::Byte(val as u8),
-                    PhysicalPrimitive::Int32 => Value::Int32(val),
-                    PhysicalPrimitive::Int64 => Value::Int64(val as i64),
-                    PhysicalPrimitive::Float32 => Value::Float32(val as f32),
-                    PhysicalPrimitive::Float64 => Value::Float64(val as f64),
-                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
-                },
-                Value::Int64(val) => match to {
-                    PhysicalPrimitive::Byte => Value::Byte(val as u8),
-                    PhysicalPrimitive::Int32 => Value::Int32(val as i32),
-                    PhysicalPrimitive::Int64 => Value::Int64(val),
-                    PhysicalPrimitive::Float32 => Value::Float32(val as f32),
-                    PhysicalPrimitive::Float64 => Value::Float64(val as f64),
-                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
-                },
-                Value::Float32(val) => match to {
-                    PhysicalPrimitive::Byte => Value::Byte(val as u8),
-                    PhysicalPrimitive::Int32 => Value::Int32(val as i32),
-                    PhysicalPrimitive::Int64 => Value::Int64(val as i64),
-                    PhysicalPrimitive::Float32 => Value::Float32(val),
-                    PhysicalPrimitive::Float64 => Value::Float64(val as f64),
-                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
-                },
-                Value::Float64(val) => match to {
-                    PhysicalPrimitive::Byte => Value::Byte(val as u8),
-                    PhysicalPrimitive::Int32 => Value::Int32(val as i32),
-                    PhysicalPrimitive::Int64 => Value::Int64(val as i64),
-                    PhysicalPrimitive::Float32 => Value::Float32(val as f32),
-                    PhysicalPrimitive::Float64 => Value::Float64(val),
-                    PhysicalPrimitive::PointerSize => Value::Size(val as usize),
-                },
-            });
-        }
-        LinearNodeValue::Debug(inner) => {
-            evaluate_node(fns, params, vm, inner)?;
-            println!("{:?}", vm.op_stack.last().unwrap());
-        }
-        LinearNodeValue::MemoryCopy { source, dest, size } => {
-            evaluate_node(fns, params, vm, source)?;
-            let Value::Size(source) = vm.op_stack.pop().unwrap() else {
-                unreachable!()
-            };
-            evaluate_node(fns, params, vm, dest)?;
-            let Value::Size(dest) = vm.op_stack.pop().unwrap() else {
-                unreachable!()
-            };
-            evaluate_node(fns, params, vm, size)?;
-            let Value::Size(size) = vm.op_stack.pop().unwrap() else {
-                unreachable!()
-            };
-            vm.memory.copy_within(source..source + size, dest);
-        }
-        LinearNodeValue::GotoLabel(_) => {}
-        LinearNodeValue::Goto(label) => {
-            evaluate_node(fns, params, vm, label)?;
-            let Value::Size(label) = vm.op_stack.pop().unwrap() else {
-                unreachable!()
-            };
-            vm.in_progress_goto = Some(label);
-        }
-    }
+                let mut parameters: Vec<_> = (0..parameters.len())
+                    .map(|_| self.op_stack.pop().unwrap())
+                    .collect();
 
-    Ok(())
+                self.evaluate_function(&mut parameters[..], fn_id)?;
+            }
+            LinearNodeValue::Return(expr) => {
+                if let Some(expr) = expr {
+                    self.evaluate_node(params, expr)?;
+                    // TODO: support wide returns
+                    let val = self.op_stack.pop().unwrap();
+                    return Err(Unwind::Return(Some(val)));
+                } else {
+                    return Err(Unwind::Return(None));
+                }
+            }
+            LinearNodeValue::If(cond, if_branch, else_branch) => {
+                self.evaluate_node(params, cond)?;
+                let Some(Value::Byte(cond)) = self.op_stack.pop() else {
+                    unreachable!()
+                };
+                if cond != 0 {
+                    for node in if_branch.iter() {
+                        self.evaluate_node(params, node)?;
+                    }
+                } else if let Some(else_branch) = else_branch {
+                    for node in else_branch.iter() {
+                        self.evaluate_node(params, node)?;
+                    }
+                }
+            }
+            LinearNodeValue::Break => return Err(Unwind::Break),
+            LinearNodeValue::Loop(inner) => 'outer: loop {
+                for node in inner.iter() {
+                    match self.evaluate_node(params, node) {
+                        Err(Unwind::Break) => break 'outer,
+                        other @ Err(_) => return other,
+                        Ok(_) => {}
+                    }
+                }
+            },
+            LinearNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, child) => {
+                self.evaluate_node(params, child)?;
+                let Value::Byte(val) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.op_stack.push(bool_value(val == 0));
+            }
+            LinearNodeValue::Arithmetic(op, _ty, lhs, rhs) => {
+                self.evaluate_node(params, rhs)?;
+                self.evaluate_node(params, lhs)?;
+                let left = self.op_stack.pop().unwrap().to_numeric().unwrap();
+                let right = self.op_stack.pop().unwrap().to_numeric().unwrap();
+                let val = match (left, right) {
+                    (Numeric::Int32(left), Numeric::Int32(right)) => match op {
+                        ArithmeticOp::Add => Value::Int32(left + right),
+                        ArithmeticOp::Subtract => Value::Int32(left - right),
+                        ArithmeticOp::Multiply => Value::Int32(left * right),
+                        ArithmeticOp::Divide => Value::Int32(left / right),
+                    },
+                    (Numeric::Float32(left), Numeric::Float32(right)) => match op {
+                        ArithmeticOp::Add => Value::Float32(left + right),
+                        ArithmeticOp::Subtract => Value::Float32(left - right),
+                        ArithmeticOp::Multiply => Value::Float32(left * right),
+                        ArithmeticOp::Divide => Value::Float32(left / right),
+                    },
+                    (Numeric::Int64(left), Numeric::Int64(right)) => match op {
+                        ArithmeticOp::Add => Value::Int64(left + right),
+                        ArithmeticOp::Subtract => Value::Int64(left - right),
+                        ArithmeticOp::Multiply => Value::Int64(left * right),
+                        ArithmeticOp::Divide => Value::Int64(left / right),
+                    },
+                    (Numeric::Float64(left), Numeric::Float64(right)) => match op {
+                        ArithmeticOp::Add => Value::Float64(left + right),
+                        ArithmeticOp::Subtract => Value::Float64(left - right),
+                        ArithmeticOp::Multiply => Value::Float64(left * right),
+                        ArithmeticOp::Divide => Value::Float64(left / right),
+                    },
+                    (Numeric::Size(left), Numeric::Size(right)) => match op {
+                        ArithmeticOp::Add => Value::Size(left + right),
+                        ArithmeticOp::Subtract => Value::Size(left - right),
+                        ArithmeticOp::Multiply => Value::Size(left * right),
+                        ArithmeticOp::Divide => Value::Size(left / right),
+                    },
+                    (_, _) => unreachable!(),
+                };
+                self.op_stack.push(val);
+            }
+            LinearNodeValue::Comparison(
+                op @ (ComparisonOp::EqualTo | ComparisonOp::NotEquals),
+                _ty,
+                lhs,
+                rhs,
+            ) => {
+                self.evaluate_node(params, rhs)?;
+                self.evaluate_node(params, lhs)?;
+                let left = self.op_stack.pop().unwrap();
+                let right = self.op_stack.pop().unwrap();
+                self.op_stack.push(bool_value(
+                    (*op == ComparisonOp::EqualTo) == (left == right),
+                ));
+            }
+            LinearNodeValue::Comparison(op, _ty, lhs, rhs) => {
+                self.evaluate_node(params, rhs)?;
+                self.evaluate_node(params, lhs)?;
+                let left = self.op_stack.pop().unwrap().to_numeric().unwrap();
+                let right = self.op_stack.pop().unwrap().to_numeric().unwrap();
+                let val = match (left, right) {
+                    (Numeric::Int32(left), Numeric::Int32(right)) => match op {
+                        ComparisonOp::LessThan => bool_value(left < right),
+                        ComparisonOp::GreaterThan => bool_value(left > right),
+                        ComparisonOp::LessEqualThan => bool_value(left <= right),
+                        ComparisonOp::GreaterEqualThan => bool_value(left >= right),
+                        ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
+                    },
+                    (Numeric::Float32(left), Numeric::Float32(right)) => match op {
+                        ComparisonOp::LessThan => bool_value(left < right),
+                        ComparisonOp::GreaterThan => bool_value(left > right),
+                        ComparisonOp::LessEqualThan => bool_value(left <= right),
+                        ComparisonOp::GreaterEqualThan => bool_value(left >= right),
+                        ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
+                    },
+                    (Numeric::Int64(left), Numeric::Int64(right)) => match op {
+                        ComparisonOp::LessThan => bool_value(left < right),
+                        ComparisonOp::GreaterThan => bool_value(left > right),
+                        ComparisonOp::LessEqualThan => bool_value(left <= right),
+                        ComparisonOp::GreaterEqualThan => bool_value(left >= right),
+                        ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
+                    },
+                    (Numeric::Float64(left), Numeric::Float64(right)) => match op {
+                        ComparisonOp::LessThan => bool_value(left < right),
+                        ComparisonOp::GreaterThan => bool_value(left > right),
+                        ComparisonOp::LessEqualThan => bool_value(left <= right),
+                        ComparisonOp::GreaterEqualThan => bool_value(left >= right),
+                        ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
+                    },
+                    (Numeric::Size(left), Numeric::Size(right)) => match op {
+                        ComparisonOp::LessThan => bool_value(left < right),
+                        ComparisonOp::GreaterThan => bool_value(left > right),
+                        ComparisonOp::LessEqualThan => bool_value(left <= right),
+                        ComparisonOp::GreaterEqualThan => bool_value(left >= right),
+                        ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
+                    },
+                    (_, _) => unreachable!(),
+                };
+                self.op_stack.push(val);
+            }
+            LinearNodeValue::BinaryLogical(op, lhs, rhs) => {
+                self.evaluate_node(params, lhs)?;
+                let Value::Byte(left) = self.op_stack.pop().unwrap() else {
+                    unreachable!();
+                };
+                let left = left != 0;
+                let result = match op {
+                    BinaryLogicalOp::BooleanAnd => {
+                        left && {
+                            self.evaluate_node(params, rhs)?;
+                            let Value::Byte(right) = self.op_stack.pop().unwrap() else {
+                                unreachable!();
+                            };
+                            right != 0
+                        }
+                    }
+                    BinaryLogicalOp::BooleanOr => {
+                        left || {
+                            self.evaluate_node(params, rhs)?;
+                            let Value::Byte(right) = self.op_stack.pop().unwrap() else {
+                                unreachable!();
+                            };
+                            right != 0
+                        }
+                    }
+                };
+
+                self.op_stack.push(bool_value(result));
+            }
+            LinearNodeValue::Size(size) => {
+                self.op_stack.push(Value::Size(*size));
+            }
+            LinearNodeValue::Int(x) => {
+                self.op_stack.push(Value::Int32(*x as i32));
+            }
+            LinearNodeValue::Float(x) => {
+                self.op_stack.push(Value::Float32(*x as f32));
+            }
+            LinearNodeValue::Byte(x) => {
+                self.op_stack.push(Value::Byte(*x));
+            }
+            LinearNodeValue::CharLiteral(x) => {
+                // TODO: lossy conversion
+                self.op_stack.push(Value::Byte(*x as u8));
+            }
+            LinearNodeValue::FunctionID(x) => {
+                self.op_stack.push(Value::FunctionID(*x));
+            }
+            LinearNodeValue::WriteRegister(tmp, val) => {
+                self.evaluate_node(params, val)?;
+                let Value::Size(val) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.temporaries.insert(*tmp, val);
+            }
+            LinearNodeValue::ReadRegister(tmp) => {
+                self.op_stack.push(Value::Size(
+                    *self
+                        .temporaries
+                        .get(tmp)
+                        .expect("temp to be defined before use"),
+                ));
+            }
+            LinearNodeValue::KillRegister(tmp) => {
+                self.temporaries.remove(tmp);
+            }
+            LinearNodeValue::Discard => {
+                self.op_stack.pop().unwrap();
+            }
+            LinearNodeValue::TopOfStack => {}
+            LinearNodeValue::Abort => {
+                return Err(Unwind::Aborted);
+            }
+            LinearNodeValue::Cast { value, from: _, to } => {
+                self.evaluate_node(params, value)?;
+                let val = self.op_stack.pop().unwrap();
+                self.op_stack.push(match val {
+                    Value::FunctionID(_) => {
+                        unreachable!()
+                    }
+                    Value::Size(_) => todo!(),
+                    Value::Byte(val) => match to {
+                        PhysicalPrimitive::Byte => Value::Byte(val),
+                        PhysicalPrimitive::Int32 => Value::Int32(val as i32),
+                        PhysicalPrimitive::Int64 => Value::Int64(val as i64),
+                        PhysicalPrimitive::Float32 => Value::Float32(val as f32),
+                        PhysicalPrimitive::Float64 => Value::Float64(val as f64),
+                        PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                    },
+                    Value::Int32(val) => match to {
+                        PhysicalPrimitive::Byte => Value::Byte(val as u8),
+                        PhysicalPrimitive::Int32 => Value::Int32(val),
+                        PhysicalPrimitive::Int64 => Value::Int64(val as i64),
+                        PhysicalPrimitive::Float32 => Value::Float32(val as f32),
+                        PhysicalPrimitive::Float64 => Value::Float64(val as f64),
+                        PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                    },
+                    Value::Int64(val) => match to {
+                        PhysicalPrimitive::Byte => Value::Byte(val as u8),
+                        PhysicalPrimitive::Int32 => Value::Int32(val as i32),
+                        PhysicalPrimitive::Int64 => Value::Int64(val),
+                        PhysicalPrimitive::Float32 => Value::Float32(val as f32),
+                        PhysicalPrimitive::Float64 => Value::Float64(val as f64),
+                        PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                    },
+                    Value::Float32(val) => match to {
+                        PhysicalPrimitive::Byte => Value::Byte(val as u8),
+                        PhysicalPrimitive::Int32 => Value::Int32(val as i32),
+                        PhysicalPrimitive::Int64 => Value::Int64(val as i64),
+                        PhysicalPrimitive::Float32 => Value::Float32(val),
+                        PhysicalPrimitive::Float64 => Value::Float64(val as f64),
+                        PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                    },
+                    Value::Float64(val) => match to {
+                        PhysicalPrimitive::Byte => Value::Byte(val as u8),
+                        PhysicalPrimitive::Int32 => Value::Int32(val as i32),
+                        PhysicalPrimitive::Int64 => Value::Int64(val as i64),
+                        PhysicalPrimitive::Float32 => Value::Float32(val as f32),
+                        PhysicalPrimitive::Float64 => Value::Float64(val),
+                        PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                    },
+                });
+            }
+            LinearNodeValue::Debug(inner) => {
+                self.evaluate_node(params, inner)?;
+                println!("{:?}", self.op_stack.last().unwrap());
+            }
+            LinearNodeValue::MemoryCopy { source, dest, size } => {
+                self.evaluate_node(params, source)?;
+                let Value::Size(source) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.evaluate_node(params, dest)?;
+                let Value::Size(dest) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.evaluate_node(params, size)?;
+                let Value::Size(size) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.memory.copy_within(source..source + size, dest);
+            }
+            LinearNodeValue::GotoLabel(_) => {}
+            LinearNodeValue::Goto(label) => {
+                self.evaluate_node(params, label)?;
+                let Value::Size(label) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.in_progress_goto = Some(label);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn bool_value(val: bool) -> Value {
