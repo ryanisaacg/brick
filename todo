@@ -27,10 +27,6 @@ coroutines / generators / async:
     - require coroutines to return generators
     - error when `yield`ing outside of a coroutine
 
-runtime:
-- mark a coroutine as main or allow top-level code to yield OR
-- add some runtime bridge to call generators?
-
 static data:
 - add some syntax for declaring global state
 - handle global state in the HIR
