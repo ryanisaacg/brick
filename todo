@@ -7,7 +7,6 @@ error reporting:
 - ability to continue in face of errors
 
 linear IR:
-- Remove hard-coded references to variable locations - force the backend to make those placements
 - (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
 - (maybe) AST rewrite the HIR to disambiguate between variable references and function references
 
@@ -21,11 +20,16 @@ coroutines / generators / async:
     - pass down values when resuming from a generator
 - support arguments to coroutines
     - either ban references from coroutine args or note that they're borrowed as long as the generator lives
+    - copy arguments into the generator's initial state
 - generators on associated functions
 - non-infinite generators (e.g. generators should return Next(value) | Exhausted)
 - error guardrails:
     - require coroutines to return generators
     - error when `yield`ing outside of a coroutine
+
+runtime:
+- mark a coroutine as main or allow top-level code to yield OR
+- add some runtime bridge to call generators?
 
 static data:
 - add some syntax for declaring global state
@@ -171,6 +175,15 @@ errors:
 - try operator returns an error if one exists
 - functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
 - allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
+
+misc:
+- automatically create temporaries when trying to get lvalues of function calls
+
+backends:
+- add wasm backend?
+- add cranelift backend?
+    - one option is to directly emit cranelift via its apis
+    - another option is to generate WASM and then run Cranelift on the wasm
 
 extern:
 - opaque extern pointers
