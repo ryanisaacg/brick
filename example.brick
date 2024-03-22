@@ -1,7 +1,16 @@
-let array = [0, 0, 0, 0];
-let index = 0;
-while index < 4 {
-    array[index] = index;
-    index += 1;
+extern fn set_fill(r: f32, g: f32, b: f32);
+extern fn draw_rect(x: f32, y: f32, w: f32, h: f32);
+extern fn run(game: unique generator[void, void]);
+
+gen fn game_loop(): generator[void, void] {
+    let position = 0;
+    set_fill(1, 0, 0);
+    while true {
+        draw_rect(position, 16, 32, 32);
+        position += 1;
+        yield void;
+    }
 }
-array[2]
+
+let loop = game_loop();
+run(unique loop);

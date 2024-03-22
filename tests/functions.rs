@@ -116,14 +116,14 @@ fn extern_pointer() {
     let mut funcs: HashMap<String, Arc<ExternBinding>> = HashMap::new();
     funcs.insert(
         "increment".to_string(),
-        Arc::new(|memory, mut stack| {
+        Arc::new(|vm, mut stack| {
             let Value::Size(pointer) = stack.pop().unwrap() else {
                 unreachable!()
             };
             let size = std::mem::size_of::<i32>();
-            let mut value: i32 = *bytemuck::from_bytes(&memory[pointer..(pointer + size)]);
+            let mut value: i32 = *bytemuck::from_bytes(&vm.memory[pointer..(pointer + size)]);
             value += 1;
-            memory[pointer..(pointer + size)].copy_from_slice(bytemuck::bytes_of(&value));
+            vm.memory[pointer..(pointer + size)].copy_from_slice(bytemuck::bytes_of(&value));
 
             None
         }),

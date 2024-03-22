@@ -42,7 +42,7 @@ pub enum Numeric {
     Size(usize),
 }
 
-pub type ExternBinding = dyn Fn(&mut [u8], Vec<Value>) -> Option<Value>;
+pub type ExternBinding = dyn Fn(&mut VM, Vec<Value>) -> Option<Value>;
 
 pub enum Function {
     Ir(LinearFunction),
@@ -66,7 +66,7 @@ pub enum Unwind {
 }
 
 pub struct VM<'a> {
-    memory: [u8; 1024],
+    pub memory: [u8; 1024],
     temporaries: HashMap<RegisterID, usize>,
     layouts: HashMap<TypeID, DeclaredTypeLayout>,
     op_stack: Vec<Value>,
@@ -137,12 +137,22 @@ impl<'a> VM<'a> {
                 Ok(())
             }
             Function::Extern(ext) => {
-                if let Some(returned) = ext(&mut self.memory[..], params.to_vec()) {
+                if let Some(returned) = ext(self, params.to_vec()) {
                     self.op_stack.push(returned);
                 }
                 Ok(())
             }
         }
+    }
+
+    pub fn resume_generator(&mut self, generator_ptr: Value) -> Result<(), Unwind> {
+        let Value::Size(location) = generator_ptr else {
+            panic!("must provide a valid generator pointer to resume_generator");
+        };
+        let fn_id: FunctionID = *bytemuck::from_bytes(&self.memory[location..(location + 4)]);
+        self.evaluate_function(&mut [generator_ptr], fn_id)?;
+
+        Ok(())
     }
 
     pub(crate) fn evaluate_top_level_statements(mut self, statements: &[LinearNode]) -> Vec<Value> {

@@ -1,5 +1,10 @@
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
 use assert_matches::assert_matches;
-use brick::{eval, eval_types, Value};
+use brick::{eval, eval_types, eval_with_bindings, ExternBinding, Value};
 
 #[test]
 fn yield_basic() {
@@ -279,4 +284,57 @@ seq() + seq() + seq()
     )
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(6)]);
+}
+
+#[test]
+fn externally_driven_coroutine() {
+    let mut bindings: HashMap<String, Arc<ExternBinding>> = HashMap::new();
+    let results = Arc::new(Mutex::new(Vec::new()));
+
+    let push_results = results.clone();
+    bindings.insert(
+        "push".to_string(),
+        Arc::new(move |_, mut args| {
+            let mut results = push_results.lock().unwrap();
+            results.push(args.remove(0));
+            None
+        }),
+    );
+    bindings.insert(
+        "call_generator_times".to_string(),
+        Arc::new(|vm, mut args| {
+            let Value::Int32(times) = args.pop().unwrap() else {
+                unreachable!()
+            };
+            let generator = args.pop().unwrap();
+            for _ in 0..times {
+                vm.resume_generator(generator.clone()).unwrap();
+            }
+            None
+        }),
+    );
+
+    eval_with_bindings(
+        r#"
+extern fn push(number: i32);
+extern fn call_generator_times(coroutine: unique generator[void, void], times: i32);
+
+gen fn push_increasing(): generator[void, void] {
+    let value = 0;
+    while true {
+        push(value);
+        value += 1;
+        yield void;
+    }
+}
+
+let seq = push_increasing();
+call_generator_times(unique seq, 5);
+"#,
+        bindings,
+    )
+    .unwrap();
+
+    let results = results.lock().unwrap();
+    assert_eq!(results.len(), 5);
 }

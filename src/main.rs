@@ -1,27 +1,50 @@
 use brick::{interpret_code, ExternBinding, Value};
-use std::{collections::HashMap, fs::read_to_string, io::stdin, sync::Arc};
+use std::{collections::HashMap, fs::read_to_string, sync::Arc};
 
 fn main() {
     let mut bindings: HashMap<String, Arc<ExternBinding>> = HashMap::new();
     bindings.insert(
-        "read".to_string(),
-        Arc::new(|_, _| {
-            let mut input = String::new();
-            stdin()
-                .read_line(&mut input)
-                .expect("should be able to read from stdin");
-            Some(Value::Int32(
-                input.trim().parse().expect("should be an int"),
-            ))
+        "set_fill".to_string(),
+        Arc::new(|_, values| {
+            let Value::Float32(r) = values[0] else {
+                panic!("expected float");
+            };
+            let Value::Float32(g) = values[1] else {
+                panic!("expected float");
+            };
+            let Value::Float32(b) = values[2] else {
+                panic!("expected float");
+            };
+            println!("filling {r} {g} {b}");
+            None
         }),
     );
     bindings.insert(
-        "write".to_string(),
+        "draw_rect".to_string(),
         Arc::new(|_, values| {
-            let Value::Int32(input) = values[0] else {
-                panic!("expected int");
+            let Value::Float32(x) = values[0] else {
+                panic!("expected float");
             };
-            println!("{}", input);
+            let Value::Float32(y) = values[1] else {
+                panic!("expected float");
+            };
+            let Value::Float32(w) = values[2] else {
+                panic!("expected float");
+            };
+            let Value::Float32(h) = values[3] else {
+                panic!("expected float");
+            };
+            println!("rect at {x} {y} {w} {h}");
+            None
+        }),
+    );
+    bindings.insert(
+        "run".to_string(),
+        Arc::new(|vm, mut values| {
+            let generator = values.remove(0);
+            for _ in 0..10 {
+                vm.resume_generator(generator.clone()).unwrap();
+            }
             None
         }),
     );
