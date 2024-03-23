@@ -171,11 +171,23 @@ impl<'a> VM<'a> {
                 LinearNodeValue::GotoLabel(current_label) if *current_label == target_label => {
                     self.in_progress_goto = None;
                 }
-                LinearNodeValue::Sequence(children) | LinearNodeValue::Loop(children) => {
+                LinearNodeValue::Sequence(children) => {
+                    // We can safely eval all of sequence's children - they'll
+                    // ignore the GOTO if they need to. once we're done with that
+                    // eval, return Ok to avoid running the whole thing again
                     for node in children.iter() {
                         self.evaluate_node(params, node)?;
                     }
                 }
+                LinearNodeValue::Loop(children) => 'outer: loop {
+                    for node in children.iter() {
+                        match self.evaluate_node(params, node) {
+                            Err(Unwind::Break) => break 'outer,
+                            other @ Err(_) => return other,
+                            Ok(_) => {}
+                        }
+                    }
+                },
                 LinearNodeValue::If(_, if_branch, else_branch) => {
                     let mut found_goto = false;
                     for node in if_branch.iter() {
@@ -192,9 +204,11 @@ impl<'a> VM<'a> {
                         }
                     }
                 }
-                _ => return Ok(()),
+                _ => {}
             }
+            return Ok(());
         }
+
         match &node.value {
             LinearNodeValue::Sequence(seq) => {
                 for node in seq.iter() {
@@ -319,6 +333,7 @@ impl<'a> VM<'a> {
                 }
             }
             LinearNodeValue::Break => return Err(Unwind::Break),
+            // easy-to-miss loop after 'outer
             LinearNodeValue::Loop(inner) => 'outer: loop {
                 for node in inner.iter() {
                     match self.evaluate_node(params, node) {

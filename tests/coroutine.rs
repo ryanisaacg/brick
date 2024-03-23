@@ -130,6 +130,27 @@ seq1() + seq1() + seq2()
 }
 
 #[test]
+fn regression_test_branch_in_yielding_loop() {
+    eval(
+        r#"
+gen fn demo(): generator[i32, void] {
+    while true {
+        // Completely useless if statement
+        if 1 == -1 {
+        }
+        yield 1;
+    }
+}
+
+let seq = demo();
+
+seq() + seq()
+"#,
+    )
+    .unwrap();
+}
+
+#[test]
 fn mutable_ref() {
     let result = eval(
         r#"
