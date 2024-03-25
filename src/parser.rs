@@ -1120,9 +1120,8 @@ fn expression_pratt<'a>(
         TokenValue::Int(int) => try_decimal(source, int as i64, range)?,
         TokenValue::Yield => {
             let next = peek_token(source, cursor, "expected yielded value after yield")?;
-            if next.value == TokenValue::Void {
-                let next = already_peeked_token(source)?;
-                let range = SourceRange::new(start, next.range.end());
+            if next.value.is_expression_boundary() {
+                let range = SourceRange::new(start, cursor);
                 AstNode::new(AstNodeValue::Yield(None), range)
             } else {
                 let inner = expression(source, context, cursor, true)?;

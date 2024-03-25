@@ -93,6 +93,72 @@ pub enum TokenValue {
     LineComment(String),
 }
 
+impl TokenValue {
+    /**
+     * Created for `yield`, to detect if it's returning a value or standlone
+     */
+    pub fn is_expression_boundary(&self) -> bool {
+        match self {
+            TokenValue::Word(_)
+            | TokenValue::Int(_)
+            | TokenValue::OpenParen
+            | TokenValue::OpenBracket
+            | TokenValue::CharacterLiteral(_)
+            | TokenValue::OpenSquare
+            | TokenValue::If
+            | TokenValue::While
+            | TokenValue::Dict
+            | TokenValue::List
+            | TokenValue::True
+            | TokenValue::False
+            | TokenValue::Unique
+            | TokenValue::Ref
+            | TokenValue::Null
+            | TokenValue::Yield
+            | TokenValue::StringLiteral(_) => false,
+            TokenValue::Plus
+            | TokenValue::Minus
+            | TokenValue::Asterisk
+            | TokenValue::ForwardSlash
+            | TokenValue::PlusEquals
+            | TokenValue::MinusEquals
+            | TokenValue::AsteriskEquals
+            | TokenValue::ForwardSlashEquals
+            | TokenValue::LessThan
+            | TokenValue::GreaterThan
+            | TokenValue::LessEqualThan
+            | TokenValue::GreaterEqualThan
+            | TokenValue::EqualTo
+            | TokenValue::NotEquals
+            | TokenValue::BooleanAnd
+            | TokenValue::BooleanOr
+            | TokenValue::Period
+            | TokenValue::NullCoalesce
+            | TokenValue::NullChaining
+            | TokenValue::Assign
+            | TokenValue::Colon
+            | TokenValue::Comma
+            | TokenValue::Semicolon
+            | TokenValue::QuestionMark
+            | TokenValue::Exclamation
+            | TokenValue::CloseParen
+            | TokenValue::CloseBracket
+            | TokenValue::CloseSquare
+            | TokenValue::Let
+            | TokenValue::Function
+            | TokenValue::Gen
+            | TokenValue::Import
+            | TokenValue::Struct
+            | TokenValue::Union
+            | TokenValue::Return
+            | TokenValue::Extern
+            | TokenValue::Interface
+            | TokenValue::Void
+            | TokenValue::LineComment(_) => true,
+        }
+    }
+}
+
 impl fmt::Display for TokenValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use TokenValue::*;

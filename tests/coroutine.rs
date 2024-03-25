@@ -265,7 +265,7 @@ fn no_yield_value() {
 gen fn consume(): generator[void, i32] {
     let acc = 0;
     while true {
-        let next = yield void;
+        let next = yield;
         acc += next;
     }
 }
@@ -345,7 +345,7 @@ gen fn push_increasing(): generator[void, void] {
     while true {
         push(value);
         value += 1;
-        yield void;
+        yield;
     }
 }
 

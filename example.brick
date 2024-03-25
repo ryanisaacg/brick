@@ -8,7 +8,7 @@ gen fn game_loop(): generator[void, void] {
     while true {
         draw_rect(position, 16, 32, 32);
         position += 1;
-        yield void;
+        yield;
     }
 }
 
