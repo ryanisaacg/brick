@@ -1,0 +1,25 @@
+[package]
+name = "brick"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+assert_matches = "1.5.0"
+petgraph = "0.6.4"
+rayon = "1.8.0"
+thiserror = "1.0"
+typed-arena = "2.0.2"
+bytemuck = "1.14.0"
+
+[dev-dependencies]
+anyhow = "1.0"
+matches = "0.1.9"
+
+[lib]
+name = "brick"
+path = "src/lib.rs"
+
+[[bin]]
+name = "brick"
+path = "src/main.rs"
