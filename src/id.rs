@@ -3,43 +3,59 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use bytemuck::{Pod, Zeroable};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct AnyID(u32);
+pub enum AnyID {
+    Type(TypeID),
+    Variable(VariableID),
+    Function(FunctionID),
+    Node(NodeID),
+}
 
 impl AnyID {
     pub fn as_type(&self) -> TypeID {
-        TypeID(self.0)
+        match self {
+            AnyID::Type(id) => *id,
+            other => panic!("illegal access: converting {other:?} to TypeID"),
+        }
     }
 
     pub fn as_var(&self) -> VariableID {
-        VariableID(self.0)
+        match self {
+            AnyID::Variable(id) => *id,
+            // TODO: remove this path - I feel worried it will cause collisions
+            AnyID::Node(node_id) => node_id.as_variable(),
+            other => panic!("illegal access: converting {other:?} to VariableID"),
+        }
     }
 
     pub fn as_fn(&self) -> FunctionID {
-        FunctionID(self.0)
+        match self {
+            AnyID::Function(id) => *id,
+            other => panic!("illegal access: converting {other:?} to FunctionID"),
+        }
     }
 }
 
 impl From<TypeID> for AnyID {
     fn from(value: TypeID) -> Self {
-        AnyID(value.0)
+        AnyID::Type(value)
     }
 }
 
 impl From<NodeID> for AnyID {
     fn from(value: NodeID) -> Self {
-        AnyID(value.0)
+        AnyID::Node(value)
     }
 }
 
 impl From<VariableID> for AnyID {
     fn from(value: VariableID) -> Self {
-        AnyID(value.0)
+        AnyID::Variable(value)
     }
 }
 
 impl From<FunctionID> for AnyID {
     fn from(value: FunctionID) -> Self {
-        AnyID(value.0)
+        AnyID::Function(value)
     }
 }
 
