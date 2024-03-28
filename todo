@@ -10,6 +10,29 @@ linear IR:
 - (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
 - (maybe) AST rewrite the HIR to disambiguate between variable references and function references
 
+compilation resume and reload:
+- differentiate modules and compilation units, or give up on first class modules
+- make IDs relative to compilation units
+- allow a compilation pass to have some existing compilation units to start off (for partial compilation)
+- REPL
+    - read
+    - evaluate
+    - print
+    - loop
+
+tooling:
+- LSP
+    - go-to-definition
+        - variable
+        - type
+        - field access
+    - find references
+    - hover
+    - rename (probably going to be very hard)
+    - list of compilation errors
+    - syntax highlighting
+- pretty-printer
+
 coroutines / generators / async:
 - stackless coroutines
     - alloc the generator to match its proper size
