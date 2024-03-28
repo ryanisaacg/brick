@@ -164,6 +164,7 @@ fn resolve_declaration(
                 .unwrap_or(Ok(ExpressionType::Void))?,
             is_associated,
             is_coroutine: *is_coroutine,
+            provenance: Some(node.provenance.clone()),
         }),
         AstNodeValue::RequiredFunction(FunctionHeaderValue {
             params,
@@ -193,6 +194,7 @@ fn resolve_declaration(
                 .unwrap_or(Ok(ExpressionType::Void))?,
             is_associated,
             is_coroutine: false,
+            provenance: Some(node.provenance.clone()),
         }),
         _ => panic!("internal compiler error: unexpected decl node"),
     })

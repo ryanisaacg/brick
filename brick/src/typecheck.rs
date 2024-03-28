@@ -195,6 +195,7 @@ pub struct FuncType {
     pub returns: ExpressionType,
     pub is_associated: bool,
     pub is_coroutine: bool,
+    pub provenance: Option<SourceRange>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

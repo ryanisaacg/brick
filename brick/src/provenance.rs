@@ -5,10 +5,10 @@ use std::fmt;
 pub struct SourceRange {
     source_name: &'static str,
     source_text: &'static str,
-    start_line: u32,
-    start_offset: u32,
-    end_line: u32,
-    end_offset: u32,
+    pub start_line: u32,
+    pub start_offset: u32,
+    pub end_line: u32,
+    pub end_offset: u32,
 }
 
 impl SourceRange {
@@ -54,6 +54,13 @@ impl SourceRange {
         let start = self.start().index();
         let end = self.end().index();
         &self.source_text[start..end]
+    }
+
+    pub fn contains(&self, line: u32, char: u32) -> bool {
+        line >= self.start_line
+            && line <= self.end_line
+            && char >= self.start_offset
+            && char <= self.end_offset
     }
 }
 

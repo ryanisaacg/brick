@@ -38,6 +38,7 @@ dependencies = [
 name = "brick-lsp"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "brick",
  "lsp-server",
  "lsp-types",

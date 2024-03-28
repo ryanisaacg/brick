@@ -1,28 +1,25 @@
 // Adapating from the example from the lsp-server repo
 
-use std::error::Error;
+use std::path::Path;
 
-use lsp_types::OneOf;
+use brick::id::{AnyID, FunctionID};
+use brick::provenance::SourceRange;
+use brick::{HirVal, StaticDeclaration};
 use lsp_types::{
     request::GotoDefinition, GotoDefinitionResponse, InitializeParams, ServerCapabilities,
 };
+use lsp_types::{GotoDefinitionParams, Location, OneOf, Position, Range};
 
 use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
 
-fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
-    // Note that  we must have our logging only write out to stderr.
-    eprintln!("starting generic LSP server");
+fn main() -> anyhow::Result<()> {
+    eprintln!("brick-lsp booting up");
 
-    // Create the transport. Includes the stdio (stdin and stdout) versions but this could
-    // also be implemented to use sockets or HTTP.
     let (connection, io_threads) = Connection::stdio();
-
-    // Run the server and wait for the two threads to end (typically by trigger LSP Exit event).
     let server_capabilities = serde_json::to_value(ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         ..Default::default()
-    })
-    .unwrap();
+    })?;
     let initialization_params = match connection.initialize(server_capabilities) {
         Ok(it) => it,
         Err(e) => {
@@ -35,17 +32,12 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     main_loop(connection, initialization_params)?;
     io_threads.join()?;
 
-    // Shut down gracefully.
     eprintln!("shutting down server");
     Ok(())
 }
 
-fn main_loop(
-    connection: Connection,
-    params: serde_json::Value,
-) -> Result<(), Box<dyn Error + Sync + Send>> {
-    let _params: InitializeParams = serde_json::from_value(params).unwrap();
-    eprintln!("starting example main loop");
+fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Result<()> {
+    let _params: InitializeParams = serde_json::from_value(params)?;
     for msg in &connection.receiver {
         eprintln!("got msg: {msg:?}");
         match msg {
@@ -56,17 +48,28 @@ fn main_loop(
                 eprintln!("got request: {req:?}");
                 match cast::<GotoDefinition>(req) {
                     Ok((id, params)) => {
-                        eprintln!("got gotoDefinition request #{id}: {params:?}");
-                        let uri = params.text_document_position_params.text_document.uri;
-                        let start = lsp_types::Position {
-                            line: 1,
-                            character: 1,
-                        };
-                        let result = Some(GotoDefinitionResponse::Scalar(lsp_types::Location {
-                            uri,
-                            range: lsp_types::Range { start, end: start },
-                        }));
-                        let result = serde_json::to_value(&result).unwrap();
+                        eprintln!("got gotoDefinition request #{id}: {params:?}\n");
+                        let provenance = find_definition(&params)?;
+                        let result = provenance.map(|provenance| {
+                            GotoDefinitionResponse::Scalar(Location {
+                                uri: params
+                                    .text_document_position_params
+                                    .text_document
+                                    .uri
+                                    .clone(),
+                                range: Range {
+                                    start: Position {
+                                        line: provenance.start_line - 1,
+                                        character: provenance.start_offset - 1,
+                                    },
+                                    end: Position {
+                                        line: provenance.end_line - 1,
+                                        character: provenance.end_offset - 1,
+                                    },
+                                },
+                            })
+                        });
+                        let result = serde_json::to_value(&result)?;
                         let resp = Response {
                             id,
                             result: Some(result),
@@ -97,4 +100,65 @@ where
     R::Params: serde::de::DeserializeOwned,
 {
     req.extract(R::METHOD)
+}
+
+fn find_definition(params: &GotoDefinitionParams) -> anyhow::Result<Option<SourceRange>> {
+    let path = Path::new(
+        params
+            .text_document_position_params
+            .text_document
+            .uri
+            .path(),
+    );
+    let contents = std::fs::read_to_string(path)?;
+    let position = params.text_document_position_params.position;
+
+    let module_name = path.file_stem().unwrap().to_str().unwrap();
+    let filename = path
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string()
+        .leak();
+    let (module, decls) = brick::typecheck_file(module_name, filename, contents)?;
+    let mut found = None;
+    module.visit(|_, node| {
+        if found.is_some() {
+            return;
+        }
+        let HirVal::VariableReference(id) = &node.value else {
+            return;
+        };
+        let Some(provenance) = &node.provenance else {
+            return;
+        };
+        if provenance.contains(position.line + 1, position.character + 1) {
+            found = Some(*id);
+        }
+    });
+
+    Ok(match found {
+        Some(id) => match id {
+            AnyID::Function(fn_id) => decls.values().find_map(|decl| find_function(decl, fn_id)),
+            AnyID::Type(_) => todo!(),
+            AnyID::Variable(_) => todo!(),
+            AnyID::Node(_) => todo!(),
+        },
+        None => None,
+    })
+}
+
+fn find_function(module: &StaticDeclaration, id: FunctionID) -> Option<SourceRange> {
+    let mut found = None;
+    module.visit(&mut |decl| {
+        let StaticDeclaration::Func(func) = decl else {
+            return;
+        };
+        if func.func_id == id {
+            found = func.provenance.clone();
+        }
+    });
+
+    found
 }
