@@ -8,7 +8,6 @@ use std::{
 use borrowck::BorrowError;
 use hir::HirModule;
 use interpreter::VM;
-pub use interpreter::{ExternBinding, Value};
 use linear_ir::{layout_types, linearize_function, linearize_nodes};
 use thiserror::Error;
 pub use typecheck::StaticDeclaration;
@@ -16,11 +15,10 @@ use typecheck::{resolve::resolve_module, typecheck};
 
 mod borrowck;
 mod hir;
-pub mod id;
 mod interpreter;
 mod linear_ir;
 mod parser;
-pub mod provenance;
+mod provenance;
 mod runtime;
 mod tokenizer;
 mod typecheck;
@@ -29,6 +27,11 @@ use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
 use crate::{borrowck::borrow_check, hir::lower_module, id::TypeID, typecheck::ModuleType};
+
+pub mod id;
+pub use hir::HirNodeValue;
+pub use interpreter::{ExternBinding, Value};
+pub use provenance::{SourceMarker, SourceRange};
 
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -114,7 +117,7 @@ pub struct CompilationResults {
     pub declarations: HashMap<String, StaticDeclaration>,
 }
 
-pub fn eval_types(source: &str) -> Result<CompilationResults, CompileError> {
+pub fn check_types(source: &str) -> Result<CompilationResults, CompileError> {
     typecheck_module("main", "eval", source.to_string())
 }
 
@@ -167,13 +170,48 @@ pub fn typecheck_module(
     })
 }
 
+pub fn typecheck_file(
+    module_name: &str,
+    source_name: &'static str,
+    contents: String,
+) -> Result<(HirModule, HashMap<String, StaticDeclaration>), CompileError> {
+    use rayon::prelude::*;
+
+    let parse_arena = Arena::new();
+    let modules = collect_modules(&parse_arena, module_name.to_string(), source_name, contents)?;
+
+    let declarations = modules
+        .par_iter()
+        .map(|(name, module)| {
+            let name = name.clone();
+            let module = StaticDeclaration::Module(ModuleType {
+                id: TypeID::new(),
+                exports: resolve_module(&module[..]),
+            });
+            (name, module)
+        })
+        .collect::<HashMap<_, _>>();
+    let mut id_decls = HashMap::new();
+    for decl in declarations.values() {
+        decl.visit(&mut |decl: &StaticDeclaration| {
+            id_decls.insert(decl.id(), decl);
+        });
+    }
+
+    let parsed_module = &modules[module_name];
+    let types = typecheck(parsed_module.iter(), module_name, &declarations).unwrap();
+    let ir = lower_module(types, &id_decls);
+
+    Ok((ir, declarations))
+}
+
 struct ParseQueueEntry {
     name: String,
     source_name: &'static str,
     contents: String,
 }
 
-pub fn collect_modules<'a>(
+fn collect_modules<'a>(
     arena: &'a Arena<AstNode<'a>>,
     module_name: String,
     source_name: &'static str,
@@ -218,41 +256,4 @@ pub fn collect_modules<'a>(
     }
 
     Ok(parsed_modules)
-}
-
-// TODO: rethink how this is exposed?
-pub use hir::HirNodeValue as HirVal;
-pub fn typecheck_file(
-    module_name: &str,
-    source_name: &'static str,
-    contents: String,
-) -> Result<(HirModule, HashMap<String, StaticDeclaration>), CompileError> {
-    use rayon::prelude::*;
-
-    let parse_arena = Arena::new();
-    let modules = collect_modules(&parse_arena, module_name.to_string(), source_name, contents)?;
-
-    let declarations = modules
-        .par_iter()
-        .map(|(name, module)| {
-            let name = name.clone();
-            let module = StaticDeclaration::Module(ModuleType {
-                id: TypeID::new(),
-                exports: resolve_module(&module[..]),
-            });
-            (name, module)
-        })
-        .collect::<HashMap<_, _>>();
-    let mut id_decls = HashMap::new();
-    for decl in declarations.values() {
-        decl.visit(&mut |decl: &StaticDeclaration| {
-            id_decls.insert(decl.id(), decl);
-        });
-    }
-
-    let parsed_module = &modules[module_name];
-    let types = typecheck(parsed_module.iter(), module_name, &declarations).unwrap();
-    let ir = lower_module(types, &id_decls);
-
-    Ok((ir, declarations))
 }

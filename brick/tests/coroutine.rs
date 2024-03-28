@@ -4,7 +4,7 @@ use std::{
 };
 
 use assert_matches::assert_matches;
-use brick::{eval, eval_types, eval_with_bindings, ExternBinding, Value};
+use brick::{check_types, eval, eval_with_bindings, ExternBinding, Value};
 
 #[test]
 fn yield_basic() {
@@ -240,7 +240,7 @@ c
 #[test]
 #[should_panic] // TODO: passing values back down to coroutines
 fn echo() {
-    eval_types(
+    check_types(
         r#"
 gen fn echo(initial: i32): generator[i32, i32] {
     let current = initial;
@@ -260,7 +260,7 @@ seq(2) + seq(3) + seq(4)
 #[test]
 #[should_panic] // TODO: passing values back down to coroutines
 fn no_yield_value() {
-    eval_types(
+    check_types(
         r#"
 gen fn consume(): generator[void, i32] {
     let acc = 0;

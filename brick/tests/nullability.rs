@@ -1,10 +1,10 @@
 use assert_matches::assert_matches;
-use brick::{eval, eval_types, Value};
+use brick::{check_types, eval, Value};
 
 #[test]
 #[should_panic]
 fn must_specify_null_type() {
-    eval_types(
+    check_types(
         r#"
 let x = null;
 "#,

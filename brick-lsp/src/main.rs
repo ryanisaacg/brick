@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use brick::id::{AnyID, FunctionID};
-use brick::provenance::SourceRange;
-use brick::{HirVal, StaticDeclaration};
+use brick::SourceRange;
+use brick::{HirNodeValue, StaticDeclaration};
 use lsp_types::{
     request::GotoDefinition, GotoDefinitionResponse, InitializeParams, ServerCapabilities,
 };
@@ -127,7 +127,7 @@ fn find_definition(params: &GotoDefinitionParams) -> anyhow::Result<Option<Sourc
         if found.is_some() {
             return;
         }
-        let HirVal::VariableReference(id) = &node.value else {
+        let HirNodeValue::VariableReference(id) = &node.value else {
             return;
         };
         let Some(provenance) = &node.provenance else {

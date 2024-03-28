@@ -1,6 +1,5 @@
 use std::fmt;
 
-// TODO: worth it to do PartialOrd?
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct SourceRange {
     source_name: &'static str,
@@ -66,15 +65,11 @@ impl SourceRange {
 
 impl fmt::Debug for SourceRange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_one_char() {
-            write!(f, "{}:{}", self.start_line, self.start_offset)
-        } else {
-            write!(
-                f,
-                "{}:{} - {}:{}",
-                self.start_line, self.start_offset, self.end_line, self.end_offset
-            )
-        }
+        write!(
+            f,
+            "SourceRange {{ source_name: {}, start_line: {}, start_offset: {}, end_line: {}, end_offset: {} }}",
+            self.source_name, self.start_line, self.start_offset, self.end_line, self.end_offset,
+        )
     }
 }
 
@@ -141,7 +136,11 @@ impl SourceMarker {
 
 impl fmt::Debug for SourceMarker {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.line, self.offset)
+        write!(
+            f,
+            "SourceMarker {{ source_name: {}, line: {}, offset: {} }}",
+            self.source_name, self.line, self.offset
+        )
     }
 }
 
