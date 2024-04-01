@@ -1,0 +1,5 @@
+// Int | 1
+let a = 5;
+let b = 3 + a;
+let c = b / 2;
+a - c

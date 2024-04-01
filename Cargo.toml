@@ -3,4 +3,5 @@ resolver = "2"
 members = [
     "brick",
     "brick-lsp",
+    "data-test-driver",
 ]

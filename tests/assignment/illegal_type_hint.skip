@@ -1,0 +1,4 @@
+// NoCompile
+struct Test {}
+let x: Test = 50;
+x
