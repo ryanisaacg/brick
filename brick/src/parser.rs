@@ -50,7 +50,8 @@ impl<'a> AstNode<'a> {
             | Statement(child)
             | Deref(child)
             | UnaryExpr(_, child)
-            | ArrayType(child) => {
+            | ArrayType(child)
+            | Loop(child) => {
                 callback(child);
             }
             DictType(left, right)
@@ -252,6 +253,7 @@ pub enum AstNodeValue<'a> {
     BinExpr(BinOp, &'a mut AstNode<'a>, &'a mut AstNode<'a>),
     If(IfDeclaration<'a>),
     While(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
+    Loop(&'a mut AstNode<'a>),
     Call(&'a mut AstNode<'a>, Vec<AstNode<'a>>),
     TakeUnique(&'a mut AstNode<'a>),
     TakeRef(&'a mut AstNode<'a>),
@@ -1109,6 +1111,7 @@ fn expression_pratt<'a>(
         token @ (TokenValue::If | TokenValue::While) => {
             if_or_while(source, context, token, cursor)?
         }
+        TokenValue::Loop => parse_loop(source, context, cursor)?,
         TokenValue::OpenBracket => block(source, context, cursor)?,
         // Atoms
         TokenValue::True => AstNode::new(AstNodeValue::Bool(true), range),
@@ -1647,6 +1650,25 @@ fn if_or_while<'a>(
     } else {
         AstNode::new(AstNodeValue::While(predicate_ptr, block_ptr), provenance)
     })
+}
+
+fn parse_loop<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    cursor: SourceMarker,
+) -> Result<AstNode<'a>, ParseError> {
+    let token = assert_next_lexeme_eq(
+        source,
+        TokenValue::OpenBracket,
+        cursor,
+        "expected { after loop",
+    )?;
+
+    let body = block(source, context, token.range.start())?;
+    let provenance = SourceRange::new(cursor, body.provenance.end());
+    let body = add_node(context, body);
+
+    Ok(AstNode::new(AstNodeValue::Loop(body), provenance))
 }
 
 fn block<'a>(

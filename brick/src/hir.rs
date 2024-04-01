@@ -350,7 +350,8 @@ impl HirNode {
             | HirNodeValue::Dereference(child)
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
-            | HirNodeValue::StructToInterface { value: child, .. } => {
+            | HirNodeValue::StructToInterface { value: child, .. }
+            | HirNodeValue::Loop(child) => {
                 callback(None, child);
             }
             HirNodeValue::GeneratorSuspend(yielded, _) => {
@@ -535,7 +536,8 @@ impl HirNode {
             | HirNodeValue::Dereference(child)
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
-            | HirNodeValue::StructToInterface { value: child, .. } => {
+            | HirNodeValue::StructToInterface { value: child, .. }
+            | HirNodeValue::Loop(child) => {
                 callback(None, child);
             }
             HirNodeValue::GeneratorSuspend(yielded, _) => {
@@ -604,6 +606,7 @@ pub enum HirNodeValue {
     // Expressions
     If(Box<HirNode>, Box<HirNode>, Option<Box<HirNode>>),
     While(Box<HirNode>, Box<HirNode>),
+    Loop(Box<HirNode>),
     StructLiteral(TypeID, HashMap<String, HirNode>),
     UnionLiteral(TypeID, String, Box<HirNode>),
     ArrayLiteral(Vec<HirNode>),

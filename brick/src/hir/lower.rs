@@ -165,6 +165,7 @@ fn lower_node(decls: &HashMap<TypeID, &StaticDeclaration>, node: &AstNode<'_>) -
             let body = lower_node_alloc(decls, body);
             HirNodeValue::While(cond, body)
         }
+        AstNodeValue::Loop(body) => HirNodeValue::Loop(lower_node_alloc(decls, body)),
         AstNodeValue::Block(contents) => {
             let contents = contents
                 .iter()

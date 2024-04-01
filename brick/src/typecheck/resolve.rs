@@ -261,6 +261,7 @@ pub fn resolve_type_expr(
         | AstNodeValue::BinExpr(_, _, _)
         | AstNodeValue::If(_)
         | AstNodeValue::While(_, _)
+        | AstNodeValue::Loop(_)
         | AstNodeValue::Call(_, _)
         | AstNodeValue::TakeUnique(_)
         | AstNodeValue::TakeRef(_)

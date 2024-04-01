@@ -456,6 +456,16 @@ pub fn linearize_nodes(
                     provenance: node.provenance,
                 })
             }
+            HirNodeValue::Loop(body) => {
+                let provenance = body.provenance.clone();
+                let mut vec_deque = VecDeque::new();
+                vec_deque.push_back(*body);
+                let body = linearize_nodes(declarations, stack_entries, stack_offset, vec_deque);
+                values.push(LinearNode {
+                    value: LinearNodeValue::Loop(body),
+                    provenance,
+                });
+            }
 
             // TODO: auto-returns?
             _ => {
@@ -705,7 +715,10 @@ fn lower_expression(
             }
         }
 
-        HirNodeValue::If(_, _, _) | HirNodeValue::While(_, _) | HirNodeValue::Return(_) => {
+        HirNodeValue::If(_, _, _)
+        | HirNodeValue::While(_, _)
+        | HirNodeValue::Return(_)
+        | HirNodeValue::Loop(_) => {
             unreachable!("all control flow must be removed from expressions in HIR")
         }
 
@@ -1268,6 +1281,7 @@ fn lower_lvalue(
         HirNodeValue::Sequence(_) => todo!(),
         HirNodeValue::If(_, _, _) => todo!(),
         HirNodeValue::While(_, _) => todo!(),
+        HirNodeValue::Loop(_) => todo!(),
         HirNodeValue::StructLiteral(_, _) => todo!(),
         HirNodeValue::VtableCall(_, _, _) => todo!(),
         HirNodeValue::StructToInterface { .. } => todo!(),

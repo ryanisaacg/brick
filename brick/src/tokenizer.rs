@@ -70,6 +70,7 @@ pub enum TokenValue {
     // Keywords
     If,
     While,
+    Loop,
     Let,
     True,
     False,
@@ -107,6 +108,7 @@ impl TokenValue {
             | TokenValue::OpenSquare
             | TokenValue::If
             | TokenValue::While
+            | TokenValue::Loop
             | TokenValue::Dict
             | TokenValue::List
             | TokenValue::True
@@ -201,6 +203,7 @@ impl fmt::Display for TokenValue {
             Let => write!(f, "keyword let"),
             If => write!(f, "keyword if"),
             While => write!(f, "keyword while"),
+            Loop => write!(f, "keyword loop"),
             True => write!(f, "keyword true"),
             False => write!(f, "keyword false"),
             Function => write!(f, "keyword fn"),
@@ -331,6 +334,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     match word.as_str() {
                         "if" => TokenValue::If,
                         "while" => TokenValue::While,
+                        "loop" => TokenValue::Loop,
                         "true" => TokenValue::True,
                         "false" => TokenValue::False,
                         "let" => TokenValue::Let,

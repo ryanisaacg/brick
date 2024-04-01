@@ -106,7 +106,6 @@ syntax:
 - remove ; and , requirements?
 - keyword arguments
 - maybe separate syntax for i64 / f64 literals
-- `loop` construct
 
 import support:
 - allow imports to have nested paths (sugar for recursively expanding?)

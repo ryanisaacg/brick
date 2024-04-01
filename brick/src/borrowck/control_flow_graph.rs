@@ -315,6 +315,12 @@ fn create_graph_for_node<'a>(
 
             (start_condition, virtual_next)
         }
+        Loop(body) => {
+            let (start_child, end_child) = create_graph_for_node(body, graph, function_exit);
+            graph.add_edge(end_child, start_child, CfgEdge::Goto);
+
+            (start_child, end_child)
+        }
         PointerSize(_) => todo!(),
     }
 }

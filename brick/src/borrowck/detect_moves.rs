@@ -246,6 +246,7 @@ fn find_moves_in_node(
             }
         }
         // TODO
+        HirNodeValue::Loop(_) => {}
         HirNodeValue::InterfaceAddress(_) => {}
         HirNodeValue::StructToInterface { .. } => {}
         HirNodeValue::PointerSize(_) => todo!(),

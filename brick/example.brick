@@ -5,12 +5,12 @@ extern fn run(game: unique generator[void, void]);
 gen fn game_loop(): generator[void, void] {
     let position = 0;
     set_fill(1, 0, 0);
-    while true {
+    loop {
         draw_rect(position, 16, 32, 32);
         position += 1;
         yield;
     }
 }
 
-let loop = game_loop();
-run(unique loop);
+let loop_seq = game_loop();
+run(unique loop_seq);

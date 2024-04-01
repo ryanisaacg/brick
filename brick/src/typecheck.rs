@@ -447,7 +447,7 @@ fn typecheck_function<'a>(
             Some(param_ty),
         )?;
 
-        if return_ty != &ExpressionType::Void {
+        if return_ty != &ExpressionType::Void && return_ty != &ExpressionType::Unreachable {
             return Err(TypecheckError::TypeMismatch {
                 expected: ExpressionType::Void,
                 received: return_ty.clone(),
@@ -937,6 +937,16 @@ fn typecheck_expression<'a>(
 
             ExpressionType::Void
         }
+        AstNodeValue::Loop(body) => {
+            typecheck_expression(
+                body,
+                outer_scopes,
+                current_scope,
+                context,
+                generator_input_ty,
+            )?;
+            ExpressionType::Unreachable
+        }
         AstNodeValue::If(IfDeclaration {
             condition,
             if_branch,
@@ -1413,6 +1423,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::Null
         | AstNodeValue::If(_)
         | AstNodeValue::While(_, _)
+        | AstNodeValue::Loop(_)
         | AstNodeValue::Call(_, _)
         | AstNodeValue::TakeUnique(_)
         | AstNodeValue::TakeRef(_)
