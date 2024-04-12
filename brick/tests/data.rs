@@ -19,7 +19,7 @@ fn data() {
                 match result {
                     brick::Value::FunctionID(_) => todo!(),
                     brick::Value::Size(_) => todo!(),
-                    brick::Value::Byte(_) => todo!(),
+                    brick::Value::Byte(byte) => Ok(TestValue::Int(byte as i64)),
                     brick::Value::Int32(val) => Ok(TestValue::Int(val as i64)),
                     brick::Value::Int64(val) => Ok(TestValue::Int(val)),
                     brick::Value::Float32(val) => Ok(TestValue::Float(val as f64)),

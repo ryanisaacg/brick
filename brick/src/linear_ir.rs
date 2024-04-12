@@ -1455,14 +1455,14 @@ fn array_alloc_space_to_push(
     let buffer_register = RegisterID::new();
 
     LinearNodeValue::Sequence(vec![
-        LinearNode::write_register(arr_ptr, LinearNode::debug(array_location)),
+        LinearNode::write_register(arr_ptr, array_location),
         LinearNode::write_register(
             length_register,
-            LinearNode::debug(LinearNode::read_memory(
+            LinearNode::read_memory(
                 LinearNode::read_register(arr_ptr),
                 length_offset,
                 PhysicalType::Pointer,
-            )),
+            ),
         ),
         // if (length + 1) * 2 > capacity, realloc
         LinearNode::if_node(
@@ -1477,11 +1477,11 @@ fn array_alloc_space_to_push(
                     ),
                     LinearNode::size(2),
                 ),
-                LinearNode::debug(LinearNode::read_memory(
+                LinearNode::read_memory(
                     LinearNode::read_register(arr_ptr),
                     capacity_offset,
                     PhysicalType::Pointer,
-                )),
+                ),
             ),
             // Increase capacity
             vec![
