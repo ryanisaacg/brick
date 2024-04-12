@@ -861,7 +861,9 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            assert!(validate_lvalue(left));
+            if !validate_lvalue(left) {
+                return Err(TypecheckError::IllegalLvalue(left.provenance.clone()));
+            }
             let right = typecheck_expression(
                 right,
                 outer_scopes,
