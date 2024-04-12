@@ -1,0 +1,9 @@
+// Int | 10
+let array = list[1, 2, 3, 4];
+let index = 0;
+let total = 0;
+while index < array.len() {
+    total += array[index];
+    index += 1;
+}
+total

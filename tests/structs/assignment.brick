@@ -1,0 +1,14 @@
+// Int | 5
+struct Container {
+    padding: Point,
+    inner: Point,
+}
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+let val = Container { padding: Point { x: 0, y: 0 }, inner: Point { x: 0, y: 0 } };
+val.inner.x = 5;
+
+val.inner.x

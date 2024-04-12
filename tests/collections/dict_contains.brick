@@ -1,0 +1,12 @@
+// Int | 5
+let value = 0;
+let d = dict{ [1]: 30 };
+let key = 1;
+if d.contains_key(ref key) {
+    value += 5;
+}
+key = 2;
+if d.contains_key(ref key) {
+    value += 50;
+}
+value

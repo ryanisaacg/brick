@@ -1,0 +1,8 @@
+// Int | 128
+let i = 0;
+let n = 2;
+while i < 6 {
+    i += 1;
+    n *= 2;
+}
+n

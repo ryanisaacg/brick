@@ -1,0 +1,8 @@
+// NoCompile
+struct Test {
+    field: i32
+}
+
+fn test(): i32 {
+    Test.field
+}

@@ -1,0 +1,19 @@
+// Compile
+interface HasArea {
+    fn area(area: HasArea): i32,
+}
+
+struct Square {
+    size: i32,
+
+    fn area(self: ref Square): i32 {
+        self.size * self.size
+    }
+}
+
+fn area_2(shape: HasArea): i32 {
+    shape.area()
+}
+
+let x = Square { size: 2 };
+area_2(x);

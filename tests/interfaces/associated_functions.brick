@@ -1,0 +1,9 @@
+// Compile
+interface HasArea {
+    fn area(area: HasArea): f32,
+}
+
+fn area_2(shape: HasArea): f32 {
+    let area = shape.area();
+    area * area
+}

@@ -1,0 +1,11 @@
+// NoCompile
+gen fn echo(initial: i32): generator[i32, i32] {
+    let current = initial;
+    while true {
+        let next = yield current;
+        current = next;
+    }
+}
+
+let seq = echo(1);
+seq(2) + seq(3) + seq(4)

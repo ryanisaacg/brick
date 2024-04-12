@@ -1,0 +1,11 @@
+// Int | -3
+fn incr_if_positive(a: unique i32) {
+    if *a <= 0 {
+        return;
+    };
+    *a += 1;
+}
+
+let x = -3;
+incr_if_positive(unique x);
+x

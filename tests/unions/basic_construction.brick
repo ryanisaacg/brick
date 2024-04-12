@@ -1,0 +1,8 @@
+// Int | 12
+union Number {
+    int(i32),
+    float(f32),
+}
+
+let num = Number { int: 12 };
+num.int ?? 0

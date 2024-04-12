@@ -1,0 +1,12 @@
+// Int | 3
+fn add_one(x: unique i32) {
+    *x = incremented(x);
+}
+
+fn incremented(x: ref i32): i32 {
+    *x + 1
+}
+
+let x = 2;
+add_one(unique x);
+x

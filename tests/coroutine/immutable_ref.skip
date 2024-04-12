@@ -1,0 +1,9 @@
+// NoCompile
+gen fn basic(): generator[i32, void] {
+    yield 1;
+    yield 2;
+}
+
+let seq = basic();
+let seq_ref = ref seq;
+seq_ref() + seq_ref()

@@ -1,0 +1,6 @@
+// NoCompile
+let array = list[0];
+while array.len() < 10 {
+    array.push(array.len());
+}
+array[9.0]

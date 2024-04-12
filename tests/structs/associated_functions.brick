@@ -1,0 +1,12 @@
+// Int | 10
+struct Point2 {
+    x: i32,
+    y: i32,
+
+    fn length2(point: Point2): i32 {
+        (point.x * point.x) + (point.y * point.y)
+    }
+}
+
+let x = Point2 { x: 3, y: -1 };
+x.length2()

@@ -1,0 +1,18 @@
+// Int | 6
+gen fn ones(): generator[i32, void] {
+    while true {
+        yield 1;
+    }
+}
+
+gen fn count_up(): generator[i32, void] {
+    let x = 0;
+    let seq = ones();
+    while true {
+        yield x;
+        x += seq();
+    }
+}
+
+let seq = count_up();
+seq() + seq() + seq()

@@ -1,0 +1,14 @@
+// Int | 1235
+gen fn once(): generator[i32, void] {
+    let x = 1200 + 34;
+
+    yield x;
+
+    let y = x + 1;
+
+    yield y;
+}
+
+let seq = once();
+seq();
+seq()

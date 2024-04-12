@@ -1,0 +1,9 @@
+// Int | 1
+gen fn basic(): generator[i32, void] {
+    yield 1;
+}
+
+let seq = basic();
+let seq_ref = unique seq;
+seq_ref()
+

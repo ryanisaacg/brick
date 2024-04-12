@@ -1,0 +1,4 @@
+// Int | 825
+let val = dict{ [1]: 10, [2]: 15, [3]: 20 };
+val.insert(3, 800);
+val[1] + val[2] + val[3]

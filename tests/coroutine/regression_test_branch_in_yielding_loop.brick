@@ -1,0 +1,13 @@
+// Int | 2
+gen fn demo(): generator[i32, void] {
+    while true {
+        // Completely useless if statement
+        if 1 == -1 {
+        }
+        yield 1;
+    }
+}
+
+let seq = demo();
+
+seq() + seq()

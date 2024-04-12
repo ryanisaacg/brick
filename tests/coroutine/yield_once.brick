@@ -1,0 +1,13 @@
+// Int | 1234
+gen fn once(): generator[i32, void] {
+    let x = 1200 + 34;
+
+    yield x;
+
+    // Ensure this code doesn't execute by forcing a panic
+    let arr = list[1];
+    arr[1000];
+}
+
+let seq = once();
+seq()

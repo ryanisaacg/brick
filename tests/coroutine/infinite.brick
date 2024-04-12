@@ -1,0 +1,9 @@
+// Int | 15
+gen fn infinite_seq(): generator[i32, void] {
+    while true {
+        yield 5;
+    }
+}
+
+let seq = infinite_seq();
+seq() + seq() + seq()

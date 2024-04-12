@@ -1,0 +1,13 @@
+// Int | 15
+fn add(a: i32, b: i32): i32 {
+    a + b
+}
+
+add({
+    let x = 5;
+    x
+}, if 3 > 2 {
+    10
+} else {
+    -10
+})

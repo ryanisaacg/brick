@@ -1,0 +1,7 @@
+// NoCompile
+fn immutable_mutation(x: ref i32) {
+    *x += 5;
+}
+
+let x = 2;
+immutable_mutation(ref x);

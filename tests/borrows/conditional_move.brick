@@ -1,0 +1,11 @@
+// NoCompile
+// TODO: more specific?
+struct Data {}
+
+fn test(): Data {
+    let x = Data{};
+    if 1 > 5 {
+        let y = x;
+    }
+    x
+}

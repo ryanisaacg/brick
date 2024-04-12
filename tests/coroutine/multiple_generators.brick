@@ -1,0 +1,13 @@
+// Int | 4
+gen fn infinite_seq(): generator[i32, void] {
+    let current = 1;
+    while true {
+        yield current;
+        current += 1;
+    }
+}
+
+let seq1 = infinite_seq();
+let seq2 = infinite_seq();
+
+seq1() + seq1() + seq2()

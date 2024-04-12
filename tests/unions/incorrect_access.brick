@@ -1,0 +1,8 @@
+// Int | -50
+union Number {
+    a(i32),
+    b(i32),
+}
+
+let num = Number { a: 12 };
+num.b ?? -50

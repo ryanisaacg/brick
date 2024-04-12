@@ -1,0 +1,3 @@
+// TODO: this should panic when it execute
+let array = list[1, 2, 3, 4];
+array[5]

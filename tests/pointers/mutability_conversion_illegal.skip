@@ -1,0 +1,12 @@
+// NoCompile
+fn add_one(x: unique i32) {
+   *x += 1; 
+}
+
+fn incremented(x: ref i32): i32 {
+    add_one(x);
+    *x
+}
+
+let x = 2;
+incremented(ref x);

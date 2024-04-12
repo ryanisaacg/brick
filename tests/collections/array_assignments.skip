@@ -1,0 +1,8 @@
+// Int | 2
+let array = list[0, 0, 0, 0];
+let index = 0;
+while index < array.len() {
+    array[index] = index;
+    index += 1;
+}
+array[2]

@@ -1,0 +1,12 @@
+// Int | 6
+gen fn infinite_seq(): generator[i32, void] {
+    let current = 1;
+    while true {
+        yield current;
+        current += 1;
+    }
+}
+
+let seq = infinite_seq();
+let value = seq() + seq() + seq();
+value

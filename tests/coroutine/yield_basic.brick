@@ -1,0 +1,8 @@
+// Int | 3
+gen fn basic(): generator[i32, void] {
+    yield 1;
+    yield 2;
+}
+
+let seq = basic();
+seq() + seq()

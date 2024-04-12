@@ -1,0 +1,5 @@
+// Int | 4
+let x = 2;
+let y = unique x;
+*y += 2;
+*y

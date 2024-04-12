@@ -1,0 +1,8 @@
+// Int | 7
+fn unique_mutation(x: unique i32) {
+    *x += 5;
+}
+
+let x = 2;
+unique_mutation(unique x);
+x

@@ -1,0 +1,23 @@
+// Int | 6
+gen fn basic(): generator[i32, void] {
+    let x = 5;
+    yield x;
+    let y = 1;
+    yield y;
+    yield x + y;
+}
+
+fn stack_mangle() {
+    let x = 1;
+    let y = 2;
+    let z = 3;
+    let a = x + y + z;
+    let b = a * 3;
+}
+
+let seq = basic();
+let a = seq(); // 5
+let b = seq(); // 1
+stack_mangle();
+let c = seq(); // 6, but comes out as 24
+c

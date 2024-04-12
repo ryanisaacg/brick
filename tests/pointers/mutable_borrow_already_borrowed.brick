@@ -1,0 +1,9 @@
+// NoCompile
+// TODO: borrow check non-main
+fn main(): i32 {
+    let x = 30;
+    let immutable_reference = ref x;
+    let mutable_reference = unique x;
+    *mutable_reference += 1;
+    *immutable_reference
+}

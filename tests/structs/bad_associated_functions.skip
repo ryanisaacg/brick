@@ -1,0 +1,8 @@
+// NoCompile
+struct Square {
+    size: f32,
+
+    fn area(self: Square): string {
+        self.size * self.size
+    }
+}
