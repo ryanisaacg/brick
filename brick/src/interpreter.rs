@@ -155,13 +155,16 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    pub(crate) fn evaluate_top_level_statements(mut self, statements: &[LinearNode]) -> Vec<Value> {
+    pub(crate) fn evaluate_top_level_statements(
+        mut self,
+        statements: &[LinearNode],
+    ) -> Result<Vec<Value>, Unwind> {
         for statement in statements.iter() {
-            self.evaluate_node(&mut [], statement).unwrap();
+            self.evaluate_node(&mut [], statement)?;
         }
         debug_assert_eq!(self.temporaries.len(), 0);
 
-        self.op_stack
+        Ok(self.op_stack)
     }
 
     // Kinda a hack: when we return, unwind the stack via Result

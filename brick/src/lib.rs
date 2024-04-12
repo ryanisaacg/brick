@@ -39,6 +39,14 @@ pub use interpreter::{ExternBinding, Value};
 pub use provenance::{SourceMarker, SourceRange};
 
 #[derive(Debug, Error)]
+pub enum IntepreterError {
+    #[error("aborted during execution")]
+    Abort,
+    #[error("compile error: {0}")]
+    CompileError(#[from] CompileError),
+}
+
+#[derive(Debug, Error)]
 pub enum CompileError {
     #[error("parse error: {0}")]
     ParseError(#[from] ParseError),
@@ -50,7 +58,7 @@ pub enum CompileError {
     TypecheckError(#[from] TypecheckError),
 }
 
-pub fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
+pub fn eval(source: &str) -> Result<Vec<Value>, IntepreterError> {
     let val = interpret_code("eval", source.to_string(), HashMap::new())?;
 
     Ok(val)
@@ -59,7 +67,7 @@ pub fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
 pub fn eval_with_bindings(
     source: &str,
     bindings: HashMap<String, ExternBinding>,
-) -> Result<Vec<Value>, CompileError> {
+) -> Result<Vec<Value>, IntepreterError> {
     let val = interpret_code("eval", source.to_string(), bindings)?;
 
     Ok(val)
@@ -69,7 +77,7 @@ pub fn interpret_code(
     source_name: &'static str,
     contents: String,
     mut bindings: HashMap<String, ExternBinding>,
-) -> Result<Vec<Value>, CompileError> {
+) -> Result<Vec<Value>, IntepreterError> {
     // TODO: "main"?
     let CompilationResults {
         modules,
@@ -116,7 +124,10 @@ pub fn interpret_code(
     );
 
     let vm = VM::new(ty_declarations, &functions);
-    Ok(vm.evaluate_top_level_statements(&statements[..]))
+    match vm.evaluate_top_level_statements(&statements[..]) {
+        Ok(values) => Ok(values),
+        Err(_) => Err(IntepreterError::Abort),
+    }
 }
 
 pub struct CompilationResults {

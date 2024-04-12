@@ -11,6 +11,7 @@ use glob::glob;
 pub enum TestExpectation {
     Compiles,
     DoesNotCompile,
+    Aborts,
     ProducesValue(TestValue),
 }
 
@@ -26,6 +27,7 @@ pub enum TestResult {
     Succeeded(PathBuf),
     FailsToCompile(PathBuf, Error),
     CompiledButShouldnt(PathBuf),
+    RanButShouldnt(PathBuf),
     MismatchedResult {
         path: PathBuf,
         expected: TestValue,
@@ -44,6 +46,11 @@ impl Display for TestResult {
                 f,
                 "{}: Compilation succeeded, expected failure",
                 path_display(path)
+            ),
+            TestResult::RanButShouldnt(path) => write!(
+                f,
+                "{}: Program compiled and ran, expected panic",
+                path_display(path),
             ),
             TestResult::MismatchedResult {
                 path,
@@ -86,6 +93,13 @@ pub fn test_folder(
                     Ok(_) => TestResult::CompiledButShouldnt(path),
                     Err(_) => TestResult::Succeeded(path),
                 },
+                TestExpectation::Aborts => {
+                    if check_does_compile(&contents).is_ok() && execute(&contents).is_err() {
+                        TestResult::Succeeded(path)
+                    } else {
+                        TestResult::RanButShouldnt(path)
+                    }
+                }
                 TestExpectation::ProducesValue(expected) => match execute(&contents) {
                     Ok(received) if expected == received => TestResult::Succeeded(path),
                     Ok(received) => TestResult::MismatchedResult {
@@ -124,6 +138,7 @@ fn parse_intended_result(contents: &str) -> TestExpectation {
         "Compile" => TestExpectation::Compiles,
         "NoCompile" => TestExpectation::DoesNotCompile,
         "Void" => TestExpectation::ProducesValue(TestValue::Void),
+        "Abort" => TestExpectation::Aborts,
         results => {
             let mut components = results.split(" | ");
             let ty = components.next().unwrap();
