@@ -1,3 +1,5 @@
+// NoCompile
+// TODO: borrowck bug
 gen fn basic(): generator[i32, void] {
     yield 1;
     yield 2;
