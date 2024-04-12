@@ -392,14 +392,17 @@ fn typecheck_node<'ast>(
                     let AstNodeValue::FunctionDeclaration(func) = &function.value else {
                         return None;
                     };
-                    typecheck_function(func, context).unwrap();
-                    Some(TypecheckedFunction {
-                        id: func.id,
-                        name: func.name.clone(),
-                        func,
-                    })
+                    if let Err(err) = typecheck_function(func, context) {
+                        Some(Err(err))
+                    } else {
+                        Some(Ok(TypecheckedFunction {
+                            id: func.id,
+                            name: func.name.clone(),
+                            func,
+                        }))
+                    }
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, _>>()?;
             functions.extend(associated_functions.iter().cloned());
             associated_functions_for_type.insert(statement.id, associated_functions);
         }
