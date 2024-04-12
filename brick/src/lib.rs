@@ -26,7 +26,12 @@ mod typecheck;
 use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
-use crate::{borrowck::borrow_check, hir::lower_module, id::TypeID, typecheck::ModuleType};
+use crate::{
+    borrowck::borrow_check,
+    hir::lower_module,
+    id::TypeID,
+    typecheck::{ModuleType, TypecheckError},
+};
 
 pub mod id;
 pub use hir::HirNodeValue;
@@ -41,6 +46,8 @@ pub enum CompileError {
     FilesystemError(io::Error, String),
     #[error("borrow check errors: {0:?}")]
     BorrowcheckError(Vec<BorrowError>),
+    #[error("typecheck error: {0:?}")]
+    TypecheckError(#[from] TypecheckError),
 }
 
 pub fn eval(source: &str) -> Result<Vec<Value>, CompileError> {
@@ -149,14 +156,14 @@ pub fn typecheck_module(
         });
     }
 
-    let mut modules: HashMap<_, _> = modules
+    let mut modules = modules
         .par_iter()
         .map(|(name, contents)| {
-            let types = typecheck(contents.iter(), name, &declarations).unwrap();
+            let types = typecheck(contents.iter(), name, &declarations)?;
             let ir = lower_module(types, &id_decls);
-            (name.clone(), ir)
+            Ok((name.clone(), ir))
         })
-        .collect();
+        .collect::<Result<HashMap<_, _>, TypecheckError>>()?;
     for module in modules.values_mut() {
         let errors = borrow_check(module, &id_decls);
         if !errors.is_empty() {
@@ -199,7 +206,7 @@ pub fn typecheck_file(
     }
 
     let parsed_module = &modules[module_name];
-    let types = typecheck(parsed_module.iter(), module_name, &declarations).unwrap();
+    let types = typecheck(parsed_module.iter(), module_name, &declarations)?;
     let ir = lower_module(types, &id_decls);
 
     Ok((ir, declarations))
