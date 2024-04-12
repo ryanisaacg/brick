@@ -234,7 +234,6 @@ pub enum PrimitiveType {
     PointerSize,
 }
 
-// TODO: get the lifetimes out of these typecheck errors
 #[derive(Debug, Error)]
 pub enum TypecheckError {
     #[error("arithmetic")]
@@ -260,6 +259,8 @@ pub enum TypecheckError {
     ExpectedNullableLHS(SourceRange),
     #[error("cannot yield outside of a generator: {0}")]
     CannotYield(SourceRange),
+    #[error("illegal lvalue: {0}")]
+    IllegalLvalue(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -823,9 +824,10 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            // TODO: actual type errors
             // TODO: validate legal type to assign
-            assert!(validate_lvalue(left));
+            if !validate_lvalue(left) {
+                return Err(TypecheckError::IllegalLvalue(left.provenance.clone()));
+            }
             let right = typecheck_expression(
                 right,
                 outer_scopes,
