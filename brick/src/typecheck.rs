@@ -371,8 +371,7 @@ fn typecheck_node<'ast>(
 ) -> Result<(), TypecheckError> {
     match &statement.value {
         AstNodeValue::FunctionDeclaration(func) => {
-            // TODO: bubble errors
-            typecheck_function(func, context).unwrap();
+            typecheck_function(func, context)?;
             functions.push(TypecheckedFunction {
                 id: func.id,
                 name: func.name.clone(),
