@@ -1,59 +1,10 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use assert_matches::assert_matches;
-use brick::{eval, eval_with_bindings, interpret_code, ExternBinding, Value};
-
-#[test]
-fn add() {
-    let result = eval(
-        r#"
-// test test test
-
-fn add(a: i32, b: i32): i32 {
-    a + b
-}
-
-add(1, 2)
-"#,
-    )
-    .unwrap();
-    assert_matches!(&result[..], [Value::Int32(3)]);
-}
-
-#[test]
-fn recursion() {
-    let result = eval(
-        r#"
-fn fib(input: i32): i32 {
-    if input < 1 {
-        return 0;
-    }
-    if input == 1 {
-        return 1;
-    }
-
-    fib(input - 1) + fib(input - 2)
-}
-
-fib(5)
-"#,
-    )
-    .unwrap();
-    assert_matches!(&result[..], [Value::Int32(5)]);
-}
-
-#[should_panic]
-#[test]
-fn return_mismatch() {
-    eval(
-        r#"
-fn function(): i32 {
-    "not an i32"
-}
-"#,
-    )
-    .unwrap();
-}
+use brick::{eval_with_bindings, interpret_code, ExternBinding, Value};
 
 static mut INCR_VALUE: i32 = 0;
 
@@ -89,28 +40,6 @@ x
 }
 
 #[test]
-fn complex_call() {
-    let result = eval(
-        r#"
-fn add(a: i32, b: i32): i32 {
-    a + b
-}
-
-add({
-    let x = 5;
-    x
-}, if 3 > 2 {
-    10
-} else {
-    -10
-})
-"#,
-    )
-    .unwrap();
-    assert_matches!(&result[..], [Value::Int32(15)]);
-}
-
-#[test]
 fn extern_pointer() {
     let mut funcs: HashMap<String, ExternBinding> = HashMap::new();
     funcs.insert(
@@ -140,58 +69,137 @@ x
     assert_matches!(&result[..], [Value::Int32(11)]);
 }
 
+#[test]
+fn externally_driven_coroutine() {
+    let mut bindings: HashMap<String, ExternBinding> = HashMap::new();
+    let results = Arc::new(Mutex::new(Vec::new()));
+
+    let push_results = results.clone();
+    bindings.insert(
+        "push".to_string(),
+        Box::new(move |_, mut args| {
+            let mut results = push_results.lock().unwrap();
+            results.push(args.remove(0));
+            None
+        }),
+    );
+    bindings.insert(
+        "call_generator_times".to_string(),
+        Box::new(|vm, mut args| {
+            let Value::Int32(times) = args.pop().unwrap() else {
+                unreachable!()
+            };
+            let generator = args.pop().unwrap();
+            for _ in 0..times {
+                vm.resume_generator(generator.clone()).unwrap();
+            }
+            None
+        }),
+    );
+
+    eval_with_bindings(
+        r#"
+extern fn push(number: i32);
+extern fn call_generator_times(coroutine: unique generator[void, void], times: i32);
+
+gen fn push_increasing(): generator[void, void] {
+    let value = 0;
+    while true {
+        push(value);
+        value += 1;
+        yield;
+    }
+}
+
+let seq = push_increasing();
+call_generator_times(unique seq, 5);
+"#,
+        bindings,
+    )
+    .unwrap();
+
+    let results = results.lock().unwrap();
+    assert_eq!(results.len(), 5);
+}
+
+// Requirements
+// TODO: string support
+// TODO: string keys for dictionaries
+
+// Ergonomics
+// TODO: null checks OR ?. for unions
+// TODO: nullable index operator
+// TODO: Zero-variant unions
+// TODO: for loops / ranges
+// TODO: empty array, dict operator
+// TODO: don't close quotes with escaped quotes
+
+#[test]
 #[should_panic]
-#[test]
-fn illegal_return() {
-    eval(
+fn json_parse() {
+    let result = eval_with_bindings(
         r#"
-fn add(a: i32, b: i32): i32 {
-    if a > b {
-        return 0.0;
-    }
-    a + b
-}
-"#,
-    )
-    .unwrap();
+extern fn ext_parse_json(val: string);
+// Null -> 0, Bool -> 1, Number -> 2, String -> 3, Array -> 4, Object -> 5
+extern fn value_tag(): i32;
+extern fn value_as_bool(): bool;
+extern fn value_as_number(): f64;
+extern fn value_as_string(): string;
+extern fn value_as_array_items(): i32;
+extern fn value_as_object_entries(): i32;
+
+union JsonValue {
+    Null(bool),
+    Bool(bool),
+    Number(f64),
+    String(string),
+    Array(list[JsonValue]),
+    Object(dict[string, JsonValue]),
 }
 
-#[test]
-fn doesnt_converge() {
-    eval(
-        r#"
-fn cmp(a: i32, b: i32): i32 {
-    if a > b {
-        return 1;
-    } else {
-        if a < b {
-            return -1;
-        } else {
-            return 0;
+fn parse_json(val: string): JsonValue {
+    ext_parse_json(val);
+    parse_json_node()
+}
+
+fn parse_json_node(): JsonValue {
+    let tag = value_tag();
+    if tag == 0 {
+        return JsonValue { Null: false };
+    } else if tag == 1 {
+        return JsonValue { Bool: value_as_bool() };
+    } else if tag == 2 {
+        return JsonValue { Number: value_as_number() };
+    } else if tag == 3 {
+        return JsonValue { String: value_as_string() };
+    } else if tag == 4 {
+        let length = value_as_array_items();
+        let items = list[JsonValue { Null: false }; length];
+        let idx = 0; 
+        while idx < length {
+            items[idx] = parse_json_node();
+            idx += 1;
         }
+        return JsonValue { Array: items };
+    } else if tag == 5 {
+        let entries = value_as_object_entries();
+        let obj = dict{ dummy: JsonValue { Null: false } };
+        let idx = 0;
+        while idx < entries {
+            let key = value_as_string();
+            obj.insert(key, parse_json_node());
+        }
+        return JsonValue { Object: obj };
     }
-}
-"#,
-    )
-    .unwrap();
+    return JsonValue { Null: true };
 }
 
-#[test]
-fn void_return() {
-    let result = eval(
-        r#"
-fn incr_if_positive(a: unique i32) {
-    if *a <= 0 {
-        return;
-    };
-    *a += 1;
-}
-
-let x = -3;
-incr_if_positive(unique x);
-x
+let json = parse_json("{\'hello\': 1024 }");
+let obj = json.Object ?? dict{ dummy: JsonValue { Null: false } };
+obj["hello"].Number
 "#,
+        HashMap::new(),
     )
     .unwrap();
-    assert_matches!(&result[..], [Value::Int32(-3)]);
+    assert_eq!(&result[..], &[Value::Float64(1024.0)]);
 }

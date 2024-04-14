@@ -1,4 +1,4 @@
-// NotCompile
+// NoCompile
 fn function(): i32 {
     "not an i32"
 }

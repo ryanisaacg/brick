@@ -49,6 +49,7 @@ coroutines / generators / async:
 - error guardrails:
     - require coroutines to return generators
     - error when `yield`ing outside of a coroutine
+    - prevent calling coroutine through immutable references
 
 static data:
 - add some syntax for declaring global state

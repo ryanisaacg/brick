@@ -10,5 +10,6 @@ gen fn once(): generator[i32, void] {
 }
 
 let seq = once();
-seq();
+// TODO: discard values
+let _ = seq();
 seq()
