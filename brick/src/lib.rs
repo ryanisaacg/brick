@@ -54,8 +54,8 @@ pub enum CompileError {
     FilesystemError(io::Error, String),
     #[error("borrow check errors: {0:?}")]
     BorrowcheckError(Vec<BorrowError>),
-    #[error("typecheck error: {0:?}")]
-    TypecheckError(#[from] TypecheckError),
+    #[error("typecheck errors: {0:?}")]
+    TypecheckError(Vec<TypecheckError>),
 }
 
 pub fn eval(source: &str) -> Result<Vec<Value>, IntepreterError> {
@@ -174,7 +174,8 @@ pub fn typecheck_module(
             let ir = lower_module(types, &id_decls);
             Ok((name.clone(), ir))
         })
-        .collect::<Result<HashMap<_, _>, TypecheckError>>()?;
+        .collect::<Result<HashMap<_, _>, Vec<TypecheckError>>>()
+        .map_err(CompileError::TypecheckError)?;
     for module in modules.values_mut() {
         let errors = borrow_check(module, &id_decls);
         if !errors.is_empty() {
@@ -217,7 +218,8 @@ pub fn typecheck_file(
     }
 
     let parsed_module = &modules[module_name];
-    let types = typecheck(parsed_module.iter(), module_name, &declarations)?;
+    let types = typecheck(parsed_module.iter(), module_name, &declarations)
+        .map_err(CompileError::TypecheckError)?;
     let ir = lower_module(types, &id_decls);
 
     Ok((ir, declarations))
