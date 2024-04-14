@@ -261,6 +261,8 @@ pub enum TypecheckError {
     CannotYield(SourceRange),
     #[error("illegal lvalue: {0}")]
     IllegalLvalue(SourceRange),
+    #[error("illegal lhs of dot operator: {0}")]
+    IllegalDotLHS(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -608,7 +610,7 @@ fn typecheck_expression<'a>(
         AstNodeValue::Null => ExpressionType::Null,
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
-            let left = typecheck_expression(
+            let left_ty = typecheck_expression(
                 left,
                 outer_scopes,
                 current_scope,
@@ -618,7 +620,7 @@ fn typecheck_expression<'a>(
             let AstNodeValue::Name { value: name, .. } = &right.value else {
                 panic!("TODO: right side of dot operator");
             };
-            match fully_dereference(left) {
+            match fully_dereference(left_ty) {
                 ExpressionType::InstanceOf(id) => {
                     // TODO: fallible
                     let ty = context.decl(id).unwrap().field_access(name);
@@ -640,7 +642,9 @@ fn typecheck_expression<'a>(
                         todo!("dict methods")
                     }
                 }
-                _ => todo!("lhs hand of dot operator"),
+                _ => {
+                    return Err(TypecheckError::IllegalDotLHS(left.provenance.clone()));
+                }
             }
         }
         AstNodeValue::BinExpr(BinOp::NullChaining, left, right) => {
