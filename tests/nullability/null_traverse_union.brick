@@ -1,0 +1,16 @@
+// Int | 10
+union Shape {
+    bouba(Circle),
+    keke(Square)
+}
+
+struct Square {
+    side: i32
+}
+
+struct Circle {
+    radius: i32,
+}
+
+let shape = Shape { keke: Square { side: 10 } };
+(shape.bouba?.radius ?? 0) + (shape.keke?.side ?? 0)

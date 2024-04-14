@@ -1,4 +1,4 @@
-use brick::{check_types, eval};
+use brick::{check_types, eval, Value};
 use data_test_driver::TestValue;
 
 #[test]
@@ -16,18 +16,29 @@ fn data() {
                 Ok(TestValue::Void)
             } else if results.len() == 1 {
                 let result = results.remove(0);
-                match result {
-                    brick::Value::FunctionID(_) => todo!(),
-                    brick::Value::Size(_) => todo!(),
-                    brick::Value::Byte(byte) => Ok(TestValue::Int(byte as i64)),
-                    brick::Value::Int32(val) => Ok(TestValue::Int(val as i64)),
-                    brick::Value::Int64(val) => Ok(TestValue::Int(val)),
-                    brick::Value::Float32(val) => Ok(TestValue::Float(val as f64)),
-                    brick::Value::Float64(val) => Ok(TestValue::Float(val)),
+                Ok(value_to_test_value(result))
+            } else if results.len() == 2 {
+                // Maybe a nullable value
+                if results[1] == Value::Byte(1) {
+                    Ok(value_to_test_value(results.remove(0)))
+                } else {
+                    todo!()
                 }
             } else {
                 todo!()
             }
         },
     );
+}
+
+fn value_to_test_value(val: Value) -> TestValue {
+    match val {
+        Value::FunctionID(_) => todo!(),
+        Value::Size(_) => todo!(),
+        Value::Byte(byte) => TestValue::Int(byte as i64),
+        Value::Int32(val) => TestValue::Int(val as i64),
+        Value::Int64(val) => TestValue::Int(val),
+        Value::Float32(val) => TestValue::Float(val as f64),
+        Value::Float64(val) => TestValue::Float(val),
+    }
 }

@@ -1,0 +1,6 @@
+// Int | 31
+let x: i32? = 18;
+let y = x ?? 8;
+x = null;
+let z = x ?? 13;
+y + z

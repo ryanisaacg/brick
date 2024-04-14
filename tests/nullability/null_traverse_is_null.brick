@@ -1,0 +1,8 @@
+// Int | 5
+struct Square {
+    side: i32
+}
+
+
+let square: Square? = null;
+square?.side ?? 5
