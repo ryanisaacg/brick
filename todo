@@ -10,6 +10,8 @@ linear IR:
 - (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
 - (maybe) AST rewrite the HIR to disambiguate between variable references and function references
 
+- rework the hashmaps into an actual environment data structure that allows for generational indexing?
+
 compilation resume and reload:
 - differentiate modules and compilation units, or give up on first class modules
 - make IDs relative to compilation units
@@ -116,6 +118,8 @@ modules:
 - modules can be indexed in a type expression context
 - modules can be indexed in a struct / variant literal context
 - modules can be declared explicitly
+- do files have to import each other?
+- how are modules declared?
 
 returns:
 - ensure returns get expected type checked against their function in HIR
