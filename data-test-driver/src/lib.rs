@@ -70,14 +70,15 @@ fn path_display(path: &Path) -> &str {
 }
 
 pub fn test_folder(
-    path: &str,
+    mut path: PathBuf,
     check_does_compile: impl Fn(&str) -> anyhow::Result<()> + Send + Sync,
     execute: impl Fn(&str) -> anyhow::Result<TestValue> + Send + Sync,
 ) {
     use rayon::prelude::*;
 
-    let glob_input = format!("{path}/**/*.brick");
-    let paths: Vec<_> = glob(&glob_input).unwrap().collect();
+    path.push("**");
+    path.push("*.brick");
+    let paths: Vec<_> = glob(path.to_str().unwrap()).unwrap().collect();
 
     let results: Vec<_> = paths
         .into_par_iter()

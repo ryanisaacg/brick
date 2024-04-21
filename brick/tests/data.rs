@@ -3,9 +3,11 @@ use data_test_driver::TestValue;
 
 #[test]
 fn data() {
+    let mut working_dir = std::env::current_dir().unwrap();
+    working_dir.pop();
+    working_dir.push("tests");
     data_test_driver::test_folder(
-        // TODO
-        "/Users/ryanisaacg/git/ryanisaacg/ludus/tests",
+        working_dir,
         |contents| -> anyhow::Result<()> {
             check_types(contents)?;
             Ok(())
