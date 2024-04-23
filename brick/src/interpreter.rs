@@ -66,10 +66,10 @@ pub enum Unwind {
 }
 
 pub struct VM<'a> {
-    pub memory: [u8; 1024],
+    pub memory: Vec<u8>,
+    pub op_stack: Vec<Value>,
     temporaries: HashMap<RegisterID, usize>,
     layouts: HashMap<TypeID, DeclaredTypeLayout>,
-    op_stack: Vec<Value>,
     base_ptr: usize,
     stack_ptr: usize,
     heap_ptr: usize,
@@ -83,14 +83,15 @@ impl<'a> VM<'a> {
         layouts: HashMap<TypeID, DeclaredTypeLayout>,
         functions: &'a HashMap<FunctionID, Function>,
     ) -> VM {
-        let memory = [0; 1024];
+        let memory = vec![0; 1024];
+        let len = memory.len();
         VM {
             memory,
             temporaries: HashMap::new(),
             layouts,
             op_stack: Vec::new(),
-            base_ptr: memory.len(),
-            stack_ptr: memory.len(),
+            base_ptr: len,
+            stack_ptr: len,
             heap_ptr: std::mem::size_of::<usize>(),
             in_progress_goto: None,
             variable_locations: vec![HashMap::new()],
@@ -158,13 +159,13 @@ impl<'a> VM<'a> {
     pub(crate) fn evaluate_top_level_statements(
         mut self,
         statements: &[LinearNode],
-    ) -> Result<Vec<Value>, Unwind> {
+    ) -> Result<(Vec<Value>, Vec<u8>), Unwind> {
         for statement in statements.iter() {
             self.evaluate_node(&mut [], statement)?;
         }
         debug_assert_eq!(self.temporaries.len(), 0);
 
-        Ok(self.op_stack)
+        Ok((self.op_stack, self.memory))
     }
 
     // Kinda a hack: when we return, unwind the stack via Result
@@ -601,6 +602,11 @@ impl<'a> VM<'a> {
                     unreachable!()
                 };
                 self.in_progress_goto = Some(label);
+            }
+            LinearNodeValue::ConstantData(data) => {
+                let ptr = self.memory.len();
+                self.memory.extend(data.iter());
+                self.op_stack.push(Value::Size(ptr));
             }
         }
 

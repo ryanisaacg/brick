@@ -273,6 +273,8 @@ pub enum LinearNodeValue {
     CharLiteral(char),
     Byte(u8),
     FunctionID(FunctionID),
+    // TODO: reference to constant section, or lower levels factor that out?
+    ConstantData(Vec<u8>),
 
     // Probably not keeping this around forever
     #[allow(dead_code)]
@@ -350,7 +352,8 @@ impl LinearNode {
             | LinearNodeValue::Abort
             | LinearNodeValue::ReadRegister(_)
             | LinearNodeValue::KillRegister(_)
-            | LinearNodeValue::Return(None) => {}
+            | LinearNodeValue::Return(None)
+            | LinearNodeValue::ConstantData(_) => {}
         }
     }
 }
@@ -501,7 +504,13 @@ fn lower_expression(
         HirNodeValue::Bool(x) => LinearNodeValue::Byte(if x { 1 } else { 0 }),
         HirNodeValue::Null => LinearNodeValue::Byte(0),
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
-        HirNodeValue::StringLiteral(_x) => todo!(),
+        HirNodeValue::StringLiteral(string) => {
+            let bytes = string.as_bytes();
+            LinearNodeValue::Sequence(vec![
+                LinearNode::size(bytes.len()),
+                LinearNode::new(LinearNodeValue::ConstantData(bytes.to_vec())),
+            ])
+        }
 
         HirNodeValue::Arithmetic(op, lhs, rhs) => {
             let ExpressionType::Primitive(ty) = rhs.ty else {

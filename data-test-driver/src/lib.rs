@@ -18,12 +18,15 @@ pub enum TestExpectation {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TestValue {
     Void,
+    Null,
+    Nullable(Box<TestValue>),
     Int(i64),
     Float(f64),
+    String(String),
 }
 
 #[derive(Debug)]
-pub enum TestResult {
+enum TestSuccessOrFailure {
     Succeeded(PathBuf),
     FailsToCompile(PathBuf, Error),
     CompiledButShouldnt(PathBuf),
@@ -35,24 +38,24 @@ pub enum TestResult {
     },
 }
 
-impl Display for TestResult {
+impl Display for TestSuccessOrFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TestResult::Succeeded(path) => write!(f, "{}: Succeeded", path_display(path)),
-            TestResult::FailsToCompile(path, error) => {
+            TestSuccessOrFailure::Succeeded(path) => write!(f, "{}: Succeeded", path_display(path)),
+            TestSuccessOrFailure::FailsToCompile(path, error) => {
                 write!(f, "{}: Compilation failed\n{error}\n", path_display(path))
             }
-            TestResult::CompiledButShouldnt(path) => write!(
+            TestSuccessOrFailure::CompiledButShouldnt(path) => write!(
                 f,
                 "{}: Compilation succeeded, expected failure",
                 path_display(path)
             ),
-            TestResult::RanButShouldnt(path) => write!(
+            TestSuccessOrFailure::RanButShouldnt(path) => write!(
                 f,
                 "{}: Program compiled and ran, expected panic",
                 path_display(path),
             ),
-            TestResult::MismatchedResult {
+            TestSuccessOrFailure::MismatchedResult {
                 path,
                 expected,
                 received,
@@ -72,7 +75,7 @@ fn path_display(path: &Path) -> &str {
 pub fn test_folder(
     mut path: PathBuf,
     check_does_compile: impl Fn(&str) -> anyhow::Result<()> + Send + Sync,
-    execute: impl Fn(&str) -> anyhow::Result<TestValue> + Send + Sync,
+    execute: impl Fn(&str, &TestValue) -> anyhow::Result<TestValue> + Send + Sync,
 ) {
     use rayon::prelude::*;
 
@@ -87,28 +90,30 @@ pub fn test_folder(
             let contents = fs::read_to_string(&path).unwrap();
             match parse_intended_result(&contents) {
                 TestExpectation::Compiles => match check_does_compile(&contents) {
-                    Ok(_) => TestResult::Succeeded(path),
-                    Err(error) => TestResult::FailsToCompile(path, error),
+                    Ok(_) => TestSuccessOrFailure::Succeeded(path),
+                    Err(error) => TestSuccessOrFailure::FailsToCompile(path, error),
                 },
                 TestExpectation::DoesNotCompile => match check_does_compile(&contents) {
-                    Ok(_) => TestResult::CompiledButShouldnt(path),
-                    Err(_) => TestResult::Succeeded(path),
+                    Ok(_) => TestSuccessOrFailure::CompiledButShouldnt(path),
+                    Err(_) => TestSuccessOrFailure::Succeeded(path),
                 },
                 TestExpectation::Aborts => {
-                    if check_does_compile(&contents).is_ok() && execute(&contents).is_err() {
-                        TestResult::Succeeded(path)
+                    if check_does_compile(&contents).is_ok()
+                        && execute(&contents, &TestValue::Void).is_err()
+                    {
+                        TestSuccessOrFailure::Succeeded(path)
                     } else {
-                        TestResult::RanButShouldnt(path)
+                        TestSuccessOrFailure::RanButShouldnt(path)
                     }
                 }
-                TestExpectation::ProducesValue(expected) => match execute(&contents) {
-                    Ok(received) if expected == received => TestResult::Succeeded(path),
-                    Ok(received) => TestResult::MismatchedResult {
+                TestExpectation::ProducesValue(expected) => match execute(&contents, &expected) {
+                    Ok(received) if expected == received => TestSuccessOrFailure::Succeeded(path),
+                    Ok(received) => TestSuccessOrFailure::MismatchedResult {
                         path,
                         expected,
                         received,
                     },
-                    Err(error) => TestResult::FailsToCompile(path, error),
+                    Err(error) => TestSuccessOrFailure::FailsToCompile(path, error),
                 },
             }
         })
@@ -116,14 +121,14 @@ pub fn test_folder(
 
     let success_count = results
         .iter()
-        .filter(|test| matches!(test, TestResult::Succeeded(_)))
+        .filter(|test| matches!(test, TestSuccessOrFailure::Succeeded(_)))
         .count();
 
     println!("{success_count} tests passed");
     if success_count < results.len() {
         println!("Failed tests:");
         for result in results.iter() {
-            if !matches!(result, TestResult::Succeeded(_)) {
+            if !matches!(result, TestSuccessOrFailure::Succeeded(_)) {
                 println!("  {result}");
             }
         }
@@ -144,11 +149,20 @@ fn parse_intended_result(contents: &str) -> TestExpectation {
             let mut components = results.split(" | ");
             let ty = components.next().unwrap();
             let value = components.next().unwrap();
-            TestExpectation::ProducesValue(match ty {
-                "Int" => TestValue::Int(value.parse().unwrap()),
-                "Float" => TestValue::Float(value.parse().unwrap()),
-                other => panic!("Unexpected return type marker: {other}"),
+            TestExpectation::ProducesValue(if let Some(ty) = ty.strip_prefix('?') {
+                TestValue::Nullable(Box::new(parse_test_value(ty, value)))
+            } else {
+                parse_test_value(ty, value)
             })
         }
+    }
+}
+
+fn parse_test_value(ty: &str, value: &str) -> TestValue {
+    match ty {
+        "Int" => TestValue::Int(value.parse().unwrap()),
+        "Float" => TestValue::Float(value.parse().unwrap()),
+        "String" => TestValue::String(value.to_string()),
+        other => panic!("Unexpected return type marker: {other}"),
     }
 }

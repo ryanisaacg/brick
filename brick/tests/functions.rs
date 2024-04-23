@@ -4,7 +4,7 @@ use std::{
 };
 
 use assert_matches::assert_matches;
-use brick::{eval_with_bindings, interpret_code, ExternBinding, Value};
+use brick::{eval_with_bindings, ExternBinding, Value};
 
 static mut INCR_VALUE: i32 = 0;
 
@@ -23,16 +23,14 @@ fn extern_binding() {
         }),
     );
 
-    let result = interpret_code(
-        "",
+    let result = eval_with_bindings(
         r#"
 extern fn next(): i32;
 let x = next();
 x = next();
 x = next();
 x
-"#
-        .to_string(),
+"#,
         bindings,
     )
     .unwrap();
