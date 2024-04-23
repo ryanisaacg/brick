@@ -204,6 +204,7 @@ misc:
 
 backends:
 - add wasm backend?
+    - ensure it complies with the tooling conventions around C ABIs, so that we can call into a Rust-based runtime (https://github.com/WebAssembly/tool-conventions)
 - add cranelift backend?
     - one option is to directly emit cranelift via its apis
     - another option is to generate WASM and then run Cranelift on the wasm
