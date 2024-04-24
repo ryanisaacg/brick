@@ -67,9 +67,6 @@ type parameters:
 - monomorphizing
 - generic types can be constrained by interfaces
 
-runtime:
-- possible exploration: runtime functions written in Rust or Zig?
-
 collections:
 - tuples
 - arrays:
