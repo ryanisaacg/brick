@@ -232,6 +232,7 @@ pub enum LinearNodeValue {
 
     // Control flow
     Call(Box<LinearNode>, Vec<LinearNode>),
+    RuntimeCall(LinearRuntimeFunction, Vec<LinearNode>),
     Return(Option<Box<LinearNode>>),
     If(Box<LinearNode>, Vec<LinearNode>, Option<Vec<LinearNode>>),
     // TODO: labelled breaks?
@@ -279,6 +280,12 @@ pub enum LinearNodeValue {
     // Probably not keeping this around forever
     #[allow(dead_code)]
     Debug(Box<LinearNode>),
+}
+
+// TODO: distinguish from src/runtime
+#[derive(Clone, Debug)]
+pub enum LinearRuntimeFunction {
+    StringConcat,
 }
 
 impl LinearNode {
@@ -332,7 +339,9 @@ impl LinearNode {
                     else_block.iter_mut().for_each(callback);
                 }
             }
-            LinearNodeValue::Loop(children) | LinearNodeValue::Sequence(children) => {
+            LinearNodeValue::RuntimeCall(_, children)
+            | LinearNodeValue::Loop(children)
+            | LinearNodeValue::Sequence(children) => {
                 children.iter_mut().for_each(callback);
             }
             LinearNodeValue::Size(_)
@@ -1234,6 +1243,11 @@ fn lower_expression(
             ])
         }
         HirNodeValue::Yield(_) => unreachable!("yields should be rewritten in HIR"),
+        HirNodeValue::StringConcat(left, right) => {
+            let left = lower_expression(declarations, stack_entries, stack_offset, *left);
+            let right = lower_expression(declarations, stack_entries, stack_offset, *right);
+            LinearNodeValue::RuntimeCall(LinearRuntimeFunction::StringConcat, vec![left, right])
+        }
     };
 
     LinearNode { value, provenance }
@@ -1309,6 +1323,7 @@ fn lower_lvalue(
         HirNodeValue::GotoLabel(_) => todo!(),
         HirNodeValue::GeneratorResume(_) => todo!(),
         HirNodeValue::GeneratorCreate { .. } => todo!(),
+        HirNodeValue::StringConcat(_, _) => todo!(),
     }
 }
 

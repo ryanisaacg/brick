@@ -356,6 +356,7 @@ fn lower_node(decls: &HashMap<TypeID, &StaticDeclaration>, node: &AstNode<'_>) -
                 }
                 BinOp::NullCoalesce => HirNodeValue::NullCoalesce(left, right),
                 BinOp::Index | BinOp::Dot | BinOp::NullChaining => unreachable!(),
+                BinOp::Concat => HirNodeValue::StringConcat(left, right),
             }
         }
         AstNodeValue::Call(func, params) => {

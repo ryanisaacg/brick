@@ -26,6 +26,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "brick-runtime",
  "bytemuck",
  "data-test-driver",
  "matches",
@@ -46,6 +47,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "brick-runtime"
+version = "0.1.0"
 
 [[package]]
 name = "bytemuck"

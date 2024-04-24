@@ -1,11 +1,13 @@
 use std::{collections::HashMap, fmt::Debug};
 
+use brick_runtime::{brick_runtime_alloc, brick_string_concat};
+
 use crate::{
     hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
     id::{FunctionID, RegisterID, TypeID, VariableID},
     linear_ir::{
-        DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
-        PhysicalPrimitive, PhysicalType, TypeLayoutValue, NULL_TAG_SIZE,
+        DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, LinearRuntimeFunction,
+        PhysicalCollection, PhysicalPrimitive, PhysicalType, TypeLayoutValue, NULL_TAG_SIZE,
     },
 };
 
@@ -250,8 +252,16 @@ impl<'a> VM<'a> {
                 let Some(Value::Size(amount)) = self.op_stack.pop() else {
                     unreachable!()
                 };
-                self.op_stack.push(Value::Size(self.heap_ptr));
-                self.heap_ptr += amount;
+                let allocation = unsafe {
+                    let new_ptr = brick_runtime_alloc(
+                        self.memory.as_mut_ptr(),
+                        &mut self.heap_ptr as *mut usize,
+                        amount,
+                    );
+
+                    new_ptr.offset_from(self.memory.as_mut_ptr()) as usize
+                };
+                self.op_stack.push(Value::Size(allocation));
             }
             LinearNodeValue::Parameter(idx) => {
                 let mut temp = Value::Byte(0);
@@ -607,6 +617,37 @@ impl<'a> VM<'a> {
                 let ptr = self.memory.len();
                 self.memory.extend(data.iter());
                 self.op_stack.push(Value::Size(ptr));
+            }
+            LinearNodeValue::RuntimeCall(LinearRuntimeFunction::StringConcat, args) => {
+                self.evaluate_node(params, &args[0])?;
+                let Value::Size(a_ptr) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                let Value::Size(a_len) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.evaluate_node(params, &args[1])?;
+                let Value::Size(b_ptr) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                let Value::Size(b_len) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                let mut str_len = 0usize;
+                let location = unsafe {
+                    let ptr = brick_string_concat(
+                        self.memory.as_mut_ptr(),
+                        &mut self.heap_ptr as *mut usize,
+                        self.memory[a_ptr..(a_ptr + a_len)].as_ptr(),
+                        a_len,
+                        self.memory[b_ptr..(b_ptr + b_len)].as_ptr(),
+                        b_len,
+                        &mut str_len as *mut usize,
+                    );
+                    ptr.offset_from(self.memory.as_ptr()) as usize
+                };
+                self.op_stack.push(Value::Size(str_len));
+                self.op_stack.push(Value::Size(location));
             }
         }
 

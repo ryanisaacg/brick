@@ -11,6 +11,7 @@ rayon = "1.8.0"
 thiserror = "1.0"
 typed-arena = "2.0.2"
 bytemuck = "1.14.0"
+brick-runtime = { path = "../brick-runtime" }
 
 [dev-dependencies]
 anyhow = "1.0"

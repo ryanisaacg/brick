@@ -238,7 +238,8 @@ fn create_graph_for_node<'a>(
         | GotoLabel(_)
         | GeneratorResume(_)
         | GeneratorCreate { .. }
-        | InterfaceAddress(_) => {
+        | InterfaceAddress(_)
+        | StringConcat(_, _) => {
             let start = graph.add_node(IntermediateNode::Expression(current));
 
             (start, start)

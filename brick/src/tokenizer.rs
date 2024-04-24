@@ -46,6 +46,7 @@ pub enum TokenValue {
 
     // Misc operators
     Period,
+    Concat,
 
     // Nullability
     NullCoalesce,
@@ -135,6 +136,7 @@ impl TokenValue {
             | TokenValue::BooleanAnd
             | TokenValue::BooleanOr
             | TokenValue::Period
+            | TokenValue::Concat
             | TokenValue::NullCoalesce
             | TokenValue::NullChaining
             | TokenValue::Assign
@@ -182,6 +184,7 @@ impl fmt::Display for TokenValue {
             Comma => write!(f, ","),
             Colon => write!(f, ":"),
             Period => write!(f, "."),
+            Concat => write!(f, "++"),
             OpenParen => write!(f, "("),
             CloseParen => write!(f, ")"),
             OpenBracket => write!(f, "{{"),
@@ -419,14 +422,17 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         TokenValue::GreaterThan
                     }
                 }
-                '+' => {
-                    if let Some('=') = self.source.peek() {
+                '+' => match self.source.peek() {
+                    Some('=') => {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::PlusEquals
-                    } else {
-                        TokenValue::Plus
                     }
-                }
+                    Some('+') => {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::Concat
+                    }
+                    _ => TokenValue::Plus,
+                },
                 '-' => {
                     if let Some('=') = self.source.peek() {
                         end = Some(self.next_char().unwrap().1);

@@ -657,6 +657,42 @@ fn typecheck_expression<'a>(
                 }
             }
         }
+        AstNodeValue::BinExpr(BinOp::Concat, left, right) => {
+            let mut errors = Vec::new();
+
+            let left_ty = typecheck_expression(
+                left,
+                outer_scopes,
+                current_scope,
+                context,
+                generator_input_ty,
+            )?;
+            if left_ty != &ExpressionType::Primitive(PrimitiveType::String) {
+                errors.push(TypecheckError::TypeMismatch {
+                    expected: ExpressionType::Primitive(PrimitiveType::String),
+                    received: left_ty.clone(),
+                });
+            }
+            let right_ty = typecheck_expression(
+                right,
+                outer_scopes,
+                current_scope,
+                context,
+                generator_input_ty,
+            )?;
+            if right_ty != &ExpressionType::Primitive(PrimitiveType::String) {
+                errors.push(TypecheckError::TypeMismatch {
+                    expected: ExpressionType::Primitive(PrimitiveType::String),
+                    received: right_ty.clone(),
+                });
+            }
+
+            if !errors.is_empty() {
+                return Err(errors);
+            }
+
+            ExpressionType::Primitive(PrimitiveType::String)
+        }
         AstNodeValue::BinExpr(BinOp::NullChaining, left, right) => {
             let left = typecheck_expression(
                 left,

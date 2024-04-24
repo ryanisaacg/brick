@@ -299,6 +299,7 @@ pub enum UnaryOp {
 pub enum BinOp {
     Dot,
     Index,
+    Concat,
 
     NullCoalesce,
     NullChaining,
@@ -1326,6 +1327,7 @@ fn expression_pratt<'a>(
                 TokenValue::Plus => BinOp::Add,
                 TokenValue::Minus => BinOp::Subtract,
                 TokenValue::Period => BinOp::Dot,
+                TokenValue::Concat => BinOp::Concat,
                 TokenValue::Asterisk => BinOp::Multiply,
                 TokenValue::ForwardSlash => BinOp::Divide,
                 TokenValue::BooleanAnd => BinOp::BooleanAnd,
@@ -1362,7 +1364,8 @@ const COMPARE: u8 = BOOLEAN_NOT + 2;
 const SUM: u8 = COMPARE + 2;
 const FACTOR: u8 = SUM + 2;
 // misc
-const REFERENCE: u8 = FACTOR + 1;
+const CONCAT: u8 = FACTOR + 2;
+const REFERENCE: u8 = CONCAT + 1;
 const CALL: u8 = REFERENCE + 2;
 const NULL_CHAINING: u8 = CALL + 1;
 const DOT: u8 = NULL_CHAINING + 1;
@@ -1399,6 +1402,7 @@ fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
         | TokenValue::EqualTo => (COMPARE, COMPARE - 1),
         TokenValue::Plus | TokenValue::Minus => (SUM, SUM - 1),
         TokenValue::Asterisk | TokenValue::ForwardSlash => (FACTOR, FACTOR - 1),
+        TokenValue::Concat => (CONCAT, CONCAT - 1),
         TokenValue::Period => (DOT - 1, DOT),
         TokenValue::NullChaining => (NULL_CHAINING - 1, NULL_CHAINING),
         TokenValue::BooleanAnd => (BOOLEAN_AND, BOOLEAN_AND - 1),

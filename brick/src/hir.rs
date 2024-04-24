@@ -366,6 +366,16 @@ impl HirNode {
                     callback(None, arg);
                 }
             }
+            HirNodeValue::StringConcat(left, right) => {
+                callback(
+                    Some(&ExpressionType::Primitive(PrimitiveType::String)),
+                    left,
+                );
+                callback(
+                    Some(&ExpressionType::Primitive(PrimitiveType::String)),
+                    right,
+                );
+            }
         }
     }
 
@@ -552,6 +562,16 @@ impl HirNode {
                     callback(None, arg);
                 }
             }
+            HirNodeValue::StringConcat(left, right) => {
+                callback(
+                    Some(&ExpressionType::Primitive(PrimitiveType::String)),
+                    left,
+                );
+                callback(
+                    Some(&ExpressionType::Primitive(PrimitiveType::String)),
+                    right,
+                );
+            }
         }
     }
 }
@@ -572,6 +592,7 @@ pub enum HirNodeValue {
     Assignment(Box<HirNode>, Box<HirNode>),
     ArrayIndex(Box<HirNode>, Box<HirNode>),
     DictIndex(Box<HirNode>, Box<HirNode>),
+    StringConcat(Box<HirNode>, Box<HirNode>),
     Arithmetic(ArithmeticOp, Box<HirNode>, Box<HirNode>),
     Comparison(ComparisonOp, Box<HirNode>, Box<HirNode>),
     BinaryLogical(BinaryLogicalOp, Box<HirNode>, Box<HirNode>),
