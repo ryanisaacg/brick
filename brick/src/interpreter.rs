@@ -633,7 +633,6 @@ impl<'a> VM<'a> {
                 let Value::Size(b_len) = self.op_stack.pop().unwrap() else {
                     unreachable!()
                 };
-                let mut str_len = 0usize;
                 let location = unsafe {
                     let ptr = brick_string_concat(
                         self.memory.as_mut_ptr(),
@@ -642,11 +641,10 @@ impl<'a> VM<'a> {
                         a_len,
                         self.memory[b_ptr..(b_ptr + b_len)].as_ptr(),
                         b_len,
-                        &mut str_len as *mut usize,
                     );
                     ptr.offset_from(self.memory.as_ptr()) as usize
                 };
-                self.op_stack.push(Value::Size(str_len));
+                self.op_stack.push(Value::Size(a_len + b_len));
                 self.op_stack.push(Value::Size(location));
             }
         }
