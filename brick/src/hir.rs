@@ -112,7 +112,7 @@ impl HirNode {
 
     pub fn from_ast(ast: &AstNode<'_>, value: HirNodeValue, ty: ExpressionType) -> HirNode {
         HirNode {
-            id: ast.id,
+            id: NodeID::new(),
             value,
             ty,
             provenance: Some(ast.provenance.clone()),

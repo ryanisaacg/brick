@@ -143,7 +143,6 @@ fn find_definition(params: &GotoDefinitionParams) -> anyhow::Result<Option<Sourc
             AnyID::Function(fn_id) => decls.values().find_map(|decl| find_function(decl, fn_id)),
             AnyID::Type(_) => todo!(),
             AnyID::Variable(_) => todo!(),
-            AnyID::Node(_) => todo!(),
         },
         None => None,
     })

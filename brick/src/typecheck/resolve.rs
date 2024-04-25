@@ -61,7 +61,7 @@ fn resolve_declaration(
             associated_functions,
             name,
         }) => {
-            let fields = fields.iter().map(|NameAndType { id: _, name, ty }| {
+            let fields = fields.iter().map(|NameAndType { name, ty }| {
                 Ok((name.clone(), resolve_type_expr(names_to_type_id, ty)?))
             });
             let associated_functions = associated_functions
@@ -126,15 +126,9 @@ fn resolve_declaration(
                 id: names_to_type_id[name.as_str()],
                 variants: variants
                     .iter()
-                    .map(
-                        |NameAndType {
-                             id: _,
-                             name,
-                             ty: type_,
-                         }| {
-                            Ok((name.clone(), resolve_type_expr(names_to_type_id, type_)?))
-                        },
-                    )
+                    .map(|NameAndType { name, ty: type_ }| {
+                        Ok((name.clone(), resolve_type_expr(names_to_type_id, type_)?))
+                    })
                     .collect::<Result<HashMap<_, _>, _>>()?,
             })
         }
@@ -248,7 +242,7 @@ pub fn resolve_type_expr(
         | AstNodeValue::StructDeclaration(_)
         | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::InterfaceDeclaration(_)
-        | AstNodeValue::Declaration(_, _, _)
+        | AstNodeValue::Declaration(_, _, _, _)
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
         | AstNodeValue::Yield(_)

@@ -7,7 +7,6 @@ pub enum AnyID {
     Type(TypeID),
     Variable(VariableID),
     Function(FunctionID),
-    Node(NodeID),
 }
 
 impl AnyID {
@@ -21,8 +20,6 @@ impl AnyID {
     pub fn as_var(&self) -> VariableID {
         match self {
             AnyID::Variable(id) => *id,
-            // TODO: remove this path - I feel worried it will cause collisions
-            AnyID::Node(node_id) => node_id.as_variable(),
             other => panic!("illegal access: converting {other:?} to VariableID"),
         }
     }
@@ -38,12 +35,6 @@ impl AnyID {
 impl From<TypeID> for AnyID {
     fn from(value: TypeID) -> Self {
         AnyID::Type(value)
-    }
-}
-
-impl From<NodeID> for AnyID {
-    fn from(value: NodeID) -> Self {
-        AnyID::Node(value)
     }
 }
 

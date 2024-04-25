@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::{
-    id::{AnyID, FunctionID, NodeID, TypeID},
+    id::{AnyID, FunctionID, TypeID},
     parser::{
         AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
         InterfaceDeclarationValue, StructDeclarationValue, UnaryOp,
@@ -287,7 +287,6 @@ impl<'a> Declarations<'a> {
 
 pub struct TypecheckedFile<'a> {
     pub functions: Vec<TypecheckedFunction<'a>>,
-    pub associated_functions: HashMap<NodeID, Vec<TypecheckedFunction<'a>>>,
     // TODO: convert this into a Sequence?
     pub top_level_statements: Vec<&'a AstNode<'a>>,
 }
@@ -343,7 +342,6 @@ pub fn typecheck<'a>(
     let mut functions = Vec::new();
     let mut top_level_statements = Vec::new();
     let mut top_level_scope = HashMap::new();
-    let mut associated_functions = HashMap::new();
     let mut all_errors = Vec::new();
 
     for statement in file {
@@ -353,7 +351,6 @@ pub fn typecheck<'a>(
             &mut top_level_scope,
             &mut functions,
             &mut top_level_statements,
-            &mut associated_functions,
         );
         if let Err(errors) = result {
             all_errors.extend(errors.into_iter());
@@ -363,7 +360,6 @@ pub fn typecheck<'a>(
     if all_errors.is_empty() {
         Ok(TypecheckedFile {
             functions,
-            associated_functions,
             top_level_statements,
         })
     } else {
@@ -377,7 +373,6 @@ fn typecheck_node<'ast>(
     top_level_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     functions: &mut Vec<TypecheckedFunction<'ast>>,
     top_level_statements: &mut Vec<&AstNode<'ast>>,
-    associated_functions_for_type: &mut HashMap<NodeID, Vec<TypecheckedFunction<'ast>>>,
 ) -> Result<(), Vec<TypecheckError>> {
     match &statement.value {
         AstNodeValue::FunctionDeclaration(func) => {
@@ -414,7 +409,6 @@ fn typecheck_node<'ast>(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             functions.extend(associated_functions.iter().cloned());
-            associated_functions_for_type.insert(statement.id, associated_functions);
         }
         // These nodes don't execute anything and therefore don't need to be typechecked
         AstNodeValue::Import(_)
@@ -525,7 +519,7 @@ fn typecheck_expression<'a>(
             )?;
             ExpressionType::Void
         }
-        AstNodeValue::Declaration(name, type_hint, value) => {
+        AstNodeValue::Declaration(name, type_hint, value, variable_id) => {
             // TODO: do I want shadowing? currently this shadows
             let value_ty = typecheck_expression(
                 value,
@@ -545,7 +539,7 @@ fn typecheck_expression<'a>(
                     }]);
                 }
                 type_hint.ty.set(ty.clone()).unwrap();
-                current_scope.insert(name.clone(), (node.id.into(), ty));
+                current_scope.insert(name.clone(), ((*variable_id).into(), ty));
             } else {
                 if value_ty == &ExpressionType::Null
                     || value_ty == &ExpressionType::Unreachable
@@ -555,7 +549,7 @@ fn typecheck_expression<'a>(
                         node.provenance.clone(),
                     )]);
                 }
-                current_scope.insert(name.clone(), (node.id.into(), value_ty.clone()));
+                current_scope.insert(name.clone(), ((*variable_id).into(), value_ty.clone()));
             }
 
             ExpressionType::Void
@@ -1497,7 +1491,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::InterfaceDeclaration(_)
         | AstNodeValue::RequiredFunction(_)
-        | AstNodeValue::Declaration(_, _, _)
+        | AstNodeValue::Declaration(_, _, _, _)
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
         | AstNodeValue::Yield(_)

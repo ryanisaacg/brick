@@ -4,7 +4,7 @@ use thiserror::Error;
 use typed_arena::Arena;
 
 use crate::{
-    id::{AnyID, FunctionID, NodeID, VariableID},
+    id::{AnyID, FunctionID, VariableID},
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
     typecheck::ExpressionType,
@@ -12,14 +12,12 @@ use crate::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NameAndType<'a> {
-    pub id: NodeID,
     pub name: String,
     pub ty: &'a AstNode<'a>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct AstNode<'parse> {
-    pub id: NodeID,
     pub value: AstNodeValue<'parse>,
     pub provenance: SourceRange,
     pub ty: OnceLock<ExpressionType>,
@@ -28,7 +26,6 @@ pub struct AstNode<'parse> {
 impl<'a> AstNode<'a> {
     pub fn new(value: AstNodeValue<'a>, provenance: SourceRange) -> AstNode<'a> {
         AstNode {
-            id: NodeID::new(),
             value,
             provenance,
             ty: OnceLock::new(),
@@ -75,7 +72,7 @@ impl<'a> AstNode<'a> {
                     callback(else_branch);
                 }
             }
-            Declaration(_, type_hint, child) => {
+            Declaration(_, type_hint, child, _) => {
                 if let Some(type_hint) = type_hint {
                     callback(type_hint);
                 }
@@ -230,7 +227,12 @@ pub enum AstNodeValue<'a> {
     UnionDeclaration(UnionDeclarationValue<'a>),
     InterfaceDeclaration(InterfaceDeclarationValue<'a>),
     RequiredFunction(FunctionHeaderValue<'a>),
-    Declaration(String, Option<&'a mut AstNode<'a>>, &'a mut AstNode<'a>),
+    Declaration(
+        String,
+        Option<&'a mut AstNode<'a>>,
+        &'a mut AstNode<'a>,
+        VariableID,
+    ),
     Import(String),
     Return(Option<&'a mut AstNode<'a>>),
     Yield(Option<&'a mut AstNode<'a>>),
@@ -610,11 +612,7 @@ fn interface_or_struct_body<'a>(
             cursor = range.end();
             let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
             let kind = add_node(context, kind);
-            fields.push(NameAndType {
-                id: NodeID::new(),
-                name,
-                ty: kind,
-            });
+            fields.push(NameAndType { name, ty: kind });
 
             let (should_end, range) = comma_or_end_list(
                 source,
@@ -666,7 +664,6 @@ fn union_declaration<'a>(
             "expected ) after variant type",
         )?;
         variants.push(NameAndType {
-            id: NodeID::new(),
             name,
             ty: add_node(context, ty),
         });
@@ -819,11 +816,7 @@ fn function_header<'a>(
                 cursor = range.end();
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
                 let kind = add_node(context, kind);
-                params.push(NameAndType {
-                    id: NodeID::new(),
-                    name,
-                    ty: kind,
-                });
+                params.push(NameAndType { name, ty: kind });
             }
         }
     }
@@ -896,7 +889,7 @@ fn variable_declaration<'a>(
     let type_hint = type_hint.map(|type_hint| add_node(context, type_hint));
 
     Ok(AstNode::new(
-        AstNodeValue::Declaration(name, type_hint, add_node(context, value)),
+        AstNodeValue::Declaration(name, type_hint, add_node(context, value), VariableID::new()),
         provenance,
     ))
 }

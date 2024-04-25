@@ -27,7 +27,7 @@ fn look_for_value(
 ) -> anyhow::Result<TestValue> {
     match expected {
         TestValue::Void => {
-            if results.len() == 0 {
+            if results.is_empty() {
                 Ok(TestValue::Void)
             } else {
                 bail!("non-void result returned from test case");
