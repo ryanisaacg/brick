@@ -198,6 +198,7 @@ errors:
 
 misc:
 - automatically create temporaries when trying to get lvalues of function calls
+- automatically discard unused expression values
 
 backends:
 - add wasm backend?
