@@ -1,0 +1,4 @@
+// NoCompile
+gen fn non_generator_coroutine() -> i32 {
+    5
+}

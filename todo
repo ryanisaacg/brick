@@ -38,7 +38,6 @@ tooling:
 coroutines / generators / async:
 - stackless coroutines
     - alloc the generator to match its proper size
-- type yield returns correctly
 - support arguments to coroutines
     - either ban references from coroutine args or note that they're borrowed as long as the generator lives
     - copy arguments into the generator's initial state
@@ -46,7 +45,6 @@ coroutines / generators / async:
 - non-infinite generators (e.g. generators should return Next(value) | Exhausted)
 - error guardrails:
     - require coroutines to return generators
-    - error when `yield`ing outside of a coroutine
     - prevent calling coroutine through immutable references
 
 static data:

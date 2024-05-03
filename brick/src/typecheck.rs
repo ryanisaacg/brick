@@ -263,6 +263,8 @@ pub enum TypecheckError {
     IllegalLvalue(SourceRange),
     #[error("illegal lhs of dot operator: {0}")]
     IllegalDotLHS(SourceRange),
+    #[error("must return a generator: {0}")]
+    MustReturnGenerator(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -444,7 +446,9 @@ fn typecheck_function<'a>(
 
     if function.is_coroutine {
         let ExpressionType::Generator { param_ty, .. } = &function_type.returns else {
-            todo!()
+            return Err(vec![TypecheckError::MustReturnGenerator(
+                function_type.provenance.clone().unwrap(),
+            )]);
         };
         let return_ty = typecheck_expression(
             function.body,
