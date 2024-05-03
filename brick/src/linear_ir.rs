@@ -2,8 +2,8 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::{
     hir::{
-        ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirFunction, HirNode, HirNodeValue,
-        UnaryLogicalOp,
+        ArithmeticOp, BinaryLogicalOp, ComparisonOp, GeneratorProperties, HirFunction, HirNode,
+        HirNodeValue, UnaryLogicalOp,
     },
     id::{FunctionID, RegisterID, TypeID, VariableID},
     provenance::SourceRange,
@@ -33,8 +33,18 @@ pub fn linearize_function(
         &mut initial_offset,
         block.into(),
     );
-    if let Some((generator_id, _)) = function.generator {
-        generator_local_storage::generator_local_storage(generator_id, declarations, &mut body[..]);
+    if let Some(GeneratorProperties {
+        generator_var_id,
+        param_var_id,
+        ..
+    }) = function.generator
+    {
+        generator_local_storage::generator_local_storage(
+            generator_var_id,
+            param_var_id,
+            declarations,
+            &mut body[..],
+        );
     }
 
     LinearFunction {

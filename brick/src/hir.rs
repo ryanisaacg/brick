@@ -71,7 +71,14 @@ pub struct HirFunction {
     pub id: FunctionID,
     pub name: Option<String>,
     pub body: HirNode,
-    pub generator: Option<(VariableID, ExpressionType)>,
+    pub generator: Option<GeneratorProperties>,
+}
+
+#[derive(Clone, Debug)]
+pub struct GeneratorProperties {
+    pub generator_var_id: VariableID,
+    pub param_var_id: Option<VariableID>,
+    pub ty: ExpressionType,
 }
 
 #[derive(Clone, Debug, PartialEq)]

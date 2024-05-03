@@ -38,11 +38,7 @@ tooling:
 coroutines / generators / async:
 - stackless coroutines
     - alloc the generator to match its proper size
-- allow values to be returned from yields
-    - extract yield to temporaries if necessary
-    - add a new HIR instruction to retrieve passed-down generator values
-    - type yield returns correctly
-    - pass down values when resuming from a generator
+- type yield returns correctly
 - support arguments to coroutines
     - either ban references from coroutine args or note that they're borrowed as long as the generator lives
     - copy arguments into the generator's initial state
