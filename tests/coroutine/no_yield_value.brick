@@ -1,3 +1,4 @@
+// Compile
 gen fn consume(): generator[void, i32] {
     let acc = 0;
     while true {
