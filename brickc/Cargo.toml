@@ -1,0 +1,15 @@
+[package]
+name = "brickc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+wasm-encoder = "0.206.0"
+brick = { path = "../brick" }
+
+[dev-dependencies]
+anyhow = "1.0"
+data-test-driver = { path = "../data-test-driver" }
+wasmtime = "20"

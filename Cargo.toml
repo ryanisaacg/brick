@@ -3,6 +3,6 @@ resolver = "2"
 members = [
     "brick",
     "brick-lsp",
-    "brick-runtime",
+    "brick-runtime", "brickc",
     "data-test-driver",
 ]

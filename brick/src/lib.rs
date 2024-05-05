@@ -7,8 +7,9 @@ use std::{
 
 use borrowck::BorrowError;
 use hir::HirModule;
-use interpreter::VM;
-use linear_ir::{layout_types, linearize_function, linearize_nodes};
+use interpreter::{Function, VM};
+use linear_ir::{layout_types, linearize_function, linearize_nodes, DeclaredTypeLayout};
+pub use linear_ir::{LinearFunction, LinearNode, LinearNodeValue};
 use thiserror::Error;
 pub use typecheck::StaticDeclaration;
 use typecheck::{resolve::resolve_module, typecheck};
@@ -82,28 +83,17 @@ pub fn interpret_code(
     contents: String,
     mut bindings: HashMap<String, ExternBinding>,
 ) -> Result<(Vec<Value>, Vec<u8>), IntepreterError> {
-    // TODO: "main"?
-    let CompilationResults {
-        modules,
+    let LowerResults {
+        statements,
+        functions,
         declarations,
-    } = typecheck_module("main", source_name, contents)?;
+        ty_declarations,
+    } = lower_code("main", source_name, contents)?;
+    let mut functions: HashMap<_, _> = functions
+        .into_iter()
+        .map(|func| (func.id, Function::Ir(func)))
+        .collect();
 
-    let mut ty_declarations = HashMap::new();
-    layout_types(&declarations, &mut ty_declarations);
-
-    let mut statements = Vec::new();
-    let mut functions = HashMap::new();
-
-    for (name, module) in modules {
-        // TODO: execute imported statements?
-        if name == "main" {
-            statements.push(module.top_level_statements);
-        }
-        for function in module.functions {
-            let function = linearize_function(&ty_declarations, function);
-            functions.insert(function.id, interpreter::Function::Ir(function));
-        }
-    }
     let module = StaticDeclaration::Module(ModuleType {
         id: TypeID::new(),
         exports: declarations,
@@ -113,11 +103,51 @@ pub fn interpret_code(
             for (name, decl) in exports.iter() {
                 if let Some(implementation) = bindings.remove(name) {
                     let id = decl.unwrap_fn_id();
-                    functions.insert(id, interpreter::Function::Extern(implementation));
+                    functions.insert(id, Function::Extern(implementation));
                 }
             }
         }
     });
+
+    let vm = VM::new(ty_declarations, &functions);
+    match vm.evaluate_top_level_statements(&statements[..]) {
+        Ok(results) => Ok(results),
+        Err(_) => Err(IntepreterError::Abort),
+    }
+}
+
+pub struct LowerResults {
+    pub statements: Vec<LinearNode>,
+    pub functions: Vec<LinearFunction>,
+    pub declarations: HashMap<String, StaticDeclaration>,
+    pub ty_declarations: HashMap<TypeID, DeclaredTypeLayout>,
+}
+
+pub fn lower_code(
+    module_name: &str,
+    source_name: &'static str,
+    contents: String,
+) -> Result<LowerResults, CompileError> {
+    let CompilationResults {
+        modules,
+        declarations,
+    } = typecheck_module(module_name, source_name, contents)?;
+
+    let mut ty_declarations = HashMap::new();
+    layout_types(&declarations, &mut ty_declarations);
+
+    let mut statements = Vec::new();
+    let mut functions = Vec::new();
+
+    for (name, module) in modules {
+        // TODO: execute imported statements?
+        if name == "main" {
+            statements.push(module.top_level_statements);
+        }
+        for function in module.functions {
+            functions.push(linearize_function(&ty_declarations, function));
+        }
+    }
 
     let mut stack_entries = HashMap::new();
     let statements = linearize_nodes(
@@ -127,11 +157,12 @@ pub fn interpret_code(
         statements.into(),
     );
 
-    let vm = VM::new(ty_declarations, &functions);
-    match vm.evaluate_top_level_statements(&statements[..]) {
-        Ok(results) => Ok(results),
-        Err(_) => Err(IntepreterError::Abort),
-    }
+    Ok(LowerResults {
+        statements,
+        functions,
+        declarations,
+        ty_declarations,
+    })
 }
 
 pub struct CompilationResults {
