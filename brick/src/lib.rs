@@ -9,7 +9,7 @@ use borrowck::BorrowError;
 use hir::HirModule;
 use interpreter::{Function, VM};
 use linear_ir::{layout_types, linearize_function, linearize_nodes, DeclaredTypeLayout};
-pub use linear_ir::{LinearFunction, LinearNode, LinearNodeValue};
+pub use linear_ir::{LinearFunction, LinearNode, LinearNodeValue, PhysicalPrimitive};
 use thiserror::Error;
 pub use typecheck::StaticDeclaration;
 use typecheck::{resolve::resolve_module, typecheck};
@@ -35,7 +35,7 @@ use crate::{
 };
 
 pub mod id;
-pub use hir::HirNodeValue;
+pub use hir::{ArithmeticOp, HirNodeValue};
 pub use interpreter::{ExternBinding, Value};
 pub use provenance::{SourceMarker, SourceRange};
 
