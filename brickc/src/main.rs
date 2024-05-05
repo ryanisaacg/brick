@@ -5,6 +5,7 @@ fn main() {
         "main",
         "example.brick",
         std::fs::read_to_string("example.brick").unwrap(),
+        true,
     )
     .unwrap();
 }

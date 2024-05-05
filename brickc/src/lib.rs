@@ -23,6 +23,7 @@ pub fn compile(
     module_name: &str,
     source_name: &'static str,
     contents: String,
+    is_start_function: bool,
 ) -> Result<Module, CompileError> {
     let LowerResults {
         statements,
@@ -55,7 +56,7 @@ pub fn compile(
         maximum: Some(MAXIMUM_MEMORY),
         memory64: false,
         shared: false,
-        page_size_log2: Some(16),
+        page_size_log2: None,
     });
     exports.export("memory", ExportKind::Memory, MAIN_MEMORY);
     exports.export("main", ExportKind::Func, 0);
@@ -64,7 +65,9 @@ pub fn compile(
     module.section(&fn_section);
     module.section(&memories);
     module.section(&exports);
-    module.section(&StartSection { function_index: 0 });
+    if is_start_function {
+        module.section(&StartSection { function_index: 0 });
+    }
     module.section(&codes);
 
     Ok(module)

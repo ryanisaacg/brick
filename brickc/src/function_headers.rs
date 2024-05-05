@@ -9,7 +9,7 @@ pub fn encode(
 ) {
     // TODO
     let params = vec![];
-    let results = vec![];
+    let results = vec![ValType::I32];
     ty_section.function(params, results);
     fn_section.function(fn_index);
 }

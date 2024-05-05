@@ -5,7 +5,7 @@ use wasmtime::{Engine, Func, Instance, Module, Store, Val};
 
 #[test]
 fn basic() -> anyhow::Result<()> {
-    let binary = compile("main", "main.brick", "1 + 1".to_string())?.finish();
+    let binary = compile("main", "main.brick", "1 + 1".to_string(), false)?.finish();
     let engine = Engine::default();
     let module = Module::from_binary(&engine, binary.as_slice())?;
     let mut store = Store::new(&engine, ());
@@ -14,7 +14,9 @@ fn basic() -> anyhow::Result<()> {
     let func = instance
         .get_func(&mut store, "main")
         .context("failed to find main")?;
-    func.call(store, &[], &mut [])?;
+    let mut results = [Val::I32(0)];
+    func.call(store, &[], &mut results)?;
+    assert_eq!(Some(2), results[0].i32());
 
     Ok(())
 }
@@ -26,11 +28,11 @@ fn data() {
     data_test_driver::test_folder(
         working_dir,
         |contents| -> anyhow::Result<()> {
-            compile("main", "main.brick", contents.to_string())?;
+            compile("main", "main.brick", contents.to_string(), false)?;
             Ok(())
         },
         |contents, expected| -> anyhow::Result<TestValue> {
-            let binary = compile("main", "main.brick", contents.to_string())?.finish();
+            let binary = compile("main", "main.brick", contents.to_string(), false)?.finish();
             let engine = Engine::default();
             let module = Module::from_binary(&engine, binary.as_slice())?;
             let mut store = Store::new(&engine, ());
