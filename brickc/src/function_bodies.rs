@@ -23,6 +23,7 @@ pub fn encode(
         local_index: 0,
         variable_locations: HashMap::new(),
         stack_size: 0,
+        last_loop_depth: 0,
     };
     for node in func.body.iter() {
         encode_node(&mut body, node);
@@ -61,6 +62,7 @@ struct Context<'a> {
     local_index: u32,
     variable_locations: HashMap<VariableID, i32>,
     stack_size: i32,
+    last_loop_depth: u32,
 }
 
 fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
@@ -178,6 +180,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
         }
         LinearNodeValue::If(cond, then_branch, else_branch) => {
             encode_node(ctx, cond);
+            ctx.last_loop_depth += 1;
             // TODO: BlockType for branches
             ctx.instructions.push(Instruction::If(BlockType::Empty));
             for node in then_branch.iter() {
@@ -190,17 +193,20 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                 }
             }
             ctx.instructions.push(Instruction::End);
+            ctx.last_loop_depth -= 1;
         }
         LinearNodeValue::Loop(inner) => {
             ctx.instructions.push(Instruction::Loop(BlockType::Empty));
+            let prev_loop_depth = ctx.last_loop_depth;
+            ctx.last_loop_depth = 0;
             for node in inner.iter() {
                 encode_node(ctx, node);
             }
             ctx.instructions.push(Instruction::End);
+            ctx.last_loop_depth = prev_loop_depth;
         }
         LinearNodeValue::Break => {
-            // TODO: doesn't work
-            ctx.instructions.push(Instruction::Br(0));
+            ctx.instructions.push(Instruction::Br(ctx.last_loop_depth));
         }
         LinearNodeValue::Abort => {
             ctx.instructions.push(Instruction::Unreachable);
