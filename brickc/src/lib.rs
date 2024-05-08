@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use brick::{
     id::FunctionID, lower_code, typecheck_module, CompileError, LinearFunction, LowerResults,
+    PhysicalPrimitive, PhysicalType,
 };
 use wasm_encoder::{
     CodeSection, ConstExpr, ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType,
@@ -29,13 +30,15 @@ pub fn compile(
 ) -> Result<Module, CompileError> {
     let LowerResults {
         statements,
+        statements_ty,
         mut functions,
-        declarations,
+        declarations: _,
         ty_declarations,
     } = lower_code(module_name, source_name, contents)?;
     let main = LinearFunction {
         id: FunctionID::new(),
         body: statements,
+        returns: statements_ty,
     };
     functions.insert(0, main);
 

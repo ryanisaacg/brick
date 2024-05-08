@@ -1,4 +1,4 @@
-use brick::LinearFunction;
+use brick::{LinearFunction, PhysicalPrimitive, PhysicalType};
 use wasm_encoder::{FunctionSection, TypeSection, ValType};
 
 pub fn encode(
@@ -7,9 +7,20 @@ pub fn encode(
     ty_section: &mut TypeSection,
     fn_section: &mut FunctionSection,
 ) {
-    // TODO
     let params = vec![];
-    let results = vec![ValType::I32];
+    let results = match func.returns {
+        None => vec![],
+        Some(PhysicalType::Primitive(prim)) => vec![match prim {
+            PhysicalPrimitive::Byte | PhysicalPrimitive::Int32 | PhysicalPrimitive::PointerSize => {
+                ValType::I32
+            }
+            PhysicalPrimitive::Float32 => ValType::F32,
+            PhysicalPrimitive::Int64 => ValType::I64,
+            PhysicalPrimitive::Float64 => ValType::F64,
+        }],
+        // TODO
+        _ => vec![],
+    };
     ty_section.function(params, results);
     fn_section.function(fn_index);
 }

@@ -429,42 +429,85 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
         LinearNodeValue::Cast { value, from, to } => {
             encode_node(ctx, value);
             match (from, to) {
-                (PhysicalPrimitive::Byte, PhysicalPrimitive::Byte) => { /* TODO */ }
-                (PhysicalPrimitive::Byte, PhysicalPrimitive::Int32) => { /* TODO */ }
-                (PhysicalPrimitive::Byte, PhysicalPrimitive::Float32) => { /* TODO */ }
-                (PhysicalPrimitive::Byte, PhysicalPrimitive::Int64) => { /* TODO */ }
-                (PhysicalPrimitive::Byte, PhysicalPrimitive::Float64) => { /* TODO */ }
-                (PhysicalPrimitive::Byte, PhysicalPrimitive::PointerSize) => { /* TODO */ }
-                (PhysicalPrimitive::Int32, PhysicalPrimitive::Byte) => { /* TODO */ }
-                (PhysicalPrimitive::Int32, PhysicalPrimitive::Int32) => { /* TODO */ }
-                (PhysicalPrimitive::Int32, PhysicalPrimitive::Float32) => { /* TODO */ }
-                (PhysicalPrimitive::Int32, PhysicalPrimitive::Int64) => { /* TODO */ }
-                (PhysicalPrimitive::Int32, PhysicalPrimitive::Float64) => { /* TODO */ }
-                (PhysicalPrimitive::Int32, PhysicalPrimitive::PointerSize) => { /* TODO */ }
-                (PhysicalPrimitive::Float32, PhysicalPrimitive::Byte) => { /* TODO */ }
-                (PhysicalPrimitive::Float32, PhysicalPrimitive::Int32) => { /* TODO */ }
-                (PhysicalPrimitive::Float32, PhysicalPrimitive::Float32) => { /* TODO */ }
-                (PhysicalPrimitive::Float32, PhysicalPrimitive::Int64) => { /* TODO */ }
-                (PhysicalPrimitive::Float32, PhysicalPrimitive::Float64) => { /* TODO */ }
-                (PhysicalPrimitive::Float32, PhysicalPrimitive::PointerSize) => { /* TODO */ }
-                (PhysicalPrimitive::Int64, PhysicalPrimitive::Byte) => { /* TODO */ }
-                (PhysicalPrimitive::Int64, PhysicalPrimitive::Int32) => { /* TODO */ }
-                (PhysicalPrimitive::Int64, PhysicalPrimitive::Float32) => { /* TODO */ }
-                (PhysicalPrimitive::Int64, PhysicalPrimitive::Int64) => { /* TODO */ }
-                (PhysicalPrimitive::Int64, PhysicalPrimitive::Float64) => { /* TODO */ }
-                (PhysicalPrimitive::Int64, PhysicalPrimitive::PointerSize) => { /* TODO */ }
-                (PhysicalPrimitive::Float64, PhysicalPrimitive::Byte) => { /* TODO */ }
-                (PhysicalPrimitive::Float64, PhysicalPrimitive::Int32) => { /* TODO */ }
-                (PhysicalPrimitive::Float64, PhysicalPrimitive::Float32) => { /* TODO */ }
-                (PhysicalPrimitive::Float64, PhysicalPrimitive::Int64) => { /* TODO */ }
-                (PhysicalPrimitive::Float64, PhysicalPrimitive::Float64) => { /* TODO */ }
-                (PhysicalPrimitive::Float64, PhysicalPrimitive::PointerSize) => { /* TODO */ }
-                (PhysicalPrimitive::PointerSize, PhysicalPrimitive::Byte) => { /* TODO */ }
-                (PhysicalPrimitive::PointerSize, PhysicalPrimitive::Int32) => { /* TODO */ }
-                (PhysicalPrimitive::PointerSize, PhysicalPrimitive::Float32) => { /* TODO */ }
-                (PhysicalPrimitive::PointerSize, PhysicalPrimitive::Int64) => { /* TODO */ }
-                (PhysicalPrimitive::PointerSize, PhysicalPrimitive::Float64) => { /* TODO */ }
-                (PhysicalPrimitive::PointerSize, PhysicalPrimitive::PointerSize) => { /* TODO */ }
+                (
+                    PhysicalPrimitive::Byte
+                    | PhysicalPrimitive::Int32
+                    | PhysicalPrimitive::PointerSize,
+                    PhysicalPrimitive::Byte
+                    | PhysicalPrimitive::Int32
+                    | PhysicalPrimitive::PointerSize,
+                )
+                | (PhysicalPrimitive::Float32, PhysicalPrimitive::Float32)
+                | (PhysicalPrimitive::Float64, PhysicalPrimitive::Float64)
+                | (PhysicalPrimitive::Int64, PhysicalPrimitive::Int64) => {
+                    // ignore, no-op cast
+                }
+                (
+                    PhysicalPrimitive::Byte
+                    | PhysicalPrimitive::Int32
+                    | PhysicalPrimitive::PointerSize,
+                    PhysicalPrimitive::Float32,
+                ) => {
+                    ctx.instructions.push(Instruction::F32ConvertI32S);
+                }
+                (
+                    PhysicalPrimitive::Byte
+                    | PhysicalPrimitive::Int32
+                    | PhysicalPrimitive::PointerSize,
+                    PhysicalPrimitive::Int64,
+                ) => {
+                    ctx.instructions.push(Instruction::I64Extend32S);
+                }
+                (
+                    PhysicalPrimitive::Byte
+                    | PhysicalPrimitive::Int32
+                    | PhysicalPrimitive::PointerSize,
+                    PhysicalPrimitive::Float64,
+                ) => {
+                    ctx.instructions.push(Instruction::F64ConvertI32S);
+                }
+                (
+                    PhysicalPrimitive::Float32,
+                    PhysicalPrimitive::Byte
+                    | PhysicalPrimitive::Int32
+                    | PhysicalPrimitive::PointerSize,
+                ) => {
+                    ctx.instructions.push(Instruction::I32TruncF32S);
+                }
+                (PhysicalPrimitive::Float32, PhysicalPrimitive::Int64) => {
+                    ctx.instructions.push(Instruction::I64TruncF32S);
+                }
+                (PhysicalPrimitive::Float32, PhysicalPrimitive::Float64) => {
+                    ctx.instructions.push(Instruction::F64PromoteF32);
+                }
+                (
+                    PhysicalPrimitive::Int64,
+                    PhysicalPrimitive::Byte
+                    | PhysicalPrimitive::Int32
+                    | PhysicalPrimitive::PointerSize,
+                ) => {
+                    ctx.instructions.push(Instruction::I32WrapI64);
+                }
+                (PhysicalPrimitive::Int64, PhysicalPrimitive::Float32) => {
+                    ctx.instructions.push(Instruction::F32ConvertI64S);
+                }
+                (PhysicalPrimitive::Int64, PhysicalPrimitive::Float64) => {
+                    ctx.instructions.push(Instruction::F64ConvertI64S);
+                }
+                (
+                    PhysicalPrimitive::Float64,
+                    PhysicalPrimitive::Byte
+                    | PhysicalPrimitive::Int32
+                    | PhysicalPrimitive::PointerSize,
+                ) => {
+                    ctx.instructions.push(Instruction::I32TruncF64S);
+                }
+                (PhysicalPrimitive::Float64, PhysicalPrimitive::Float32) => {
+                    ctx.instructions.push(Instruction::F32DemoteF64);
+                }
+                (PhysicalPrimitive::Float64, PhysicalPrimitive::Int64) => {
+                    ctx.instructions.push(Instruction::I64TruncF64S);
+                }
             }
         }
         LinearNodeValue::Size(value) => {

@@ -16,6 +16,7 @@ mod generator_local_storage;
 #[derive(Debug)]
 pub struct LinearFunction {
     pub id: FunctionID,
+    pub returns: Option<PhysicalType>,
     pub body: Vec<LinearNode>,
 }
 
@@ -50,6 +51,10 @@ pub fn linearize_function(
     LinearFunction {
         id: function.id,
         body,
+        returns: match &function.body.ty {
+            ExpressionType::Void | ExpressionType::Unreachable => None,
+            return_ty => Some(expr_ty_to_physical(return_ty)),
+        },
     }
 }
 
@@ -1716,7 +1721,7 @@ fn primitive_to_physical(p: PrimitiveType) -> PhysicalPrimitive {
     match p {
         // TODO: should chars be 4 byte or 1 byte
         PrimitiveType::Char => PhysicalPrimitive::Byte,
-        PrimitiveType::String => todo!(),
+        PrimitiveType::String => PhysicalPrimitive::PointerSize,
         PrimitiveType::Int32 => PhysicalPrimitive::Int32,
         PrimitiveType::Float32 => PhysicalPrimitive::Float32,
         PrimitiveType::Int64 => PhysicalPrimitive::Int64,
@@ -1933,7 +1938,7 @@ fn layout_type(
     }
 }
 
-fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
+pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
     match ty {
         ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
         ExpressionType::Primitive(p) => PhysicalType::Primitive(primitive_to_physical(*p)),

@@ -8,14 +8,14 @@ use std::{
 use borrowck::BorrowError;
 use hir::HirModule;
 use interpreter::{Function, VM};
-use linear_ir::{layout_types, linearize_function, linearize_nodes};
+use linear_ir::{expr_ty_to_physical, layout_types, linearize_function, linearize_nodes};
 pub use linear_ir::{
     DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalPrimitive,
     PhysicalType,
 };
 use thiserror::Error;
 pub use typecheck::StaticDeclaration;
-use typecheck::{resolve::resolve_module, typecheck};
+use typecheck::{resolve::resolve_module, typecheck, ExpressionType};
 
 mod borrowck;
 mod hir;
@@ -88,6 +88,7 @@ pub fn interpret_code(
 ) -> Result<(Vec<Value>, Vec<u8>), IntepreterError> {
     let LowerResults {
         statements,
+        statements_ty: _,
         functions,
         declarations,
         ty_declarations,
@@ -121,6 +122,7 @@ pub fn interpret_code(
 
 pub struct LowerResults {
     pub statements: Vec<LinearNode>,
+    pub statements_ty: Option<PhysicalType>,
     pub functions: Vec<LinearFunction>,
     pub declarations: HashMap<String, StaticDeclaration>,
     pub ty_declarations: HashMap<TypeID, DeclaredTypeLayout>,
@@ -153,6 +155,10 @@ pub fn lower_code(
     }
 
     let mut stack_entries = HashMap::new();
+    let statements_ty = statements.last().and_then(|last| match &last.ty {
+        ExpressionType::Void | ExpressionType::Unreachable => None,
+        return_ty => Some(expr_ty_to_physical(return_ty)),
+    });
     let statements = linearize_nodes(
         &ty_declarations,
         &mut stack_entries,
@@ -162,6 +168,7 @@ pub fn lower_code(
 
     Ok(LowerResults {
         statements,
+        statements_ty,
         functions,
         declarations,
         ty_declarations,
