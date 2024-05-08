@@ -700,7 +700,7 @@ fn write(
             write_primitive(op_stack, memory, location + 8);
             write_primitive(op_stack, memory, location + 16);
         }
-        PhysicalType::Pointer | PhysicalType::FunctionPointer => {
+        PhysicalType::FunctionPointer => {
             write_primitive(op_stack, memory, location);
         }
         PhysicalType::Nullable(ty) => match op_stack.pop().unwrap() {
@@ -787,9 +787,6 @@ fn read(
                 location + 8,
                 PhysicalPrimitive::PointerSize,
             );
-            read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
-        }
-        PhysicalType::Pointer => {
             read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
         }
         PhysicalType::Nullable(ty) => {

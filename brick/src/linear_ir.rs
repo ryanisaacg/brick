@@ -638,7 +638,11 @@ fn lower_expression(
                     LinearNode::ptr_comparison(
                         ComparisonOp::NotEquals,
                         LinearNode::size(*variant_idx),
-                        LinearNode::read_memory(location.clone(), offset, PhysicalType::Pointer),
+                        LinearNode::read_memory(
+                            location.clone(),
+                            offset,
+                            PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                        ),
                     ),
                     vec![LinearNode::bool_value(false)],
                     Some(vec![
@@ -902,7 +906,7 @@ fn lower_expression(
             LinearNodeValue::ReadMemory {
                 location: Box::new(table),
                 offset,
-                ty: PhysicalType::Pointer,
+                ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             }
         }
         HirNodeValue::VtableCall(table, fn_id, params) => {
@@ -1076,7 +1080,7 @@ fn lower_expression(
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset: offset + POINTER_SIZE,
-                ty: PhysicalType::Pointer,
+                ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             }
         }
         HirNodeValue::RuntimeCall(RuntimeFunction::ArrayPush, mut args) => {
@@ -1500,7 +1504,7 @@ fn array_alloc_space_to_push(
             LinearNode::read_memory(
                 LinearNode::read_register(arr_ptr),
                 length_offset,
-                PhysicalType::Pointer,
+                PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             ),
         ),
         // if (length + 1) * 2 > capacity, realloc
@@ -1519,7 +1523,7 @@ fn array_alloc_space_to_push(
                 LinearNode::read_memory(
                     LinearNode::read_register(arr_ptr),
                     capacity_offset,
-                    PhysicalType::Pointer,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                 ),
             ),
             // Increase capacity
@@ -1547,7 +1551,7 @@ fn array_alloc_space_to_push(
                     LinearNode::read_memory(
                         LinearNode::read_register(arr_ptr),
                         array_offset,
-                        PhysicalType::Pointer,
+                        PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                     ),
                     LinearNode::read_register(buffer_register),
                     LinearNode::ptr_arithmetic(
@@ -1560,7 +1564,7 @@ fn array_alloc_space_to_push(
                 LinearNode::write_memory(
                     LinearNode::read_register(arr_ptr),
                     capacity_offset,
-                    PhysicalType::Pointer,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                     LinearNode::read_register(new_capacity_register),
                 ),
             ],
@@ -1571,7 +1575,7 @@ fn array_alloc_space_to_push(
         LinearNode::write_memory(
             LinearNode::read_register(arr_ptr),
             length_offset,
-            PhysicalType::Pointer,
+            PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             LinearNode::ptr_arithmetic(
                 ArithmeticOp::Add,
                 LinearNode::read_register(length_register),
@@ -1584,7 +1588,7 @@ fn array_alloc_space_to_push(
             LinearNode::read_memory(
                 LinearNode::read_register(arr_ptr),
                 array_offset,
-                PhysicalType::Pointer,
+                PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             ),
             LinearNode::ptr_arithmetic(
                 ArithmeticOp::Multiply,
@@ -1778,8 +1782,6 @@ pub enum PhysicalType {
     Primitive(PhysicalPrimitive),
     Referenced(TypeID),
     Nullable(Box<PhysicalType>),
-    // TODO: unify with primitive pointer size?
-    Pointer,
     FunctionPointer,
     Collection(PhysicalCollection),
     /// [function ID, resume point, stack ptr]
@@ -1798,7 +1800,6 @@ impl PhysicalType {
             PhysicalType::Primitive(p) => primitive_type_size(*p),
             PhysicalType::Referenced(id) => declarations[id].size(),
             PhysicalType::Nullable(ty) => NULL_TAG_SIZE + ty.size(declarations),
-            PhysicalType::Pointer => POINTER_SIZE,
             PhysicalType::FunctionPointer => FUNCTION_ID_SIZE,
             PhysicalType::Collection(ty) => match ty {
                 PhysicalCollection::Array => POINTER_SIZE * 3,
@@ -1920,7 +1921,7 @@ fn layout_type(
             layout_static_decl(declarations, layouts, declarations[id]);
             PhysicalType::Referenced(*id)
         }
-        ExpressionType::Pointer(_, _) => PhysicalType::Pointer,
+        ExpressionType::Pointer(_, _) => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
         ExpressionType::Collection(CollectionType::Array(_)) => {
             PhysicalType::Collection(PhysicalCollection::Array)
         }
@@ -1947,7 +1948,7 @@ pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
             CollectionType::Array(_) => PhysicalCollection::Array,
             CollectionType::Dict(_, _) => PhysicalCollection::Dict,
         }),
-        ExpressionType::Pointer(_, _) => PhysicalType::Pointer,
+        ExpressionType::Pointer(_, _) => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
         ExpressionType::Nullable(inner) => {
             let ty = expr_ty_to_physical(inner);
             PhysicalType::Nullable(Box::new(ty))
