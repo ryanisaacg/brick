@@ -8,8 +8,11 @@ use std::{
 use borrowck::BorrowError;
 use hir::HirModule;
 use interpreter::{Function, VM};
-use linear_ir::{layout_types, linearize_function, linearize_nodes, DeclaredTypeLayout};
-pub use linear_ir::{LinearFunction, LinearNode, LinearNodeValue, PhysicalPrimitive};
+use linear_ir::{layout_types, linearize_function, linearize_nodes};
+pub use linear_ir::{
+    DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalPrimitive,
+    PhysicalType,
+};
 use thiserror::Error;
 pub use typecheck::StaticDeclaration;
 use typecheck::{resolve::resolve_module, typecheck};

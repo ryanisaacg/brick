@@ -1,11 +1,12 @@
 use brickc::compile;
 
 fn main() {
-    compile(
+    let module = compile(
         "main",
         "example.brick",
         std::fs::read_to_string("example.brick").unwrap(),
         true,
     )
     .unwrap();
+    std::fs::write("example.wasm", module.as_slice()).unwrap();
 }

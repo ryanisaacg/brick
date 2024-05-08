@@ -4,8 +4,8 @@ use brick::{
     id::FunctionID, lower_code, typecheck_module, CompileError, LinearFunction, LowerResults,
 };
 use wasm_encoder::{
-    CodeSection, ExportKind, ExportSection, FunctionSection, MemorySection, MemoryType, Module,
-    StartSection, TypeSection,
+    CodeSection, ConstExpr, ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType,
+    MemorySection, MemoryType, Module, StartSection, TypeSection, ValType,
 };
 
 mod function_bodies;
@@ -30,8 +30,8 @@ pub fn compile(
     let LowerResults {
         statements,
         mut functions,
-        declarations: _,
-        ty_declarations: _,
+        declarations,
+        ty_declarations,
     } = lower_code(module_name, source_name, contents)?;
     let main = LinearFunction {
         id: FunctionID::new(),
@@ -44,8 +44,20 @@ pub fn compile(
     let mut ty_section = TypeSection::new();
     let mut fn_section = FunctionSection::new();
     let mut codes = CodeSection::new();
+    let mut globals = GlobalSection::new();
     let mut exports = ExportSection::new();
     let mut memories = MemorySection::new();
+
+    let stack_pointer = 0;
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        },
+        // TODO
+        &ConstExpr::i32_const(2048),
+    );
 
     let mut function_id_to_idx = HashMap::new();
     let mut type_index = 0;
@@ -55,7 +67,12 @@ pub fn compile(
         type_index += 1;
     }
     for function in functions.iter() {
-        codes.function(&function_bodies::encode(&function_id_to_idx, &function));
+        codes.function(&function_bodies::encode(
+            &function_id_to_idx,
+            &ty_declarations,
+            stack_pointer,
+            &function,
+        ));
     }
 
     memories.memory(MemoryType {
@@ -71,6 +88,7 @@ pub fn compile(
     module.section(&ty_section);
     module.section(&fn_section);
     module.section(&memories);
+    module.section(&globals);
     module.section(&exports);
     if is_start_function {
         module.section(&StartSection { function_index: 0 });
