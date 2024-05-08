@@ -188,9 +188,8 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                 for node in else_branch.iter() {
                     encode_node(ctx, node);
                 }
-            } else {
-                ctx.instructions.push(Instruction::End);
             }
+            ctx.instructions.push(Instruction::End);
         }
         LinearNodeValue::Loop(inner) => {
             ctx.instructions.push(Instruction::Loop(BlockType::Empty));
