@@ -16,6 +16,7 @@ mod generator_local_storage;
 #[derive(Debug)]
 pub struct LinearFunction {
     pub id: FunctionID,
+    pub params: Vec<PhysicalType>,
     pub returns: Option<PhysicalType>,
     pub body: Vec<LinearNode>,
 }
@@ -51,6 +52,11 @@ pub fn linearize_function(
     LinearFunction {
         id: function.id,
         body,
+        params: function
+            .params
+            .iter()
+            .map(|p| expr_ty_to_physical(p))
+            .collect(),
         returns: match &function.body.ty {
             ExpressionType::Void | ExpressionType::Unreachable => None,
             return_ty => Some(expr_ty_to_physical(return_ty)),
@@ -1941,7 +1947,9 @@ fn layout_type(
 
 pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
     match ty {
-        ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
+        ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => {
+            unreachable!("{ty:?}")
+        }
         ExpressionType::Primitive(p) => PhysicalType::Primitive(primitive_to_physical(*p)),
         ExpressionType::InstanceOf(id) => PhysicalType::Referenced(*id),
         ExpressionType::Collection(c) => PhysicalType::Collection(match c {

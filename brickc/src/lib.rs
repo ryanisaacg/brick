@@ -38,6 +38,7 @@ pub fn compile(
     let main = LinearFunction {
         id: FunctionID::new(),
         body: statements,
+        params: Vec::new(),
         returns: statements_ty,
     };
     functions.insert(0, main);

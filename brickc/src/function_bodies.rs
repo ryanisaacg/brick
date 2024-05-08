@@ -20,7 +20,7 @@ pub fn encode(
 
         function_id_to_idx,
         register_to_local: HashMap::new(),
-        local_index: 0,
+        local_index: func.params.len() as u32,
         variable_locations: HashMap::new(),
         stack_size: 0,
         last_loop_depth: 0,
@@ -56,8 +56,9 @@ struct Context<'a> {
     function_id_to_idx: &'a HashMap<FunctionID, u32>,
     stackptr_global_idx: u32,
     declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
-    // Temp
+    // Result
     instructions: Vec<Instruction<'a>>,
+    // Temp
     register_to_local: HashMap<RegisterID, u32>,
     local_index: u32,
     variable_locations: HashMap<VariableID, i32>,
@@ -68,7 +69,9 @@ struct Context<'a> {
 fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
     match &node.value {
         LinearNodeValue::HeapAlloc(_) => { /* TODO */ }
-        LinearNodeValue::Parameter(_) => { /* TODO */ }
+        LinearNodeValue::Parameter(idx) => {
+            ctx.instructions.push(Instruction::LocalGet(*idx as u32));
+        }
         LinearNodeValue::VariableInit(var_id, ty) => {
             ctx.variable_locations.insert(*var_id, ctx.stack_size);
             ctx.stack_size += ty.size(&ctx.declarations) as i32;
