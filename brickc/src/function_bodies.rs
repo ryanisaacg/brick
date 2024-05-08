@@ -198,13 +198,19 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
             ctx.instructions.push(Instruction::End);
             ctx.last_loop_depth -= 1;
         }
+        // TODO: push loop conditions back up into LIR to aovid having this mess -
+        // there's no 'break' in wasm so we're setting up a block that we can break out of
+        // from within the loop
         LinearNodeValue::Loop(inner) => {
+            ctx.instructions.push(Instruction::Block(BlockType::Empty));
             ctx.instructions.push(Instruction::Loop(BlockType::Empty));
             let prev_loop_depth = ctx.last_loop_depth;
-            ctx.last_loop_depth = 0;
+            ctx.last_loop_depth = 1;
             for node in inner.iter() {
                 encode_node(ctx, node);
             }
+            ctx.instructions.push(Instruction::Br(0));
+            ctx.instructions.push(Instruction::End);
             ctx.instructions.push(Instruction::End);
             ctx.last_loop_depth = prev_loop_depth;
         }
