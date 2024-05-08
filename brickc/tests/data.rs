@@ -4,23 +4,6 @@ use data_test_driver::TestValue;
 use wasmtime::{Engine, Func, Instance, Module, Store, Val};
 
 #[test]
-fn basic() -> anyhow::Result<()> {
-    let binary = compile("main", "main.brick", "1 + 1".to_string(), false)?.finish();
-    let engine = Engine::default();
-    let module = Module::from_binary(&engine, binary.as_slice())?;
-    let mut store = Store::new(&engine, ());
-    let imports = [];
-    let instance = Instance::new(&mut store, &module, &imports)?;
-    let func = instance
-        .get_func(&mut store, "main")
-        .context("failed to find main")?;
-    let mut results = [Val::I32(0)];
-    func.call(store, &[], &mut results)?;
-    assert_eq!(Some(2), results[0].i32());
-
-    Ok(())
-}
-
 fn data() {
     let mut working_dir = std::env::current_dir().unwrap();
     working_dir.pop();
@@ -68,22 +51,22 @@ fn look_for_value(
                 bail!("wrong result returned: {:?}", results[0])
             }
         }
-        TestValue::Int(int_val) => {
+        TestValue::Int(_) => {
             let mut results = [Val::I32(-1)];
             func.call(store, &[], &mut results)?;
 
-            if results[0].i32() == Some(*int_val as i32) {
-                Ok(TestValue::Null)
+            if let Some(int_val) = results[0].i32() {
+                Ok(TestValue::Int(int_val as i64))
             } else {
                 bail!("wrong result returned: {:?}", results[0])
             }
         }
-        TestValue::Float(float_val) => {
+        TestValue::Float(_) => {
             let mut results = [Val::F32(f32::to_bits(-1.0))];
             func.call(store, &[], &mut results)?;
 
-            if results[0].f32() == Some(*float_val as f32) {
-                Ok(TestValue::Null)
+            if let Some(int_val) = results[0].f32() {
+                Ok(TestValue::Float(int_val as f64))
             } else {
                 bail!("wrong result returned: {:?}", results[0])
             }

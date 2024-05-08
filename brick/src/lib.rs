@@ -35,7 +35,7 @@ use crate::{
 };
 
 pub mod id;
-pub use hir::{ArithmeticOp, HirNodeValue};
+pub use hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirNodeValue, UnaryLogicalOp};
 pub use interpreter::{ExternBinding, Value};
 pub use provenance::{SourceMarker, SourceRange};
 

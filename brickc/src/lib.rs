@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use brick::{
     id::FunctionID, lower_code, typecheck_module, CompileError, LinearFunction, LowerResults,
 };
@@ -45,10 +47,15 @@ pub fn compile(
     let mut exports = ExportSection::new();
     let mut memories = MemorySection::new();
 
-    let type_index = 0;
+    let mut function_id_to_idx = HashMap::new();
+    let mut type_index = 0;
     for function in functions.iter() {
         function_headers::encode(type_index, function, &mut ty_section, &mut fn_section);
-        codes.function(&function_bodies::encode(&function));
+        function_id_to_idx.insert(function.id, type_index);
+        type_index += 1;
+    }
+    for function in functions.iter() {
+        codes.function(&function_bodies::encode(&function_id_to_idx, &function));
     }
 
     memories.memory(MemoryType {
