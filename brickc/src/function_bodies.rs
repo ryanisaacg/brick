@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use brick::{
     id::{FunctionID, RegisterID, TypeID, VariableID},
     ArithmeticOp, BinaryLogicalOp, ComparisonOp, DeclaredTypeLayout, LinearFunction, LinearNode,
-    LinearNodeValue, PhysicalPrimitive, PhysicalType, UnaryLogicalOp,
+    LinearNodeValue, PhysicalCollection, PhysicalPrimitive, PhysicalType, TypeLayoutValue,
+    UnaryLogicalOp,
 };
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
@@ -13,37 +14,35 @@ pub fn encode(
     stackptr_global_idx: u32,
     func: &LinearFunction,
 ) -> Function {
-    let mut body = Context {
+    let mut ctx = Context {
         instructions: Vec::new(),
         declarations,
         stackptr_global_idx,
 
         function_id_to_idx,
         register_to_local: HashMap::new(),
+        locals: Vec::new(),
         local_index: func.params.len() as u32,
         variable_locations: HashMap::new(),
         stack_size: 0,
         last_loop_depth: 0,
     };
     for node in func.body.iter() {
-        encode_node(&mut body, node);
+        encode_node(&mut ctx, node);
     }
-    let locals = body
-        .register_to_local
-        .values()
-        .map(|idx| (*idx, ValType::I32));
+    let locals = ctx.locals.iter().cloned();
     let mut f = Function::new(locals);
     // Expand stack
     f.instruction(&Instruction::GlobalGet(stackptr_global_idx));
-    f.instruction(&Instruction::I32Const(body.stack_size));
+    f.instruction(&Instruction::I32Const(ctx.stack_size));
     f.instruction(&Instruction::I32Sub);
     f.instruction(&Instruction::GlobalSet(stackptr_global_idx));
-    for instr in body.instructions.iter() {
+    for instr in ctx.instructions.iter() {
         f.instruction(instr);
     }
     // Contract stack
     f.instruction(&Instruction::GlobalGet(stackptr_global_idx));
-    f.instruction(&Instruction::I32Const(body.stack_size));
+    f.instruction(&Instruction::I32Const(ctx.stack_size));
     f.instruction(&Instruction::I32Add);
     f.instruction(&Instruction::GlobalSet(stackptr_global_idx));
     f.instruction(&Instruction::End);
@@ -60,10 +59,20 @@ struct Context<'a> {
     instructions: Vec<Instruction<'a>>,
     // Temp
     register_to_local: HashMap<RegisterID, u32>,
+    locals: Vec<(u32, ValType)>,
     local_index: u32,
     variable_locations: HashMap<VariableID, i32>,
     stack_size: i32,
     last_loop_depth: u32,
+}
+
+impl<'a> Context<'a> {
+    fn alloc_local(&mut self, val: ValType) -> u32 {
+        let local = self.local_index;
+        self.locals.push((local, val));
+        self.local_index += 1;
+        local
+    }
 }
 
 fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
@@ -92,30 +101,13 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
             offset,
             ty,
         } => {
-            // TODO: non-prim
+            encode_node(ctx, location);
             if let PhysicalType::Primitive(prim) = ty {
-                encode_node(ctx, location);
-                let mem = MemArg {
-                    offset: *offset as u64,
-                    align: 0,
-                    memory_index: 0,
-                };
-                match prim {
-                    PhysicalPrimitive::Byte
-                    | PhysicalPrimitive::Int32
-                    | PhysicalPrimitive::PointerSize => {
-                        ctx.instructions.push(Instruction::I32Load(mem));
-                    }
-                    PhysicalPrimitive::Float32 => {
-                        ctx.instructions.push(Instruction::F32Load(mem));
-                    }
-                    PhysicalPrimitive::Int64 => {
-                        ctx.instructions.push(Instruction::I64Load(mem));
-                    }
-                    PhysicalPrimitive::Float64 => {
-                        ctx.instructions.push(Instruction::F64Load(mem));
-                    }
-                }
+                read_primitive(ctx, prim, *offset as u64);
+            } else {
+                let location_var = ctx.alloc_local(ValType::I32);
+                ctx.instructions.push(Instruction::LocalSet(location_var));
+                read_memory(ctx, ty, location_var, *offset as u64);
             }
         }
         LinearNodeValue::WriteMemory {
@@ -149,6 +141,12 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                         ctx.instructions.push(Instruction::F64Store(mem));
                     }
                 }
+            } else {
+                encode_node(ctx, location);
+                let location_var = ctx.alloc_local(ValType::I32);
+                ctx.instructions.push(Instruction::LocalSet(location_var));
+                encode_node(ctx, value);
+                write_memory(ctx, ty, location_var, *offset as u64);
             }
         }
         LinearNodeValue::MemoryCopy { source, dest, size } => { /* TODO */ }
@@ -230,8 +228,8 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
         LinearNodeValue::WriteRegister(reg_id, value) => {
             encode_node(ctx, value);
             if !ctx.register_to_local.contains_key(reg_id) {
-                ctx.register_to_local.insert(*reg_id, ctx.local_index);
-                ctx.local_index += 1;
+                let local = ctx.alloc_local(ValType::I32);
+                ctx.register_to_local.insert(*reg_id, local);
             }
             let local_idx = ctx.register_to_local[reg_id];
             ctx.instructions.push(Instruction::LocalGet(local_idx));
@@ -547,5 +545,168 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
         }
         LinearNodeValue::ConstantData(_) => { /* TODO */ }
         LinearNodeValue::Debug(_) => { /* TODO */ }
+    }
+}
+
+fn read_memory(ctx: &mut Context<'_>, ty: &PhysicalType, location_var: u32, offset: u64) {
+    ctx.instructions.push(Instruction::LocalGet(location_var));
+    match ty {
+        PhysicalType::Primitive(prim) => read_primitive(ctx, prim, offset),
+        PhysicalType::Referenced(ty_id) => {
+            let ty = &ctx.declarations[ty_id];
+            match &ty.value {
+                TypeLayoutValue::Structure(fields) => {
+                    for (_, field_offset, ty) in fields.iter().rev() {
+                        let offset = *field_offset as u64 + offset;
+                        read_memory(ctx, ty, location_var, offset);
+                    }
+                }
+                TypeLayoutValue::Interface(fields) => {
+                    let mut location = offset + (ty.size as u64);
+                    for _ in fields.iter().rev() {
+                        read_memory(ctx, &PhysicalType::FunctionPointer, location_var, location);
+                        location -= 4;
+                    }
+                    ctx.instructions.push(Instruction::LocalGet(location_var));
+                    read_primitive(ctx, &PhysicalPrimitive::PointerSize, location);
+                }
+                TypeLayoutValue::Union(_) => todo!(),
+            }
+        }
+        PhysicalType::Nullable(inner) => {
+            read_primitive(ctx, &PhysicalPrimitive::Byte, offset);
+            ctx.instructions.push(Instruction::If(BlockType::Empty));
+            // TODO: uhhhh this doesn't match the linear IR
+            read_memory(ctx, inner.as_ref(), location_var, offset + 4);
+            ctx.instructions.push(Instruction::I32Const(1));
+            ctx.instructions.push(Instruction::Else);
+            ctx.instructions.push(Instruction::I32Const(0));
+            ctx.instructions.push(Instruction::End);
+        }
+        PhysicalType::FunctionPointer => {
+            read_primitive(ctx, &PhysicalPrimitive::Int32, offset);
+        }
+        PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
+        | PhysicalType::Generator => {
+            read_primitive(ctx, &PhysicalPrimitive::PointerSize, offset + 16);
+            ctx.instructions.push(Instruction::LocalGet(location_var));
+            read_primitive(ctx, &PhysicalPrimitive::PointerSize, offset + 8);
+            ctx.instructions.push(Instruction::LocalGet(location_var));
+            read_primitive(ctx, &PhysicalPrimitive::PointerSize, offset);
+        }
+    }
+}
+
+fn read_primitive(ctx: &mut Context<'_>, ty: &PhysicalPrimitive, offset: u64) {
+    let mem = MemArg {
+        offset,
+        align: 0,
+        memory_index: 0,
+    };
+    match ty {
+        PhysicalPrimitive::Byte | PhysicalPrimitive::Int32 | PhysicalPrimitive::PointerSize => {
+            ctx.instructions.push(Instruction::I32Load(mem));
+        }
+        PhysicalPrimitive::Float32 => {
+            ctx.instructions.push(Instruction::F32Load(mem));
+        }
+        PhysicalPrimitive::Int64 => {
+            ctx.instructions.push(Instruction::I64Load(mem));
+        }
+        PhysicalPrimitive::Float64 => {
+            ctx.instructions.push(Instruction::F64Load(mem));
+        }
+    }
+}
+
+fn write_memory(ctx: &mut Context<'_>, ty: &PhysicalType, location_var: u32, offset: u64) {
+    match ty {
+        PhysicalType::Primitive(prim) => {
+            write_primitive(ctx, prim, location_var, offset);
+        }
+        PhysicalType::Referenced(id) => match &ctx.declarations[id].value {
+            TypeLayoutValue::Structure(fields) => {
+                for (_, field_offset, ty) in fields.iter() {
+                    let offset = offset + *field_offset as u64;
+                    write_memory(ctx, ty, location_var, offset);
+                }
+            }
+            TypeLayoutValue::Interface(fields) => {
+                write_primitive(ctx, &PhysicalPrimitive::PointerSize, location_var, offset);
+                let mut offset = offset + 4;
+                for _field in fields.iter() {
+                    write_primitive(ctx, &PhysicalPrimitive::PointerSize, location_var, offset);
+                    offset += 4;
+                }
+            }
+            TypeLayoutValue::Union(variants) => {
+                // TODO
+            }
+        },
+        PhysicalType::Nullable(inner) => {
+            ctx.instructions.push(Instruction::If(BlockType::Empty));
+            ctx.instructions.push(Instruction::I32Const(1));
+            write_primitive(ctx, &PhysicalPrimitive::Int32, location_var, offset);
+            write_memory(ctx, inner.as_ref(), location_var, offset + 4);
+            ctx.instructions.push(Instruction::Else);
+            ctx.instructions.push(Instruction::I32Const(0));
+            write_primitive(ctx, &PhysicalPrimitive::Int32, location_var, offset);
+            ctx.instructions.push(Instruction::End);
+        }
+        PhysicalType::FunctionPointer => {
+            write_primitive(ctx, &PhysicalPrimitive::PointerSize, location_var, offset);
+        }
+        PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
+        | PhysicalType::Generator => {
+            write_primitive(ctx, &PhysicalPrimitive::PointerSize, location_var, offset);
+            write_primitive(
+                ctx,
+                &PhysicalPrimitive::PointerSize,
+                location_var,
+                offset + 8,
+            );
+            write_primitive(
+                ctx,
+                &PhysicalPrimitive::PointerSize,
+                location_var,
+                offset + 16,
+            );
+        }
+    }
+}
+
+// TODO: don't spam locals
+fn write_primitive(ctx: &mut Context<'_>, ty: &PhysicalPrimitive, location_var: u32, offset: u64) {
+    let mem = MemArg {
+        offset,
+        align: 0,
+        memory_index: 0,
+    };
+    let swap_local = ctx.alloc_local(match ty {
+        PhysicalPrimitive::Byte | PhysicalPrimitive::Int32 | PhysicalPrimitive::PointerSize => {
+            ValType::I32
+        }
+        PhysicalPrimitive::Float32 => ValType::F32,
+        PhysicalPrimitive::Int64 => ValType::I64,
+        PhysicalPrimitive::Float64 => ValType::F64,
+    });
+    // TODO: there has to be something less goofy than this
+    ctx.instructions.push(Instruction::LocalSet(swap_local));
+    ctx.instructions.push(Instruction::LocalGet(location_var));
+    ctx.instructions.push(Instruction::LocalGet(swap_local));
+
+    match ty {
+        PhysicalPrimitive::Byte | PhysicalPrimitive::Int32 | PhysicalPrimitive::PointerSize => {
+            ctx.instructions.push(Instruction::I32Store(mem));
+        }
+        PhysicalPrimitive::Float32 => {
+            ctx.instructions.push(Instruction::F32Store(mem));
+        }
+        PhysicalPrimitive::Int64 => {
+            ctx.instructions.push(Instruction::I64Store(mem));
+        }
+        PhysicalPrimitive::Float64 => {
+            ctx.instructions.push(Instruction::F64Store(mem));
+        }
     }
 }

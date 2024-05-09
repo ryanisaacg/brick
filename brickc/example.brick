@@ -1,10 +1,8 @@
-fn incr_if_positive(a: unique i32) {
-    if *a <= 0 {
-        return;
-    };
-    *a += 1;
+struct Triple {
+    a: i32,
+    b: i32,
+    c: i32
 }
 
-let x = -3;
-incr_if_positive(unique x);
-x
+let tri = Triple { a: 10, b: 20, c: 30 };
+

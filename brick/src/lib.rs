@@ -10,8 +10,8 @@ use hir::HirModule;
 use interpreter::{Function, VM};
 use linear_ir::{expr_ty_to_physical, layout_types, linearize_function, linearize_nodes};
 pub use linear_ir::{
-    DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalPrimitive,
-    PhysicalType,
+    DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
+    PhysicalPrimitive, PhysicalType, TypeLayoutValue,
 };
 use thiserror::Error;
 pub use typecheck::StaticDeclaration;

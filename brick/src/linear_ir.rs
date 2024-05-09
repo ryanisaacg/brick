@@ -1788,6 +1788,7 @@ pub enum PhysicalType {
     Primitive(PhysicalPrimitive),
     Referenced(TypeID),
     Nullable(Box<PhysicalType>),
+    // TODO: fold into primitives
     FunctionPointer,
     Collection(PhysicalCollection),
     /// [function ID, resume point, stack ptr]
