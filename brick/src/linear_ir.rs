@@ -205,17 +205,6 @@ impl LinearNode {
             provenance: None,
         }
     }
-
-    fn memcpy(source: LinearNode, dest: LinearNode, size: LinearNode) -> LinearNode {
-        LinearNode {
-            value: LinearNodeValue::MemoryCopy {
-                source: Box::new(source),
-                dest: Box::new(dest),
-                size: Box::new(size),
-            },
-            provenance: None,
-        }
-    }
 }
 
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
@@ -240,11 +229,6 @@ pub enum LinearNodeValue {
         offset: usize,
         ty: PhysicalType,
         value: Box<LinearNode>,
-    },
-    MemoryCopy {
-        source: Box<LinearNode>,
-        dest: Box<LinearNode>,
-        size: Box<LinearNode>,
     },
 
     // TODO: just full stack machine? OR split tuple instruction
@@ -307,6 +291,7 @@ pub enum LinearNodeValue {
 #[derive(Clone, Debug)]
 pub enum LinearRuntimeFunction {
     StringConcat,
+    Memcpy,
 }
 
 impl LinearNode {
@@ -341,11 +326,6 @@ impl LinearNode {
             | LinearNodeValue::BinaryLogical(_, a, b) => {
                 callback(a);
                 callback(b);
-            }
-            LinearNodeValue::MemoryCopy { source, dest, size } => {
-                callback(source);
-                callback(dest);
-                callback(size);
             }
             LinearNodeValue::Call(func, args) => {
                 callback(func);
@@ -1553,19 +1533,22 @@ fn array_alloc_space_to_push(
                     LinearNode::heap_alloc_var(LinearNode::read_register(new_capacity_register)),
                 ),
                 // copy old buffer to new buffer
-                LinearNode::memcpy(
-                    LinearNode::read_memory(
-                        LinearNode::read_register(arr_ptr),
-                        array_offset,
-                        PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-                    ),
-                    LinearNode::read_register(buffer_register),
-                    LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Multiply,
-                        LinearNode::read_register(length_register),
-                        LinearNode::size(elem_size),
-                    ),
-                ),
+                LinearNode::new(LinearNodeValue::RuntimeCall(
+                    LinearRuntimeFunction::Memcpy,
+                    vec![
+                        LinearNode::read_register(buffer_register),
+                        LinearNode::read_memory(
+                            LinearNode::read_register(arr_ptr),
+                            array_offset,
+                            PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                        ),
+                        LinearNode::ptr_arithmetic(
+                            ArithmeticOp::Multiply,
+                            LinearNode::read_register(length_register),
+                            LinearNode::size(elem_size),
+                        ),
+                    ],
+                )),
                 // write new capacity
                 LinearNode::write_memory(
                     LinearNode::read_register(arr_ptr),

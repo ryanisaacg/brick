@@ -30,3 +30,9 @@ pub unsafe extern "C" fn brick_string_concat(
 
     memory_region
 }
+
+pub unsafe extern "C" fn brick_memcpy(dest: *mut u8, src: *const u8, len: usize) {
+    let dest_slice = std::slice::from_raw_parts_mut(dest, len);
+    let src_slice = std::slice::from_raw_parts(src, len);
+    dest_slice.copy_from_slice(src_slice);
+}
