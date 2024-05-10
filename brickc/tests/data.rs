@@ -71,32 +71,30 @@ fn look_for_value(
                 bail!("wrong result returned: {:?}", results[0])
             }
         }
-        _ => bail!("todo"),
-        /*TestValue::Nullable(expected) => {
-            let first = results.pop();
-            if first != Some(Value::Byte(1)) {
-                bail!("expected non-null marker, found {first:?}");
-            }
-            Ok(TestValue::Nullable(Box::new(look_for_value(
-                results, memory, expected,
-            )?)))
-        }
-        TestValue::String(_) => {
-            if results.len() == 2 {
-                let pointer = results.pop().unwrap();
-                let Value::Size(pointer) = pointer else {
-                    bail!("non-pointer type returned: {:?}", pointer);
-                };
-                let length = results.pop().unwrap();
-                let Value::Size(length) = length else {
-                    bail!("non-length type returned: {:?}", length);
-                };
-                let bytes = &memory[pointer..(pointer + length)];
-                let string = std::str::from_utf8(bytes)?;
-                Ok(TestValue::String(string.to_string()))
+        TestValue::Nullable(expected) => {
+            let mut results = [
+                Val::I32(-1),
+                match expected.as_ref() {
+                    TestValue::Int(_) => Val::I32(-1),
+                    TestValue::Float(_) => Val::F32(0),
+                    _ => todo!(),
+                },
+            ];
+
+            func.call(store, &[], &mut results)?;
+
+            if results[0].i32().unwrap() == 0 {
+                Ok(TestValue::Null)
+            } else if results[0].i32().unwrap() == 1 {
+                Ok(TestValue::Nullable(Box::new(match expected.as_ref() {
+                    TestValue::Int(_) => TestValue::Int(results[1].i32().unwrap() as i64),
+                    TestValue::Float(_) => TestValue::Float(results[1].f32().unwrap() as f64),
+                    _ => todo!(),
+                })))
             } else {
-                bail!("wrong number of results returned: {}", results.len());
+                bail!("non-binary result for null bit")
             }
-        }*/
+        }
+        TestValue::String(_) => bail!("todo"),
     }
 }
