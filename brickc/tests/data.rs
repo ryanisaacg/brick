@@ -1,7 +1,9 @@
 use anyhow::{bail, Context};
 use brickc::compile;
 use data_test_driver::TestValue;
-use wasmtime::{AsContextMut, Caller, Engine, Extern, Func, Instance, Linker, Module, Store, Val};
+use wasmtime::{
+    AsContextMut, Caller, Engine, Extern, Func, Instance, Linker, Memory, Module, Store, Val,
+};
 
 #[test]
 fn data() {
@@ -40,14 +42,18 @@ fn data() {
             let func = instance
                 .get_func(&mut store, "main")
                 .context("failed to find main")?;
+            let memory = instance
+                .get_memory(&mut store, "memory")
+                .context("failed to find memory")?;
 
-            look_for_value(&mut store, func, expected)
+            look_for_value(store, memory, func, expected)
         },
     );
 }
 
 fn look_for_value(
-    store: &mut Store<()>,
+    mut store: Store<()>,
+    memory: Memory,
     func: Func,
     expected: &TestValue,
 ) -> anyhow::Result<TestValue> {
@@ -99,18 +105,26 @@ fn look_for_value(
 
             func.call(store, &[], &mut results)?;
 
-            if results[0].i32().unwrap() == 0 {
+            if results[0].unwrap_i32() == 0 {
                 Ok(TestValue::Null)
-            } else if results[0].i32().unwrap() == 1 {
+            } else if results[0].unwrap_i32() == 1 {
                 Ok(TestValue::Nullable(Box::new(match expected.as_ref() {
-                    TestValue::Int(_) => TestValue::Int(results[1].i32().unwrap() as i64),
-                    TestValue::Float(_) => TestValue::Float(results[1].f32().unwrap() as f64),
+                    TestValue::Int(_) => TestValue::Int(results[1].unwrap_i32() as i64),
+                    TestValue::Float(_) => TestValue::Float(results[1].unwrap_f32() as f64),
                     _ => todo!(),
                 })))
             } else {
                 bail!("non-binary result for null bit")
             }
         }
-        TestValue::String(_) => bail!("todo"),
+        TestValue::String(_) => {
+            let mut results = [Val::I32(-1), Val::I32(-1)];
+            func.call(&mut store, &[], &mut results)?;
+            let ptr = results[0].unwrap_i32() as usize;
+            let len = results[1].unwrap_i32() as usize;
+            let slice = &memory.data(&store)[ptr..(ptr + len)];
+            let string = std::str::from_utf8(slice)?;
+            Ok(TestValue::String(string.to_string()))
+        }
     }
 }
