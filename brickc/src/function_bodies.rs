@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use brick::{
     id::{FunctionID, RegisterID, TypeID, VariableID},
     ArithmeticOp, BinaryLogicalOp, ComparisonOp, DeclaredTypeLayout, LinearFunction, LinearNode,
-    LinearNodeValue, PhysicalCollection, PhysicalPrimitive, PhysicalType, TypeLayoutValue,
-    UnaryLogicalOp,
+    LinearNodeValue, LinearRuntimeFunction, PhysicalCollection, PhysicalPrimitive, PhysicalType,
+    TypeLayoutValue, UnaryLogicalOp,
 };
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
@@ -12,12 +12,14 @@ pub fn encode(
     function_id_to_idx: &HashMap<FunctionID, u32>,
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stackptr_global_idx: u32,
+    linear_function_to_id: &HashMap<LinearRuntimeFunction, u32>,
     func: &LinearFunction,
 ) -> Function {
     let mut ctx = Context {
         instructions: Vec::new(),
         declarations,
         stackptr_global_idx,
+        linear_function_to_id,
 
         function_id_to_idx,
         register_to_local: HashMap::new(),
@@ -55,6 +57,7 @@ struct Context<'a> {
     function_id_to_idx: &'a HashMap<FunctionID, u32>,
     stackptr_global_idx: u32,
     declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
+    linear_function_to_id: &'a HashMap<LinearRuntimeFunction, u32>,
     // Result
     instructions: Vec<Instruction<'a>>,
     // Temp
@@ -149,7 +152,6 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                 write_memory(ctx, ty, location_var, *offset as u64);
             }
         }
-        LinearNodeValue::MemoryCopy { source, dest, size } => { /* TODO */ }
         LinearNodeValue::TopOfStack => {}
         LinearNodeValue::Discard => {
             ctx.instructions.push(Instruction::Drop);
@@ -172,7 +174,15 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                 other => unreachable!("{:?}", other),
             }
         }
-        LinearNodeValue::RuntimeCall(_, _) => { /* TODO */ }
+        LinearNodeValue::RuntimeCall(func, args) => {
+            for arg in args.iter() {
+                encode_node(ctx, arg);
+            }
+            let fn_id = ctx.linear_function_to_id.get(func);
+            if let Some(fn_id) = fn_id {
+                ctx.instructions.push(Instruction::Call(*fn_id));
+            }
+        }
         LinearNodeValue::Return(value) => {
             if let Some(value) = value {
                 encode_node(ctx, value);

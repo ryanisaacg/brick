@@ -288,7 +288,7 @@ pub enum LinearNodeValue {
 }
 
 // TODO: distinguish from src/runtime
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum LinearRuntimeFunction {
     StringConcat,
     Memcpy,

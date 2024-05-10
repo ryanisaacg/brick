@@ -1,7 +1,7 @@
 use anyhow::{bail, Context};
 use brickc::compile;
 use data_test_driver::TestValue;
-use wasmtime::{Engine, Func, Instance, Module, Store, Val};
+use wasmtime::{AsContextMut, Caller, Engine, Extern, Func, Instance, Linker, Module, Store, Val};
 
 #[test]
 fn data() {
@@ -19,8 +19,24 @@ fn data() {
             let engine = Engine::default();
             let module = Module::from_binary(&engine, binary.as_slice())?;
             let mut store = Store::new(&engine, ());
-            let imports = [];
-            let instance = Instance::new(&mut store, &module, &imports)?;
+            let mut linker = Linker::new(&engine);
+            linker.func_wrap(
+                "brick-runtime",
+                "brick_memcpy",
+                |mut caller: Caller<'_, ()>, dest: i32, source: i32, len: i32| {
+                    let Extern::Memory(mem) = caller.get_export("memory").unwrap() else {
+                        unreachable!();
+                    };
+                    let store = caller.as_context_mut();
+                    let mem_ptr = mem.data_ptr(store);
+                    unsafe {
+                        let dest = mem_ptr.add(dest as usize);
+                        let source = mem_ptr.add(source as usize);
+                        brick_runtime::brick_memcpy(dest, source, len as usize);
+                    }
+                },
+            )?;
+            let instance = linker.instantiate(&mut store, &module)?;
             let func = instance
                 .get_func(&mut store, "main")
                 .context("failed to find main")?;

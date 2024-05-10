@@ -6,11 +6,13 @@ use brick::{
 };
 use wasm_encoder::{
     CodeSection, ConstExpr, ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType,
-    MemorySection, MemoryType, Module, StartSection, TypeSection, ValType,
+    ImportSection, MemorySection, MemoryType, Module, StartSection, TypeSection, ValType,
 };
 
 mod function_bodies;
 mod function_headers;
+mod runtime;
+
 /**
  * Note: currently in WASM, there is only a 0-memory. However, the spec is forwards-compatible with
  * more
@@ -46,6 +48,7 @@ pub fn compile(
     let mut module = Module::new();
 
     let mut ty_section = TypeSection::new();
+    let mut import_section = ImportSection::new();
     let mut fn_section = FunctionSection::new();
     let mut codes = CodeSection::new();
     let mut globals = GlobalSection::new();
@@ -65,6 +68,9 @@ pub fn compile(
 
     let mut function_id_to_idx = HashMap::new();
     let mut type_index = 0;
+    let linear_function_to_id =
+        runtime::add_runtime_imports(&mut import_section, &mut ty_section, &mut type_index);
+    let main_index = type_index;
     for function in functions.iter() {
         function_headers::encode(type_index, function, &mut ty_section, &mut fn_section);
         function_id_to_idx.insert(function.id, type_index);
@@ -75,6 +81,7 @@ pub fn compile(
             &function_id_to_idx,
             &ty_declarations,
             stack_pointer,
+            &linear_function_to_id,
             &function,
         ));
     }
@@ -87,9 +94,10 @@ pub fn compile(
         page_size_log2: None,
     });
     exports.export("memory", ExportKind::Memory, MAIN_MEMORY);
-    exports.export("main", ExportKind::Func, 0);
+    exports.export("main", ExportKind::Func, main_index);
 
     module.section(&ty_section);
+    module.section(&import_section);
     module.section(&fn_section);
     module.section(&memories);
     module.section(&globals);
