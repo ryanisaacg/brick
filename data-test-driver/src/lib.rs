@@ -68,8 +68,13 @@ impl Display for TestSuccessOrFailure {
     }
 }
 
-fn path_display(path: &Path) -> &str {
-    path.file_name().unwrap().to_str().unwrap()
+fn path_display(path: &Path) -> String {
+    let component_count = path.components().count();
+    let mut last_two = path.components().skip(component_count - 2).take(2);
+    let folder = last_two.next().unwrap().as_os_str().to_str().unwrap();
+    let path = last_two.next().unwrap().as_os_str().to_str().unwrap();
+
+    format!("{folder}/{path}")
 }
 
 pub fn test_folder(
