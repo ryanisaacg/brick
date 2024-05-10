@@ -38,13 +38,13 @@ pub fn encode(
     f.instruction(&Instruction::I32Sub);
     f.instruction(&Instruction::GlobalSet(stackptr_global_idx));
     for instr in ctx.instructions.iter() {
+        if matches!(instr, Instruction::Return) {
+            contract_stack(&mut f, stackptr_global_idx, ctx.stack_size);
+        }
         f.instruction(instr);
     }
     // Contract stack
-    f.instruction(&Instruction::GlobalGet(stackptr_global_idx));
-    f.instruction(&Instruction::I32Const(ctx.stack_size));
-    f.instruction(&Instruction::I32Add);
-    f.instruction(&Instruction::GlobalSet(stackptr_global_idx));
+    contract_stack(&mut f, stackptr_global_idx, ctx.stack_size);
     f.instruction(&Instruction::End);
 
     f
@@ -709,4 +709,11 @@ fn write_primitive(ctx: &mut Context<'_>, ty: &PhysicalPrimitive, location_var: 
             ctx.instructions.push(Instruction::F64Store(mem));
         }
     }
+}
+
+fn contract_stack(f: &mut Function, stackptr_global_idx: u32, stack_size: i32) {
+    f.instruction(&Instruction::GlobalGet(stackptr_global_idx));
+    f.instruction(&Instruction::I32Const(stack_size));
+    f.instruction(&Instruction::I32Add);
+    f.instruction(&Instruction::GlobalSet(stackptr_global_idx));
 }
