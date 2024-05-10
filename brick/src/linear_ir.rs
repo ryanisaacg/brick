@@ -210,7 +210,6 @@ impl LinearNode {
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
 #[derive(Clone, Debug)]
 pub enum LinearNodeValue {
-    // TODO: how to handle function parameters?
     /// Returns the heap pointer
     HeapAlloc(Box<LinearNode>),
     /// Each parameter may only appear once in a given method body
@@ -834,13 +833,11 @@ fn lower_expression(
                 LinearNode::write_register(length_register, length),
                 LinearNode::write_register(
                     buffer_register,
-                    LinearNode::new(LinearNodeValue::HeapAlloc(Box::new(
-                        LinearNode::ptr_arithmetic(
-                            ArithmeticOp::Multiply,
-                            LinearNode::size(size),
-                            LinearNode::read_register(length_register),
-                        ),
-                    ))),
+                    LinearNode::heap_alloc_var(LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Multiply,
+                        LinearNode::size(size),
+                        LinearNode::read_register(length_register),
+                    )),
                 ),
                 LinearNode::write_register(index_register, LinearNode::size(0)),
                 LinearNode::new(LinearNodeValue::Loop(vec![LinearNode::if_node(

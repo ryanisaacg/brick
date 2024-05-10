@@ -12,6 +12,7 @@ pub fn encode(
     function_id_to_idx: &HashMap<FunctionID, u32>,
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     stackptr_global_idx: u32,
+    allocptr_global_idx: u32,
     linear_function_to_id: &HashMap<LinearRuntimeFunction, u32>,
     func: &LinearFunction,
 ) -> Function {
@@ -19,6 +20,7 @@ pub fn encode(
         instructions: Vec::new(),
         declarations,
         stackptr_global_idx,
+        allocptr_global_idx,
         linear_function_to_id,
 
         function_id_to_idx,
@@ -56,6 +58,7 @@ struct Context<'a> {
     // Environment
     function_id_to_idx: &'a HashMap<FunctionID, u32>,
     stackptr_global_idx: u32,
+    allocptr_global_idx: u32,
     declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
     linear_function_to_id: &'a HashMap<LinearRuntimeFunction, u32>,
     // Result
@@ -80,7 +83,21 @@ impl<'a> Context<'a> {
 
 fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
     match &node.value {
-        LinearNodeValue::HeapAlloc(_) => { /* TODO */ }
+        LinearNodeValue::HeapAlloc(alloc_size) => {
+            ctx.instructions
+                .push(Instruction::GlobalGet(ctx.allocptr_global_idx));
+            let original_pointer = ctx.alloc_local(ValType::I32);
+            ctx.instructions
+                .push(Instruction::LocalSet(original_pointer));
+            encode_node(ctx, alloc_size);
+            ctx.instructions
+                .push(Instruction::GlobalGet(ctx.allocptr_global_idx));
+            ctx.instructions.push(Instruction::I32Add);
+            ctx.instructions
+                .push(Instruction::GlobalSet(ctx.allocptr_global_idx));
+            ctx.instructions
+                .push(Instruction::LocalGet(original_pointer));
+        }
         LinearNodeValue::Parameter(idx) => {
             ctx.instructions.push(Instruction::LocalGet(*idx as u32));
         }
@@ -242,7 +259,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                 ctx.register_to_local.insert(*reg_id, local);
             }
             let local_idx = ctx.register_to_local[reg_id];
-            ctx.instructions.push(Instruction::LocalGet(local_idx));
+            ctx.instructions.push(Instruction::LocalSet(local_idx));
         }
         LinearNodeValue::ReadRegister(reg_id) => {
             let local_idx = ctx.register_to_local[reg_id];

@@ -65,6 +65,16 @@ pub fn compile(
         // TODO
         &ConstExpr::i32_const(2048),
     );
+    let alloc_pointer = 1;
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        },
+        // TODO
+        &ConstExpr::i32_const(4),
+    );
 
     let mut function_id_to_idx = HashMap::new();
     let mut type_index = 0;
@@ -81,6 +91,7 @@ pub fn compile(
             &function_id_to_idx,
             &ty_declarations,
             stack_pointer,
+            alloc_pointer,
             &linear_function_to_id,
             &function,
         ));
