@@ -136,7 +136,6 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
             ty,
             value,
         } => {
-            // TODO: non-prim
             if let PhysicalType::Primitive(prim) = ty {
                 encode_node(ctx, location);
                 encode_node(ctx, value);
@@ -223,9 +222,6 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
             ctx.instructions.push(Instruction::End);
             ctx.last_loop_depth -= 1;
         }
-        // TODO: push loop conditions back up into LIR to aovid having this mess -
-        // there's no 'break' in wasm so we're setting up a block that we can break out of
-        // from within the loop
         LinearNodeValue::Loop(inner) => {
             ctx.instructions.push(Instruction::Block(BlockType::Empty));
             ctx.instructions.push(Instruction::Loop(BlockType::Empty));
@@ -266,7 +262,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
             ctx.instructions.push(Instruction::LocalGet(local_idx));
         }
         LinearNodeValue::KillRegister(_) => {
-            // TODO: efficient register <-> local allocation
+            // TODO (later): efficient register <-> local allocation
         }
         LinearNodeValue::Arithmetic(operator, prim, lhs, rhs) => {
             encode_node(ctx, lhs);
@@ -553,11 +549,11 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
             ctx.instructions.push(Instruction::I32Const(*value as i32));
         }
         LinearNodeValue::Int(value) => {
-            // TODO: don't cast
+            // TODO (later): don't cast
             ctx.instructions.push(Instruction::I32Const(*value as i32));
         }
         LinearNodeValue::Float(value) => {
-            // TODO: don't cast
+            // TODO (later): don't cast
             ctx.instructions.push(Instruction::F32Const(*value as f32));
         }
         LinearNodeValue::CharLiteral(value) => {
