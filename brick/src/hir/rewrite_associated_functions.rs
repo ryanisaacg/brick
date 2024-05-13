@@ -87,6 +87,7 @@ pub fn rewrite(declarations: &HashMap<TypeID, &StaticDeclaration>, root: &mut Hi
             let runtime_fns = match col_ty {
                 CollectionType::Array(_) => array_runtime_functions(),
                 CollectionType::Dict(_, _) => dictionary_runtime_functions(),
+                CollectionType::String => todo!(),
             };
 
             let runtime_fn = runtime_fns.get(func_name).unwrap();

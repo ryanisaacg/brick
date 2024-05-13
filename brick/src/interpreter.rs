@@ -700,6 +700,10 @@ fn write(
             write_primitive(op_stack, memory, location + 8);
             write_primitive(op_stack, memory, location + 16);
         }
+        PhysicalType::Collection(PhysicalCollection::String) => {
+            write_primitive(op_stack, memory, location);
+            write_primitive(op_stack, memory, location + 8);
+        }
         PhysicalType::Pointer | PhysicalType::FunctionPointer => {
             write_primitive(op_stack, memory, location);
         }
@@ -781,6 +785,15 @@ fn read(
                 location + 16,
                 PhysicalPrimitive::PointerSize,
             );
+            read_primitive(
+                op_stack,
+                memory,
+                location + 8,
+                PhysicalPrimitive::PointerSize,
+            );
+            read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
+        }
+        PhysicalType::Collection(PhysicalCollection::String) => {
             read_primitive(
                 op_stack,
                 memory,
