@@ -301,6 +301,7 @@ fn lower_node(decls: &HashMap<TypeID, &StaticDeclaration>, node: &AstNode<'_>) -
                 ExpressionType::Collection(collection) => match collection {
                     CollectionType::Dict(_, _) => HirNodeValue::DictIndex(left, right),
                     CollectionType::Array(_) => HirNodeValue::ArrayIndex(left, right),
+                    CollectionType::String => todo!(),
                 },
                 _ => unreachable!(),
             }

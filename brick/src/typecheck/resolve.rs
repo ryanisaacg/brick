@@ -206,7 +206,7 @@ pub fn resolve_type_expr(
             "i64" => ExpressionType::Primitive(PrimitiveType::Int64),
             "f64" => ExpressionType::Primitive(PrimitiveType::Float64),
             "char" => ExpressionType::Primitive(PrimitiveType::Char),
-            "string" => ExpressionType::Primitive(PrimitiveType::String),
+            "string" => ExpressionType::Collection(CollectionType::String),
             other => ExpressionType::InstanceOf(
                 *name_to_type_id
                     .get(other)

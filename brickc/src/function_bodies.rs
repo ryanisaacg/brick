@@ -645,6 +645,10 @@ pub fn walk_vals_read_order(
             callback(ValType::I32, offset + 8);
             callback(ValType::I32, offset);
         }
+        PhysicalType::Collection(PhysicalCollection::String) => {
+            callback(ValType::I32, offset + 8);
+            callback(ValType::I32, offset);
+        }
     }
 }
 
@@ -710,6 +714,10 @@ pub fn walk_vals_write_order(
             callback(ValType::I32, offset);
             callback(ValType::I32, offset + 8);
             callback(ValType::I32, offset + 16);
+        }
+        PhysicalType::Collection(PhysicalCollection::String) => {
+            callback(ValType::I32, offset);
+            callback(ValType::I32, offset + 8);
         }
     }
 }

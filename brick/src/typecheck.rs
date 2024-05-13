@@ -60,6 +60,7 @@ impl ExpressionType {
 pub enum CollectionType {
     Array(Box<ExpressionType>),
     Dict(Box<ExpressionType>, Box<ExpressionType>),
+    String,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -223,7 +224,6 @@ pub fn find_func<'a>(
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PrimitiveType {
     Char,
-    String, // TODO: should this be a non-primitive type?
     Int32,
     Float32,
     Int64,
@@ -613,7 +613,7 @@ fn typecheck_expression<'a>(
                 ExpressionType::Primitive(PrimitiveType::Float64)
             }
         }
-        AstNodeValue::StringLiteral(_) => ExpressionType::Primitive(PrimitiveType::String),
+        AstNodeValue::StringLiteral(_) => ExpressionType::Collection(CollectionType::String),
         AstNodeValue::CharLiteral(_) => ExpressionType::Primitive(PrimitiveType::Char),
         AstNodeValue::Null => ExpressionType::Null,
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
@@ -665,9 +665,9 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            if left_ty != &ExpressionType::Primitive(PrimitiveType::String) {
+            if left_ty != &ExpressionType::Collection(CollectionType::String) {
                 errors.push(TypecheckError::TypeMismatch {
-                    expected: ExpressionType::Primitive(PrimitiveType::String),
+                    expected: ExpressionType::Collection(CollectionType::String),
                     received: left_ty.clone(),
                 });
             }
@@ -678,9 +678,9 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            if right_ty != &ExpressionType::Primitive(PrimitiveType::String) {
+            if right_ty != &ExpressionType::Collection(CollectionType::String) {
                 errors.push(TypecheckError::TypeMismatch {
-                    expected: ExpressionType::Primitive(PrimitiveType::String),
+                    expected: ExpressionType::Collection(CollectionType::String),
                     received: right_ty.clone(),
                 });
             }
@@ -689,7 +689,7 @@ fn typecheck_expression<'a>(
                 return Err(errors);
             }
 
-            ExpressionType::Primitive(PrimitiveType::String)
+            ExpressionType::Collection(CollectionType::String)
         }
         AstNodeValue::BinExpr(BinOp::NullChaining, left, right) => {
             let left = typecheck_expression(
@@ -1553,7 +1553,8 @@ fn find_generic_bindings(
             | ExpressionType::Primitive(_)
             | ExpressionType::InstanceOf(_)
             | ExpressionType::ReferenceTo(_)
-            | ExpressionType::Null,
+            | ExpressionType::Null
+            | ExpressionType::Collection(CollectionType::String),
             _,
         ) => {}
         (

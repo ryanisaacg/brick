@@ -6,8 +6,8 @@ use crate::{
     provenance::SourceRange,
     runtime::{info_for_function, RuntimeFunction},
     typecheck::{
-        find_func, is_assignable_to, ExpressionType, PrimitiveType, StaticDeclaration,
-        TypecheckedFile,
+        find_func, is_assignable_to, CollectionType, ExpressionType, PrimitiveType,
+        StaticDeclaration, TypecheckedFile,
     },
 };
 
@@ -376,11 +376,11 @@ impl HirNode {
             }
             HirNodeValue::StringConcat(left, right) => {
                 callback(
-                    Some(&ExpressionType::Primitive(PrimitiveType::String)),
+                    Some(&ExpressionType::Collection(CollectionType::String)),
                     left,
                 );
                 callback(
-                    Some(&ExpressionType::Primitive(PrimitiveType::String)),
+                    Some(&ExpressionType::Collection(CollectionType::String)),
                     right,
                 );
             }
@@ -572,11 +572,11 @@ impl HirNode {
             }
             HirNodeValue::StringConcat(left, right) => {
                 callback(
-                    Some(&ExpressionType::Primitive(PrimitiveType::String)),
+                    Some(&ExpressionType::Collection(CollectionType::String)),
                     left,
                 );
                 callback(
-                    Some(&ExpressionType::Primitive(PrimitiveType::String)),
+                    Some(&ExpressionType::Collection(CollectionType::String)),
                     right,
                 );
             }

@@ -1696,6 +1696,7 @@ fn expression_type_size(
         ExpressionType::Pointer(_, _) => POINTER_SIZE,
         ExpressionType::Collection(CollectionType::Array(_)) => POINTER_SIZE * 3,
         ExpressionType::Collection(CollectionType::Dict(..)) => POINTER_SIZE * 3,
+        ExpressionType::Collection(CollectionType::String) => POINTER_SIZE * 2,
         ExpressionType::Null => 1,
         ExpressionType::Nullable(inner) => {
             NULL_TAG_SIZE + expression_type_size(declarations, inner)
@@ -1711,7 +1712,6 @@ fn primitive_to_physical(p: PrimitiveType) -> PhysicalPrimitive {
     match p {
         // TODO: should chars be 4 byte or 1 byte
         PrimitiveType::Char => PhysicalPrimitive::Byte,
-        PrimitiveType::String => PhysicalPrimitive::PointerSize,
         PrimitiveType::Int32 => PhysicalPrimitive::Int32,
         PrimitiveType::Float32 => PhysicalPrimitive::Float32,
         PrimitiveType::Int64 => PhysicalPrimitive::Int64,
@@ -1779,6 +1779,7 @@ pub enum PhysicalType {
 pub enum PhysicalCollection {
     Array,
     Dict,
+    String,
 }
 
 impl PhysicalType {
@@ -1791,6 +1792,7 @@ impl PhysicalType {
             PhysicalType::Collection(ty) => match ty {
                 PhysicalCollection::Array => POINTER_SIZE * 3,
                 PhysicalCollection::Dict => POINTER_SIZE * 3,
+                PhysicalCollection::String => POINTER_SIZE * 2,
             },
             PhysicalType::Generator => POINTER_SIZE * 3,
         }
@@ -1915,6 +1917,9 @@ fn layout_type(
         ExpressionType::Collection(CollectionType::Dict(_, _)) => {
             PhysicalType::Collection(PhysicalCollection::Dict)
         }
+        ExpressionType::Collection(CollectionType::String) => {
+            PhysicalType::Collection(PhysicalCollection::String)
+        }
         ExpressionType::Nullable(inner) => {
             let inner = layout_type(declarations, layouts, inner);
             PhysicalType::Nullable(Box::new(inner))
@@ -1936,6 +1941,7 @@ pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         ExpressionType::Collection(c) => PhysicalType::Collection(match c {
             CollectionType::Array(_) => PhysicalCollection::Array,
             CollectionType::Dict(_, _) => PhysicalCollection::Dict,
+            CollectionType::String => PhysicalCollection::String,
         }),
         ExpressionType::Pointer(_, _) => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
         ExpressionType::Nullable(inner) => {
