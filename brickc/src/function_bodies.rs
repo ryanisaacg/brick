@@ -572,61 +572,56 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
 }
 
 fn read_memory(ctx: &mut Context<'_>, ty: &PhysicalType, location_var: u32, offset: u64) {
-    walk_vals_read_order(ctx, ty, offset, &mut |ctx, val_ty, offset| {
+    walk_vals_read_order(&ctx.declarations, ty, offset, &mut |val_ty, offset| {
         ctx.instructions.push(Instruction::LocalGet(location_var));
         read_primitive(ctx, val_ty, offset);
     });
 }
 
 fn walk_vals_read_order(
-    ctx: &mut Context<'_>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     ty: &PhysicalType,
     offset: u64,
-    callback: &mut dyn FnMut(&mut Context<'_>, ValType, u64),
+    callback: &mut dyn FnMut(ValType, u64),
 ) {
     match ty {
-        PhysicalType::Primitive(prim) => callback(ctx, primitive_to_val_type(*prim), offset),
-        PhysicalType::FunctionPointer => callback(ctx, ValType::I32, offset),
+        PhysicalType::Primitive(prim) => callback(primitive_to_val_type(*prim), offset),
+        PhysicalType::FunctionPointer => callback(ValType::I32, offset),
         PhysicalType::Referenced(ty_id) => {
-            let ty = &ctx.declarations[ty_id];
+            let ty = &declarations[ty_id];
             match &ty.value {
                 TypeLayoutValue::Structure(fields) => {
                     for (_, field_offset, ty) in fields.iter().rev() {
                         let offset = *field_offset as u64 + offset;
-                        walk_vals_read_order(ctx, ty, offset, callback);
+                        walk_vals_read_order(declarations, ty, offset, callback);
                     }
                 }
                 TypeLayoutValue::Interface(fields) => {
                     let mut location = offset + (ty.size as u64);
                     for _ in fields.iter().rev() {
-                        callback(ctx, ValType::I32, location);
+                        callback(ValType::I32, location);
                         location -= 4;
                     }
-                    callback(ctx, ValType::I32, offset);
+                    callback(ValType::I32, offset);
                 }
                 TypeLayoutValue::Union(_) => todo!(),
             }
         }
         PhysicalType::Nullable(inner) => {
+            // TODO: uhhhh this doesn't match the linear IR
             walk_vals_read_order(
-                ctx,
+                declarations,
                 &PhysicalType::Primitive(PhysicalPrimitive::Byte),
                 offset,
                 callback,
             );
-            ctx.instructions.push(Instruction::If(BlockType::Empty));
-            // TODO: uhhhh this doesn't match the linear IR
-            walk_vals_read_order(ctx, inner.as_ref(), offset + 4, callback);
-            ctx.instructions.push(Instruction::I32Const(1));
-            ctx.instructions.push(Instruction::Else);
-            ctx.instructions.push(Instruction::I32Const(0));
-            ctx.instructions.push(Instruction::End);
+            walk_vals_read_order(declarations, inner.as_ref(), offset + 4, callback);
         }
         PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
         | PhysicalType::Generator => {
-            callback(ctx, ValType::I32, offset + 16);
-            callback(ctx, ValType::I32, offset + 8);
-            callback(ctx, ValType::I32, offset);
+            callback(ValType::I32, offset + 16);
+            callback(ValType::I32, offset + 8);
+            callback(ValType::I32, offset);
         }
     }
 }
@@ -647,37 +642,36 @@ fn read_primitive(ctx: &mut Context<'_>, ty: ValType, offset: u64) {
 }
 
 fn write_memory(ctx: &mut Context<'_>, ty: &PhysicalType, location_var: u32, offset: u64) {
-    walk_vals_write_order(ctx, ty, location_var, offset, &mut |ctx, val_ty, offset| {
+    walk_vals_write_order(&ctx.declarations, ty, offset, &mut |val_ty, offset| {
         write_primitive(ctx, val_ty, location_var, offset);
     });
 }
 
 fn walk_vals_write_order(
-    ctx: &mut Context<'_>,
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     ty: &PhysicalType,
-    location_var: u32,
     offset: u64,
-    callback: &mut dyn FnMut(&mut Context<'_>, ValType, u64),
+    callback: &mut dyn FnMut(ValType, u64),
 ) {
     match ty {
         PhysicalType::Primitive(prim) => {
-            write_primitive(ctx, primitive_to_val_type(*prim), location_var, offset);
+            callback(primitive_to_val_type(*prim), offset);
         }
         PhysicalType::FunctionPointer => {
-            write_primitive(ctx, ValType::I32, location_var, offset);
+            callback(ValType::I32, offset);
         }
-        PhysicalType::Referenced(id) => match &ctx.declarations[id].value {
+        PhysicalType::Referenced(id) => match &declarations[id].value {
             TypeLayoutValue::Structure(fields) => {
                 for (_, field_offset, ty) in fields.iter() {
                     let offset = offset + *field_offset as u64;
-                    walk_vals_write_order(ctx, ty, location_var, offset, callback);
+                    walk_vals_write_order(declarations, ty, offset, callback);
                 }
             }
             TypeLayoutValue::Interface(fields) => {
-                write_primitive(ctx, ValType::I32, location_var, offset);
+                callback(ValType::I32, offset);
                 let mut offset = offset + 4;
                 for _field in fields.iter() {
-                    write_primitive(ctx, ValType::I32, location_var, offset);
+                    callback(ValType::I32, offset);
                     offset += 4;
                 }
             }
@@ -686,20 +680,14 @@ fn walk_vals_write_order(
             }
         },
         PhysicalType::Nullable(inner) => {
-            ctx.instructions.push(Instruction::If(BlockType::Empty));
-            ctx.instructions.push(Instruction::I32Const(1));
-            write_primitive(ctx, ValType::I32, location_var, offset);
-            walk_vals_write_order(ctx, inner.as_ref(), location_var, offset + 4, callback);
-            ctx.instructions.push(Instruction::Else);
-            ctx.instructions.push(Instruction::I32Const(0));
-            write_primitive(ctx, ValType::I32, location_var, offset);
-            ctx.instructions.push(Instruction::End);
+            callback(ValType::I32, offset);
+            walk_vals_write_order(declarations, inner.as_ref(), offset + 4, callback);
         }
         PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
         | PhysicalType::Generator => {
-            write_primitive(ctx, ValType::I32, location_var, offset);
-            write_primitive(ctx, ValType::I32, location_var, offset + 8);
-            write_primitive(ctx, ValType::I32, location_var, offset + 16);
+            callback(ValType::I32, offset);
+            callback(ValType::I32, offset + 8);
+            callback(ValType::I32, offset + 16);
         }
     }
 }
