@@ -43,7 +43,7 @@ impl Display for TestSuccessOrFailure {
         match self {
             TestSuccessOrFailure::Succeeded(path) => write!(f, "{}: Succeeded", path_display(path)),
             TestSuccessOrFailure::FailsToCompile(path, error) => {
-                write!(f, "{}: Compilation failed\n{error}\n", path_display(path))
+                write!(f, "{}: Compilation failed\n{error:?}\n", path_display(path))
             }
             TestSuccessOrFailure::CompiledButShouldnt(path) => write!(
                 f,
