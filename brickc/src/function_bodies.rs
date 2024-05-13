@@ -16,17 +16,32 @@ pub fn encode(
     linear_function_to_id: &HashMap<LinearRuntimeFunction, u32>,
     func: &LinearFunction,
 ) -> Function {
+    let mut parameter_start_idx = 0;
+    let parameter_starts = func
+        .params
+        .iter()
+        .map(|param| {
+            let start_idx = parameter_start_idx;
+            walk_vals_read_order(declarations, param, 0, &mut |_, _| {
+                parameter_start_idx += 1;
+            });
+            start_idx
+        })
+        .collect();
     let mut ctx = Context {
-        instructions: Vec::new(),
+        func,
         declarations,
         stackptr_global_idx,
         allocptr_global_idx,
         linear_function_to_id,
+        parameter_starts,
+
+        instructions: Vec::new(),
 
         function_id_to_idx,
         register_to_local: HashMap::new(),
         locals: Vec::new(),
-        local_index: func.params.len() as u32,
+        local_index: parameter_start_idx,
         variable_locations: HashMap::new(),
         stack_size: 0,
         last_loop_depth: 0,
@@ -56,11 +71,13 @@ pub fn encode(
 
 struct Context<'a> {
     // Environment
+    func: &'a LinearFunction,
     function_id_to_idx: &'a HashMap<FunctionID, u32>,
     stackptr_global_idx: u32,
     allocptr_global_idx: u32,
     declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
     linear_function_to_id: &'a HashMap<LinearRuntimeFunction, u32>,
+    parameter_starts: Vec<u32>,
     // Result
     instructions: Vec<Instruction<'a>>,
     // Temp
@@ -99,7 +116,12 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                 .push(Instruction::LocalGet(original_pointer));
         }
         LinearNodeValue::Parameter(idx) => {
-            ctx.instructions.push(Instruction::LocalGet(*idx as u32));
+            let mut start = ctx.parameter_starts[*idx];
+            let ty = ctx.func.params[*idx].clone();
+            walk_vals_read_order(&ctx.declarations, &ty, 0, &mut |_, _| {
+                ctx.instructions.push(Instruction::LocalGet(start));
+                start += 1;
+            });
         }
         LinearNodeValue::VariableInit(var_id, ty) => {
             ctx.variable_locations.insert(*var_id, ctx.stack_size);
@@ -578,7 +600,7 @@ fn read_memory(ctx: &mut Context<'_>, ty: &PhysicalType, location_var: u32, offs
     });
 }
 
-fn walk_vals_read_order(
+pub fn walk_vals_read_order(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     ty: &PhysicalType,
     offset: u64,

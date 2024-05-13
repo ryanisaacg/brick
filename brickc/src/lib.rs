@@ -82,7 +82,13 @@ pub fn compile(
         runtime::add_runtime_imports(&mut import_section, &mut ty_section, &mut type_index);
     let main_index = type_index;
     for function in functions.iter() {
-        function_headers::encode(type_index, function, &mut ty_section, &mut fn_section);
+        function_headers::encode(
+            &ty_declarations,
+            type_index,
+            function,
+            &mut ty_section,
+            &mut fn_section,
+        );
         function_id_to_idx.insert(function.id, type_index);
         type_index += 1;
     }

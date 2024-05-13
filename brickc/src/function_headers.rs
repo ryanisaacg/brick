@@ -1,17 +1,21 @@
-use brick::{LinearFunction, PhysicalPrimitive, PhysicalType};
+use std::collections::HashMap;
+
+use brick::{id::TypeID, DeclaredTypeLayout, LinearFunction, PhysicalPrimitive, PhysicalType};
 use wasm_encoder::{FunctionSection, TypeSection, ValType};
 
+use crate::function_bodies::walk_vals_read_order;
+
 pub fn encode(
+    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     fn_index: u32,
     func: &LinearFunction,
     ty_section: &mut TypeSection,
     fn_section: &mut FunctionSection,
 ) {
-    let params = func.params.iter().map(|p| match p {
-        PhysicalType::Primitive(p) => prim_to_val(*p),
-        // TODO
-        _ => ValType::I32,
-    });
+    let mut params = Vec::new();
+    for param in func.params.iter() {
+        walk_vals_read_order(declarations, param, 0, &mut |p, _| params.push(p));
+    }
     let results = match func.returns {
         None => vec![],
         Some(PhysicalType::Primitive(prim)) => vec![prim_to_val(prim)],
