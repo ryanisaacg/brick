@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use brick::{id::TypeID, DeclaredTypeLayout, LinearFunction, PhysicalPrimitive, PhysicalType};
-use wasm_encoder::{FunctionSection, TypeSection, ValType};
+use brick::{id::TypeID, DeclaredTypeLayout, LinearFunction};
+use wasm_encoder::{FunctionSection, TypeSection};
 
-use crate::function_bodies::walk_vals_read_order;
+use crate::function_bodies::{walk_vals_read_order, walk_vals_write_order};
 
 pub fn encode(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
@@ -16,23 +16,10 @@ pub fn encode(
     for param in func.params.iter() {
         walk_vals_read_order(declarations, param, 0, &mut |p, _| params.push(p));
     }
-    let results = match func.returns {
-        None => vec![],
-        Some(PhysicalType::Primitive(prim)) => vec![prim_to_val(prim)],
-        // TODO
-        _ => vec![],
-    };
+    let mut results = Vec::new();
+    if let Some(return_ty) = &func.returns {
+        walk_vals_write_order(declarations, return_ty, 0, &mut |p, _| results.push(p));
+    }
     ty_section.function(params, results);
     fn_section.function(fn_index);
-}
-
-fn prim_to_val(prim: PhysicalPrimitive) -> ValType {
-    match prim {
-        PhysicalPrimitive::Byte | PhysicalPrimitive::Int32 | PhysicalPrimitive::PointerSize => {
-            ValType::I32
-        }
-        PhysicalPrimitive::Float32 => ValType::F32,
-        PhysicalPrimitive::Int64 => ValType::I64,
-        PhysicalPrimitive::Float64 => ValType::F64,
-    }
 }

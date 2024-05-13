@@ -669,7 +669,7 @@ fn write_memory(ctx: &mut Context<'_>, ty: &PhysicalType, location_var: u32, off
     });
 }
 
-fn walk_vals_write_order(
+pub fn walk_vals_write_order(
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     ty: &PhysicalType,
     offset: u64,
