@@ -8,7 +8,7 @@ use std::{
 use borrowck::BorrowError;
 use hir::HirModule;
 use interpreter::VM;
-use linear_ir::{layout_types, linearize_function, linearize_nodes};
+use linear_ir::{layout_types, linearize_function, LinearContext};
 use thiserror::Error;
 pub use typecheck::StaticDeclaration;
 use typecheck::{resolve::resolve_module, typecheck};
@@ -119,13 +119,7 @@ pub fn interpret_code(
         }
     });
 
-    let mut stack_entries = HashMap::new();
-    let statements = linearize_nodes(
-        &ty_declarations,
-        &mut stack_entries,
-        &mut 0,
-        statements.into(),
-    );
+    let statements = LinearContext::new(&ty_declarations).linearize_nodes(statements.into());
 
     let vm = VM::new(ty_declarations, &functions);
     match vm.evaluate_top_level_statements(&statements[..]) {
