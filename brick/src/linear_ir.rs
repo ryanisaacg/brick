@@ -20,13 +20,15 @@ pub struct LinearFunction {
 }
 
 pub fn linearize_function(
+    constant_data_region: &mut Vec<u8>,
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     function: HirFunction,
 ) -> LinearFunction {
     let HirNodeValue::Sequence(block) = function.body.value else {
         unreachable!()
     };
-    let mut body = LinearContext::new(declarations).linearize_nodes(block.into());
+    let mut body =
+        LinearContext::new(declarations, constant_data_region).linearize_nodes(block.into());
     if let Some(GeneratorProperties {
         generator_var_id,
         param_var_id,
@@ -229,6 +231,7 @@ pub enum LinearNodeValue {
         dest: Box<LinearNode>,
         size: Box<LinearNode>,
     },
+    ConstantDataAddress(usize),
 
     // TODO: just full stack machine? OR split tuple instruction
     TopOfStack,
@@ -278,8 +281,6 @@ pub enum LinearNodeValue {
     CharLiteral(char),
     Byte(u8),
     FunctionID(FunctionID),
-    // TODO: reference to constant section, or lower levels factor that out?
-    ConstantData(Vec<u8>),
 
     // Probably not keeping this around forever
     #[allow(dead_code)]
@@ -366,7 +367,7 @@ impl LinearNode {
             | LinearNodeValue::ReadRegister(_)
             | LinearNodeValue::KillRegister(_)
             | LinearNodeValue::Return(None)
-            | LinearNodeValue::ConstantData(_) => {}
+            | LinearNodeValue::ConstantDataAddress(_) => {}
         }
     }
 }
@@ -375,11 +376,18 @@ impl LinearNode {
 
 pub struct LinearContext<'a> {
     declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
+    constant_data_region: &'a mut Vec<u8>,
 }
 
 impl<'a> LinearContext<'a> {
-    pub fn new(declarations: &'a HashMap<TypeID, DeclaredTypeLayout>) -> LinearContext<'a> {
-        LinearContext { declarations }
+    pub fn new(
+        declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
+        constant_data_region: &'a mut Vec<u8>,
+    ) -> LinearContext<'a> {
+        LinearContext {
+            declarations,
+            constant_data_region,
+        }
     }
 
     pub fn linearize_nodes(&mut self, mut nodes: VecDeque<HirNode>) -> Vec<LinearNode> {
@@ -505,9 +513,11 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
         HirNodeValue::StringLiteral(string) => {
             let bytes = string.as_bytes();
+            let offset = ctx.constant_data_region.len();
+            ctx.constant_data_region.extend(bytes);
             LinearNodeValue::Sequence(vec![
                 LinearNode::size(bytes.len()),
-                LinearNode::new(LinearNodeValue::ConstantData(bytes.to_vec())),
+                LinearNode::new(LinearNodeValue::ConstantDataAddress(offset)),
             ])
         }
 

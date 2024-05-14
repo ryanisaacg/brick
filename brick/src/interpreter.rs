@@ -67,6 +67,8 @@ pub enum Unwind {
     Aborted,
 }
 
+const CONSTANT_DATA_START: usize = 1024;
+
 pub struct VM<'a> {
     pub memory: Vec<u8>,
     pub op_stack: Vec<Value>,
@@ -84,8 +86,10 @@ impl<'a> VM<'a> {
     pub fn new(
         layouts: HashMap<TypeID, DeclaredTypeLayout>,
         functions: &'a HashMap<FunctionID, Function>,
+        constant_data_region: Vec<u8>,
     ) -> VM {
-        let memory = vec![0; 1024];
+        let mut memory = vec![0; CONSTANT_DATA_START];
+        memory.extend(constant_data_region);
         let len = memory.len();
         VM {
             memory,
@@ -613,10 +617,9 @@ impl<'a> VM<'a> {
                 };
                 self.in_progress_goto = Some(label);
             }
-            LinearNodeValue::ConstantData(data) => {
-                let ptr = self.memory.len();
-                self.memory.extend(data.iter());
-                self.op_stack.push(Value::Size(ptr));
+            LinearNodeValue::ConstantDataAddress(offset) => {
+                self.op_stack
+                    .push(Value::Size(CONSTANT_DATA_START + offset));
             }
             LinearNodeValue::RuntimeCall(LinearRuntimeFunction::StringConcat, args) => {
                 self.evaluate_node(params, &args[0])?;

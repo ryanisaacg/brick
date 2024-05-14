@@ -94,13 +94,15 @@ pub fn interpret_code(
     let mut statements = Vec::new();
     let mut functions = HashMap::new();
 
+    let mut constant_data = Vec::new();
+
     for (name, module) in modules {
         // TODO: execute imported statements?
         if name == "main" {
             statements.push(module.top_level_statements);
         }
         for function in module.functions {
-            let function = linearize_function(&ty_declarations, function);
+            let function = linearize_function(&mut constant_data, &ty_declarations, function);
             functions.insert(function.id, interpreter::Function::Ir(function));
         }
     }
@@ -119,9 +121,10 @@ pub fn interpret_code(
         }
     });
 
-    let statements = LinearContext::new(&ty_declarations).linearize_nodes(statements.into());
+    let statements =
+        LinearContext::new(&ty_declarations, &mut constant_data).linearize_nodes(statements.into());
 
-    let vm = VM::new(ty_declarations, &functions);
+    let vm = VM::new(ty_declarations, &functions, constant_data);
     match vm.evaluate_top_level_statements(&statements[..]) {
         Ok(results) => Ok(results),
         Err(_) => Err(IntepreterError::Abort),
