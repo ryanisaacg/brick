@@ -588,7 +588,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
             let fn_idx = ctx.function_id_to_idx[fn_id];
             ctx.instructions.push(Instruction::I32Const(fn_idx as i32));
         }
-        LinearNodeValue::ConstantData(_) => { /* TODO */ }
+        LinearNodeValue::ConstantDataAddress(_) => { /* TODO */ }
         LinearNodeValue::Debug(_) => { /* TODO */ }
     }
 }

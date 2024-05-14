@@ -8,7 +8,7 @@ use std::{
 use borrowck::BorrowError;
 use hir::HirModule;
 use interpreter::{Function, VM};
-use linear_ir::{expr_ty_to_physical, layout_types, linearize_function, linearize_nodes};
+use linear_ir::{expr_ty_to_physical, layout_types, linearize_function, LinearContext};
 pub use linear_ir::{
     DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, LinearRuntimeFunction,
     PhysicalCollection, PhysicalPrimitive, PhysicalType, TypeLayoutValue,
@@ -92,6 +92,7 @@ pub fn interpret_code(
         functions,
         declarations,
         ty_declarations,
+        constant_data,
     } = lower_code("main", source_name, contents)?;
     let mut functions: HashMap<_, _> = functions
         .into_iter()
@@ -113,7 +114,7 @@ pub fn interpret_code(
         }
     });
 
-    let vm = VM::new(ty_declarations, &functions);
+    let vm = VM::new(ty_declarations, &functions, constant_data);
     match vm.evaluate_top_level_statements(&statements[..]) {
         Ok(results) => Ok(results),
         Err(_) => Err(IntepreterError::Abort),
@@ -126,6 +127,7 @@ pub struct LowerResults {
     pub functions: Vec<LinearFunction>,
     pub declarations: HashMap<String, StaticDeclaration>,
     pub ty_declarations: HashMap<TypeID, DeclaredTypeLayout>,
+    pub constant_data: Vec<u8>,
 }
 
 pub fn lower_code(
@@ -143,6 +145,7 @@ pub fn lower_code(
 
     let mut statements = Vec::new();
     let mut functions = Vec::new();
+    let mut constant_data = Vec::new();
 
     for (name, module) in modules {
         // TODO: execute imported statements?
@@ -150,21 +153,20 @@ pub fn lower_code(
             statements.push(module.top_level_statements);
         }
         for function in module.functions {
-            functions.push(linearize_function(&ty_declarations, function));
+            functions.push(linearize_function(
+                &mut constant_data,
+                &ty_declarations,
+                function,
+            ));
         }
     }
 
-    let mut stack_entries = HashMap::new();
     let statements_ty = statements.last().and_then(|last| match &last.ty {
         ExpressionType::Void | ExpressionType::Unreachable => None,
         return_ty => Some(expr_ty_to_physical(return_ty)),
     });
-    let statements = linearize_nodes(
-        &ty_declarations,
-        &mut stack_entries,
-        &mut 0,
-        statements.into(),
-    );
+    let statements =
+        LinearContext::new(&ty_declarations, &mut constant_data).linearize_nodes(statements.into());
 
     Ok(LowerResults {
         statements,
@@ -172,6 +174,7 @@ pub fn lower_code(
         functions,
         declarations,
         ty_declarations,
+        constant_data,
     })
 }
 

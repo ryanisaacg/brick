@@ -36,6 +36,7 @@ pub fn compile(
         mut functions,
         declarations: _,
         ty_declarations,
+        constant_data: _,
     } = lower_code(module_name, source_name, contents)?;
     let main = LinearFunction {
         id: FunctionID::new(),
