@@ -14,6 +14,7 @@ pub fn encode(
     stackptr_global_idx: u32,
     allocptr_global_idx: u32,
     linear_function_to_id: &HashMap<LinearRuntimeFunction, u32>,
+    constant_data_start: i32,
     func: &LinearFunction,
 ) -> Function {
     let mut parameter_start_idx = 0;
@@ -35,6 +36,7 @@ pub fn encode(
         allocptr_global_idx,
         linear_function_to_id,
         parameter_starts,
+        constant_data_start,
 
         instructions: Vec::new(),
 
@@ -78,6 +80,7 @@ struct Context<'a> {
     declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
     linear_function_to_id: &'a HashMap<LinearRuntimeFunction, u32>,
     parameter_starts: Vec<u32>,
+    constant_data_start: i32,
     // Result
     instructions: Vec<Instruction<'a>>,
     // Temp
@@ -588,7 +591,11 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
             let fn_idx = ctx.function_id_to_idx[fn_id];
             ctx.instructions.push(Instruction::I32Const(fn_idx as i32));
         }
-        LinearNodeValue::ConstantDataAddress(_) => { /* TODO */ }
+        LinearNodeValue::ConstantDataAddress(offset) => {
+            ctx.instructions.push(Instruction::I32Const(
+                ctx.constant_data_start + *offset as i32,
+            ));
+        }
         LinearNodeValue::Debug(_) => { /* TODO */ }
     }
 }

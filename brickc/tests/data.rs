@@ -120,8 +120,8 @@ fn look_for_value(
         TestValue::String(_) => {
             let mut results = [Val::I32(-1), Val::I32(-1)];
             func.call(&mut store, &[], &mut results)?;
-            let ptr = results[0].unwrap_i32() as usize;
-            let len = results[1].unwrap_i32() as usize;
+            let len = results[0].unwrap_i32() as usize;
+            let ptr = results[1].unwrap_i32() as usize;
             let slice = &memory.data(&store)[ptr..(ptr + len)];
             let string = std::str::from_utf8(slice)?;
             Ok(TestValue::String(string.to_string()))

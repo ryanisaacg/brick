@@ -1,2 +1,1 @@
-let array = list[5];
-array[0]
+"Two" ++ " " ++ "Words"

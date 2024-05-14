@@ -5,8 +5,9 @@ use brick::{
     PhysicalPrimitive, PhysicalType,
 };
 use wasm_encoder::{
-    CodeSection, ConstExpr, ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType,
-    ImportSection, MemorySection, MemoryType, Module, StartSection, TypeSection, ValType,
+    CodeSection, ConstExpr, DataSection, DataSegment, DataSegmentMode, ExportKind, ExportSection,
+    FunctionSection, GlobalSection, GlobalType, ImportSection, MemorySection, MemoryType, Module,
+    StartSection, TypeSection, ValType,
 };
 
 mod function_bodies;
@@ -36,7 +37,7 @@ pub fn compile(
         mut functions,
         declarations: _,
         ty_declarations,
-        constant_data: _,
+        constant_data,
     } = lower_code(module_name, source_name, contents)?;
     let main = LinearFunction {
         id: FunctionID::new(),
@@ -55,6 +56,17 @@ pub fn compile(
     let mut globals = GlobalSection::new();
     let mut exports = ExportSection::new();
     let mut memories = MemorySection::new();
+    let mut data_section = DataSection::new();
+
+    let constant_data_start = 0;
+    let constant_data_offset = constant_data.len() as i32;
+    data_section.segment(DataSegment {
+        mode: DataSegmentMode::Active {
+            memory_index: 0,
+            offset: &ConstExpr::i32_const(constant_data_start),
+        },
+        data: constant_data,
+    });
 
     let stack_pointer = 0;
     globals.global(
@@ -73,8 +85,7 @@ pub fn compile(
             mutable: true,
             shared: false,
         },
-        // TODO
-        &ConstExpr::i32_const(4),
+        &ConstExpr::i32_const(constant_data_offset),
     );
 
     let mut function_id_to_idx = HashMap::new();
@@ -100,6 +111,7 @@ pub fn compile(
             stack_pointer,
             alloc_pointer,
             &linear_function_to_id,
+            constant_data_start,
             &function,
         ));
     }
@@ -124,6 +136,7 @@ pub fn compile(
         module.section(&StartSection { function_index: 0 });
     }
     module.section(&codes);
+    module.section(&data_section);
 
     Ok(module)
 }
