@@ -1,4 +1,4 @@
-use brickc::compile;
+use brick_wasm_backend::compile;
 
 fn main() {
     let module = compile(

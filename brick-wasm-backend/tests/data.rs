@@ -1,5 +1,5 @@
 use anyhow::{bail, Context};
-use brickc::compile;
+use brick_wasm_backend::compile;
 use data_test_driver::TestValue;
 use wasmtime::{AsContextMut, Caller, Engine, Extern, Func, Linker, Memory, Module, Store, Val};
 
