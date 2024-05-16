@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
-use brick::{
-    id::FunctionID, lower_code, typecheck_module, CompileError, LinearFunction, LowerResults,
-    PhysicalPrimitive, PhysicalType,
-};
+use brick::{id::FunctionID, lower_code, CompileError, LinearFunction, LowerResults};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, DataSegment, DataSegmentMode, ExportKind, ExportSection,
     FunctionSection, GlobalSection, GlobalType, ImportSection, MemorySection, MemoryType, Module,
@@ -23,7 +20,6 @@ const STACK_PAGES: u64 = 16;
 const HEAP_MINIMUM_PAGES: u64 = 48;
 const MEMORY_MINIMUM_PAGES: u64 = STACK_PAGES + HEAP_MINIMUM_PAGES;
 const MAXIMUM_MEMORY: u64 = 16_384;
-const WASM_PAGE_SIZE: u64 = 65_536;
 
 pub fn compile(
     module_name: &str,
@@ -112,7 +108,7 @@ pub fn compile(
             alloc_pointer,
             &linear_function_to_id,
             constant_data_start,
-            &function,
+            function,
         ));
     }
 

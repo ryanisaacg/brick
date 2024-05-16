@@ -1,9 +1,7 @@
 use anyhow::{bail, Context};
 use brickc::compile;
 use data_test_driver::TestValue;
-use wasmtime::{
-    AsContextMut, Caller, Engine, Extern, Func, Instance, Linker, Memory, Module, Store, Val,
-};
+use wasmtime::{AsContextMut, Caller, Engine, Extern, Func, Linker, Memory, Module, Store, Val};
 
 #[test]
 fn data() {

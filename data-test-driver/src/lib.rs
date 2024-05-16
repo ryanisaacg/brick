@@ -84,11 +84,11 @@ fn path_display(path: &Path) -> String {
     format!("{folder}/{path}")
 }
 
-pub fn test_folder<'a>(
+pub fn test_folder(
     mut path: PathBuf,
     check_does_compile: impl Fn(&str) -> anyhow::Result<()> + Send + Sync,
     execute: impl Fn(&str, &TestValue) -> anyhow::Result<TestValue> + Send + Sync,
-    should_fail: HashSet<&'a str>,
+    should_fail: HashSet<&str>,
 ) {
     use rayon::prelude::*;
 
@@ -153,7 +153,7 @@ pub fn test_folder<'a>(
         - should_fail.len();
 
     println!("{success_count} tests passed");
-    if should_fail.len() > 0 {
+    if !should_fail.is_empty() {
         println!("{} tests failed as expected", should_fail.len());
     }
     if success_count + should_fail.len() < results.len() {

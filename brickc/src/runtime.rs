@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use brick::LinearRuntimeFunction;
-use wasm_encoder::{EntityType, FunctionSection, ImportSection, TypeSection, ValType};
+use wasm_encoder::{EntityType, ImportSection, TypeSection, ValType};
 
 pub fn add_runtime_imports(
     imports: &mut ImportSection,

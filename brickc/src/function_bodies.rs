@@ -128,14 +128,14 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
         LinearNodeValue::Parameter(idx) => {
             let mut start = ctx.parameter_starts[*idx];
             let ty = ctx.func.params[*idx].clone();
-            walk_vals_read_order(&ctx.declarations, &ty, 0, &mut |_, _| {
+            walk_vals_read_order(ctx.declarations, &ty, 0, &mut |_, _| {
                 ctx.instructions.push(Instruction::LocalGet(start));
                 start += 1;
             });
         }
         LinearNodeValue::VariableInit(var_id, ty) => {
             ctx.variable_locations.insert(*var_id, ctx.stack_size);
-            ctx.stack_size += ty.size(&ctx.declarations) as i32;
+            ctx.stack_size += ty.size(ctx.declarations) as i32;
         }
         LinearNodeValue::VariableDestroy(_) => {
             // TODO: do we care
@@ -213,7 +213,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                     let fn_idx = ctx.function_id_to_idx[fn_id];
                     ctx.instructions.push(Instruction::Call(fn_idx));
                 }
-                LinearNodeValue::VariableLocation(var) => {
+                LinearNodeValue::VariableLocation(_var) => {
                     // TODO: dynamic function call
                 }
                 LinearNodeValue::ReadMemory { .. } => {
@@ -608,7 +608,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
 }
 
 fn read_memory(ctx: &mut Context<'_>, ty: &PhysicalType, location_var: u32, offset: u64) {
-    walk_vals_read_order(&ctx.declarations, ty, offset, &mut |val_ty, offset| {
+    walk_vals_read_order(ctx.declarations, ty, offset, &mut |val_ty, offset| {
         ctx.instructions.push(Instruction::LocalGet(location_var));
         read_primitive(ctx, val_ty, offset);
     });
@@ -682,7 +682,7 @@ fn read_primitive(ctx: &mut Context<'_>, ty: ValType, offset: u64) {
 }
 
 fn write_memory(ctx: &mut Context<'_>, ty: &PhysicalType, location_var: u32, offset: u64) {
-    walk_vals_write_order(&ctx.declarations, ty, offset, &mut |val_ty, offset| {
+    walk_vals_write_order(ctx.declarations, ty, offset, &mut |val_ty, offset| {
         write_primitive(ctx, val_ty, location_var, offset);
     });
 }
@@ -715,7 +715,7 @@ pub fn walk_vals_write_order(
                     offset += 4;
                 }
             }
-            TypeLayoutValue::Union(variants) => {
+            TypeLayoutValue::Union(_variants) => {
                 // TODO
             }
         },

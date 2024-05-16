@@ -48,11 +48,7 @@ pub fn linearize_function(
     LinearFunction {
         id: function.id,
         body,
-        params: function
-            .params
-            .iter()
-            .map(|p| expr_ty_to_physical(p))
-            .collect(),
+        params: function.params.iter().map(expr_ty_to_physical).collect(),
         returns: match &function.body.ty {
             ExpressionType::Void | ExpressionType::Unreachable => None,
             return_ty => Some(expr_ty_to_physical(return_ty)),
