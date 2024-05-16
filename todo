@@ -6,10 +6,6 @@ error reporting:
 - error presentation
 - ability to continue in face of errors
 
-linear IR:
-- (maybe) AST rewrite the HIR to remove all control flow from expressions (possibly introducing "registers" if needed)
-- (maybe) AST rewrite the HIR to disambiguate between variable references and function references
-
 - rework the hashmaps into an actual environment data structure that allows for generational indexing?
 
 compilation resume and reload:
