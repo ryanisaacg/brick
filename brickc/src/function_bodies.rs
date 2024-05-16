@@ -94,10 +94,17 @@ struct Context<'a> {
 
 impl<'a> Context<'a> {
     fn alloc_local(&mut self, val: ValType) -> u32 {
-        let local = self.local_index;
-        self.locals.push((local, val));
+        let local_idx = self.local_index;
+        match self.locals.last_mut() {
+            Some((count, last_val_type)) if *last_val_type == val => {
+                *count += 1;
+            }
+            _ => {
+                self.locals.push((1, val));
+            }
+        }
         self.local_index += 1;
-        local
+        local_idx
     }
 }
 
