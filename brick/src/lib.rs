@@ -7,11 +7,15 @@ use std::{
 
 use borrowck::BorrowError;
 use hir::HirModule;
-use interpreter::VM;
-use linear_ir::{layout_types, linearize_function, LinearContext};
+use interpreter::{Function, VM};
+use linear_ir::{expr_ty_to_physical, layout_types, linearize_function, LinearContext};
+pub use linear_ir::{
+    DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, LinearRuntimeFunction,
+    PhysicalCollection, PhysicalPrimitive, PhysicalType, TypeLayoutValue,
+};
 use thiserror::Error;
 pub use typecheck::StaticDeclaration;
-use typecheck::{resolve::resolve_module, typecheck};
+use typecheck::{resolve::resolve_module, typecheck, ExpressionType};
 
 mod borrowck;
 mod hir;
@@ -34,7 +38,7 @@ use crate::{
 };
 
 pub mod id;
-pub use hir::HirNodeValue;
+pub use hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirNodeValue, UnaryLogicalOp};
 pub use interpreter::{ExternBinding, Value};
 pub use provenance::{SourceMarker, SourceRange};
 
@@ -82,30 +86,19 @@ pub fn interpret_code(
     contents: String,
     mut bindings: HashMap<String, ExternBinding>,
 ) -> Result<(Vec<Value>, Vec<u8>), IntepreterError> {
-    // TODO: "main"?
-    let CompilationResults {
-        modules,
+    let LowerResults {
+        statements,
+        statements_ty: _,
+        functions,
         declarations,
-    } = typecheck_module("main", source_name, contents)?;
+        ty_declarations,
+        constant_data,
+    } = lower_code("main", source_name, contents)?;
+    let mut functions: HashMap<_, _> = functions
+        .into_iter()
+        .map(|func| (func.id, Function::Ir(func)))
+        .collect();
 
-    let mut ty_declarations = HashMap::new();
-    layout_types(&declarations, &mut ty_declarations);
-
-    let mut statements = Vec::new();
-    let mut functions = HashMap::new();
-
-    let mut constant_data = Vec::new();
-
-    for (name, module) in modules {
-        // TODO: execute imported statements?
-        if name == "main" {
-            statements.push(module.top_level_statements);
-        }
-        for function in module.functions {
-            let function = linearize_function(&mut constant_data, &ty_declarations, function);
-            functions.insert(function.id, interpreter::Function::Ir(function));
-        }
-    }
     let module = StaticDeclaration::Module(ModuleType {
         id: TypeID::new(),
         exports: declarations,
@@ -115,20 +108,74 @@ pub fn interpret_code(
             for (name, decl) in exports.iter() {
                 if let Some(implementation) = bindings.remove(name) {
                     let id = decl.unwrap_fn_id();
-                    functions.insert(id, interpreter::Function::Extern(implementation));
+                    functions.insert(id, Function::Extern(implementation));
                 }
             }
         }
     });
-
-    let statements =
-        LinearContext::new(&ty_declarations, &mut constant_data).linearize_nodes(statements.into());
 
     let vm = VM::new(ty_declarations, &functions, constant_data);
     match vm.evaluate_top_level_statements(&statements[..]) {
         Ok(results) => Ok(results),
         Err(_) => Err(IntepreterError::Abort),
     }
+}
+
+pub struct LowerResults {
+    pub statements: Vec<LinearNode>,
+    pub statements_ty: Option<PhysicalType>,
+    pub functions: Vec<LinearFunction>,
+    pub declarations: HashMap<String, StaticDeclaration>,
+    pub ty_declarations: HashMap<TypeID, DeclaredTypeLayout>,
+    pub constant_data: Vec<u8>,
+}
+
+pub fn lower_code(
+    module_name: &str,
+    source_name: &'static str,
+    contents: String,
+) -> Result<LowerResults, CompileError> {
+    let CompilationResults {
+        modules,
+        declarations,
+    } = typecheck_module(module_name, source_name, contents)?;
+
+    let mut ty_declarations = HashMap::new();
+    layout_types(&declarations, &mut ty_declarations);
+
+    let mut statements = Vec::new();
+    let mut functions = Vec::new();
+    let mut constant_data = Vec::new();
+
+    for (name, module) in modules {
+        // TODO: execute imported statements?
+        if name == "main" {
+            statements.push(module.top_level_statements);
+        }
+        for function in module.functions {
+            functions.push(linearize_function(
+                &mut constant_data,
+                &ty_declarations,
+                function,
+            ));
+        }
+    }
+
+    let statements_ty = statements.last().and_then(|last| match &last.ty {
+        ExpressionType::Void | ExpressionType::Unreachable => None,
+        return_ty => Some(expr_ty_to_physical(return_ty)),
+    });
+    let statements =
+        LinearContext::new(&ty_declarations, &mut constant_data).linearize_nodes(statements.into());
+
+    Ok(LowerResults {
+        statements,
+        statements_ty,
+        functions,
+        declarations,
+        ty_declarations,
+        constant_data,
+    })
 }
 
 pub struct CompilationResults {

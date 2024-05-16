@@ -72,6 +72,7 @@ pub struct HirFunction {
     pub name: Option<String>,
     pub body: HirNode,
     pub generator: Option<GeneratorProperties>,
+    pub params: Vec<ExpressionType>,
 }
 
 #[derive(Clone, Debug)]

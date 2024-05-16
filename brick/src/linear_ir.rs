@@ -16,6 +16,8 @@ mod generator_local_storage;
 #[derive(Debug)]
 pub struct LinearFunction {
     pub id: FunctionID,
+    pub params: Vec<PhysicalType>,
+    pub returns: Option<PhysicalType>,
     pub body: Vec<LinearNode>,
 }
 
@@ -46,6 +48,11 @@ pub fn linearize_function(
     LinearFunction {
         id: function.id,
         body,
+        params: function.params.iter().map(expr_ty_to_physical).collect(),
+        returns: match &function.body.ty {
+            ExpressionType::Void | ExpressionType::Unreachable => None,
+            return_ty => Some(expr_ty_to_physical(return_ty)),
+        },
     }
 }
 
@@ -190,23 +197,11 @@ impl LinearNode {
             provenance: None,
         }
     }
-
-    fn memcpy(source: LinearNode, dest: LinearNode, size: LinearNode) -> LinearNode {
-        LinearNode {
-            value: LinearNodeValue::MemoryCopy {
-                source: Box::new(source),
-                dest: Box::new(dest),
-                size: Box::new(size),
-            },
-            provenance: None,
-        }
-    }
 }
 
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
 #[derive(Clone, Debug)]
 pub enum LinearNodeValue {
-    // TODO: how to handle function parameters?
     /// Returns the heap pointer
     HeapAlloc(Box<LinearNode>),
     /// Each parameter may only appear once in a given method body
@@ -225,11 +220,6 @@ pub enum LinearNodeValue {
         offset: usize,
         ty: PhysicalType,
         value: Box<LinearNode>,
-    },
-    MemoryCopy {
-        source: Box<LinearNode>,
-        dest: Box<LinearNode>,
-        size: Box<LinearNode>,
     },
     ConstantDataAddress(usize),
 
@@ -288,9 +278,10 @@ pub enum LinearNodeValue {
 }
 
 // TODO: distinguish from src/runtime
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum LinearRuntimeFunction {
     StringConcat,
+    Memcpy,
 }
 
 impl LinearNode {
@@ -325,11 +316,6 @@ impl LinearNode {
             | LinearNodeValue::BinaryLogical(_, a, b) => {
                 callback(a);
                 callback(b);
-            }
-            LinearNodeValue::MemoryCopy { source, dest, size } => {
-                callback(source);
-                callback(dest);
-                callback(size);
             }
             LinearNodeValue::Call(func, args) => {
                 callback(func);
@@ -590,7 +576,11 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                     LinearNode::ptr_comparison(
                         ComparisonOp::NotEquals,
                         LinearNode::size(*variant_idx),
-                        LinearNode::read_memory(location.clone(), offset, PhysicalType::Pointer),
+                        LinearNode::read_memory(
+                            location.clone(),
+                            offset,
+                            PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                        ),
                     ),
                     vec![LinearNode::bool_value(false)],
                     Some(vec![
@@ -788,13 +778,11 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 LinearNode::write_register(length_register, length),
                 LinearNode::write_register(
                     buffer_register,
-                    LinearNode::new(LinearNodeValue::HeapAlloc(Box::new(
-                        LinearNode::ptr_arithmetic(
-                            ArithmeticOp::Multiply,
-                            LinearNode::size(size),
-                            LinearNode::read_register(length_register),
-                        ),
-                    ))),
+                    LinearNode::heap_alloc_var(LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Multiply,
+                        LinearNode::size(size),
+                        LinearNode::read_register(length_register),
+                    )),
                 ),
                 LinearNode::write_register(index_register, LinearNode::size(0)),
                 LinearNode::new(LinearNodeValue::Loop(vec![LinearNode::if_node(
@@ -846,7 +834,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             LinearNodeValue::ReadMemory {
                 location: Box::new(table),
                 offset,
-                ty: PhysicalType::Pointer,
+                ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             }
         }
         HirNodeValue::VtableCall(table, fn_id, params) => {
@@ -998,7 +986,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset: offset + POINTER_SIZE,
-                ty: PhysicalType::Pointer,
+                ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             }
         }
         HirNodeValue::RuntimeCall(RuntimeFunction::ArrayPush, mut args) => {
@@ -1391,7 +1379,7 @@ fn array_alloc_space_to_push(
             LinearNode::read_memory(
                 LinearNode::read_register(arr_ptr),
                 length_offset,
-                PhysicalType::Pointer,
+                PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             ),
         ),
         // if (length + 1) * 2 > capacity, realloc
@@ -1410,7 +1398,7 @@ fn array_alloc_space_to_push(
                 LinearNode::read_memory(
                     LinearNode::read_register(arr_ptr),
                     capacity_offset,
-                    PhysicalType::Pointer,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                 ),
             ),
             // Increase capacity
@@ -1434,24 +1422,27 @@ fn array_alloc_space_to_push(
                     LinearNode::heap_alloc_var(LinearNode::read_register(new_capacity_register)),
                 ),
                 // copy old buffer to new buffer
-                LinearNode::memcpy(
-                    LinearNode::read_memory(
-                        LinearNode::read_register(arr_ptr),
-                        array_offset,
-                        PhysicalType::Pointer,
-                    ),
-                    LinearNode::read_register(buffer_register),
-                    LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Multiply,
-                        LinearNode::read_register(length_register),
-                        LinearNode::size(elem_size),
-                    ),
-                ),
+                LinearNode::new(LinearNodeValue::RuntimeCall(
+                    LinearRuntimeFunction::Memcpy,
+                    vec![
+                        LinearNode::read_register(buffer_register),
+                        LinearNode::read_memory(
+                            LinearNode::read_register(arr_ptr),
+                            array_offset,
+                            PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                        ),
+                        LinearNode::ptr_arithmetic(
+                            ArithmeticOp::Multiply,
+                            LinearNode::read_register(length_register),
+                            LinearNode::size(elem_size),
+                        ),
+                    ],
+                )),
                 // write new capacity
                 LinearNode::write_memory(
                     LinearNode::read_register(arr_ptr),
                     capacity_offset,
-                    PhysicalType::Pointer,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                     LinearNode::read_register(new_capacity_register),
                 ),
             ],
@@ -1462,7 +1453,7 @@ fn array_alloc_space_to_push(
         LinearNode::write_memory(
             LinearNode::read_register(arr_ptr),
             length_offset,
-            PhysicalType::Pointer,
+            PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             LinearNode::ptr_arithmetic(
                 ArithmeticOp::Add,
                 LinearNode::read_register(length_register),
@@ -1475,7 +1466,7 @@ fn array_alloc_space_to_push(
             LinearNode::read_memory(
                 LinearNode::read_register(arr_ptr),
                 array_offset,
-                PhysicalType::Pointer,
+                PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             ),
             LinearNode::ptr_arithmetic(
                 ArithmeticOp::Multiply,
@@ -1669,8 +1660,7 @@ pub enum PhysicalType {
     Primitive(PhysicalPrimitive),
     Referenced(TypeID),
     Nullable(Box<PhysicalType>),
-    // TODO: unify with primitive pointer size?
-    Pointer,
+    // TODO: fold into primitives
     FunctionPointer,
     Collection(PhysicalCollection),
     /// [function ID, resume point, stack ptr]
@@ -1690,7 +1680,6 @@ impl PhysicalType {
             PhysicalType::Primitive(p) => primitive_type_size(*p),
             PhysicalType::Referenced(id) => declarations[id].size(),
             PhysicalType::Nullable(ty) => NULL_TAG_SIZE + ty.size(declarations),
-            PhysicalType::Pointer => POINTER_SIZE,
             PhysicalType::FunctionPointer => FUNCTION_ID_SIZE,
             PhysicalType::Collection(ty) => match ty {
                 PhysicalCollection::Array => POINTER_SIZE * 3,
@@ -1813,7 +1802,7 @@ fn layout_type(
             layout_static_decl(declarations, layouts, declarations[id]);
             PhysicalType::Referenced(*id)
         }
-        ExpressionType::Pointer(_, _) => PhysicalType::Pointer,
+        ExpressionType::Pointer(_, _) => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
         ExpressionType::Collection(CollectionType::Array(_)) => {
             PhysicalType::Collection(PhysicalCollection::Array)
         }
@@ -1834,9 +1823,11 @@ fn layout_type(
     }
 }
 
-fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
+pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
     match ty {
-        ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
+        ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => {
+            unreachable!("{ty:?}")
+        }
         ExpressionType::Primitive(p) => PhysicalType::Primitive(primitive_to_physical(*p)),
         ExpressionType::InstanceOf(id) => PhysicalType::Referenced(*id),
         ExpressionType::Collection(c) => PhysicalType::Collection(match c {
@@ -1844,7 +1835,7 @@ fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
             CollectionType::Dict(_, _) => PhysicalCollection::Dict,
             CollectionType::String => PhysicalCollection::String,
         }),
-        ExpressionType::Pointer(_, _) => PhysicalType::Pointer,
+        ExpressionType::Pointer(_, _) => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
         ExpressionType::Nullable(inner) => {
             let ty = expr_ty_to_physical(inner);
             PhysicalType::Nullable(Box::new(ty))

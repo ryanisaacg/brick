@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use brick_runtime::{brick_runtime_alloc, brick_string_concat};
+use brick_runtime::{brick_memcpy, brick_runtime_alloc, brick_string_concat};
 
 use crate::{
     hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
@@ -594,21 +594,6 @@ impl<'a> VM<'a> {
                 self.evaluate_node(params, inner)?;
                 println!("{:?}", self.op_stack.last().unwrap());
             }
-            LinearNodeValue::MemoryCopy { source, dest, size } => {
-                self.evaluate_node(params, source)?;
-                let Value::Size(source) = self.op_stack.pop().unwrap() else {
-                    unreachable!()
-                };
-                self.evaluate_node(params, dest)?;
-                let Value::Size(dest) = self.op_stack.pop().unwrap() else {
-                    unreachable!()
-                };
-                self.evaluate_node(params, size)?;
-                let Value::Size(size) = self.op_stack.pop().unwrap() else {
-                    unreachable!()
-                };
-                self.memory.copy_within(source..source + size, dest);
-            }
             LinearNodeValue::GotoLabel(_) => {}
             LinearNodeValue::Goto(label) => {
                 self.evaluate_node(params, label)?;
@@ -649,6 +634,27 @@ impl<'a> VM<'a> {
                 };
                 self.op_stack.push(Value::Size(a_len + b_len));
                 self.op_stack.push(Value::Size(location));
+            }
+            LinearNodeValue::RuntimeCall(LinearRuntimeFunction::Memcpy, args) => {
+                self.evaluate_node(params, &args[0])?;
+                let Value::Size(dest) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.evaluate_node(params, &args[1])?;
+                let Value::Size(src) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.evaluate_node(params, &args[2])?;
+                let Value::Size(len) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                unsafe {
+                    brick_memcpy(
+                        self.memory[dest..].as_mut_ptr(),
+                        self.memory[src..].as_ptr(),
+                        len,
+                    );
+                }
             }
         }
 
@@ -707,7 +713,7 @@ fn write(
             write_primitive(op_stack, memory, location);
             write_primitive(op_stack, memory, location + 8);
         }
-        PhysicalType::Pointer | PhysicalType::FunctionPointer => {
+        PhysicalType::FunctionPointer => {
             write_primitive(op_stack, memory, location);
         }
         PhysicalType::Nullable(ty) => match op_stack.pop().unwrap() {
@@ -803,9 +809,6 @@ fn read(
                 location + 8,
                 PhysicalPrimitive::PointerSize,
             );
-            read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
-        }
-        PhysicalType::Pointer => {
             read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
         }
         PhysicalType::Nullable(ty) => {
