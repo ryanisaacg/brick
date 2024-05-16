@@ -266,7 +266,8 @@ pub fn resolve_type_expr(
         | AstNodeValue::StringLiteral(_)
         | AstNodeValue::CharLiteral(_)
         | AstNodeValue::UnaryExpr(_, _)
-        | AstNodeValue::DictLiteral(_) => {
+        | AstNodeValue::DictLiteral(_)
+        | AstNodeValue::Match(_) => {
             // TODO: report error
             panic!("Illegal in type name");
         }

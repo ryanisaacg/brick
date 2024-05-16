@@ -6,7 +6,7 @@ use crate::{
     id::{AnyID, FunctionID, TypeID},
     parser::{
         AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
-        InterfaceDeclarationValue, StructDeclarationValue, UnaryOp,
+        InterfaceDeclarationValue, MatchDeclaration, StructDeclarationValue, UnaryOp,
     },
     provenance::SourceRange,
     runtime::{add_runtime_functions, array_runtime_functions, dictionary_runtime_functions},
@@ -1076,6 +1076,9 @@ fn typecheck_expression<'a>(
                 None => ExpressionType::Void,
             }
         }
+        AstNodeValue::Match(MatchDeclaration { value, cases }) => {
+            todo!();
+        }
         AstNodeValue::Block(children) => {
             let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);
             scopes.push(current_scope);
@@ -1508,6 +1511,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::Null
         | AstNodeValue::If(_)
         | AstNodeValue::While(_, _)
+        | AstNodeValue::Match(_)
         | AstNodeValue::Loop(_)
         | AstNodeValue::Call(_, _)
         | AstNodeValue::TakeUnique(_)

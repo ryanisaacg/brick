@@ -59,6 +59,8 @@ pub enum TokenValue {
     Semicolon,
     QuestionMark,
     Exclamation,
+    CaseRocket,
+    VerticalPipe,
 
     // Braces
     OpenParen,
@@ -90,6 +92,7 @@ pub enum TokenValue {
     Interface,
     Yield,
     Void,
+    Case,
 
     // Comments
     LineComment(String),
@@ -118,6 +121,7 @@ impl TokenValue {
             | TokenValue::Ref
             | TokenValue::Null
             | TokenValue::Yield
+            | TokenValue::Case
             | TokenValue::StringLiteral(_) => false,
             TokenValue::Plus
             | TokenValue::Minus
@@ -145,6 +149,8 @@ impl TokenValue {
             | TokenValue::Semicolon
             | TokenValue::QuestionMark
             | TokenValue::Exclamation
+            | TokenValue::CaseRocket
+            | TokenValue::VerticalPipe
             | TokenValue::CloseParen
             | TokenValue::CloseBracket
             | TokenValue::CloseSquare
@@ -203,6 +209,8 @@ impl fmt::Display for TokenValue {
             NullCoalesce => write!(f, "??"),
             NullChaining => write!(f, "?."),
             Exclamation => write!(f, "!"),
+            CaseRocket => write!(f, "=>"),
+            VerticalPipe => write!(f, "|"),
             Let => write!(f, "keyword let"),
             If => write!(f, "keyword if"),
             While => write!(f, "keyword while"),
@@ -224,6 +232,7 @@ impl fmt::Display for TokenValue {
             Interface => write!(f, "keyword interface"),
             Yield => write!(f, "keyword yield"),
             Void => write!(f, "keyword void"),
+            Case => write!(f, "keyword case"),
             LineComment(comment) => write!(f, "// {}", comment),
         }
     }
@@ -358,6 +367,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "or" => TokenValue::BooleanOr,
                         "yield" => TokenValue::Yield,
                         "void" => TokenValue::Void,
+                        "case" => TokenValue::Case,
                         _ => TokenValue::Word(word),
                     }
                 }
@@ -398,14 +408,17 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     }
                     _ => TokenValue::QuestionMark,
                 },
-                '=' => {
-                    if let Some('=') = self.source.peek() {
+                '=' => match self.source.peek() {
+                    Some('=') => {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::EqualTo
-                    } else {
-                        TokenValue::Assign
                     }
-                }
+                    Some('>') => {
+                        end = Some(self.next_char().unwrap().1);
+                        TokenValue::CaseRocket
+                    }
+                    _ => TokenValue::Assign,
+                },
                 '<' => {
                     if let Some('=') = self.source.peek() {
                         end = Some(self.next_char().unwrap().1);
@@ -489,6 +502,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 '}' => TokenValue::CloseBracket,
                 '[' => TokenValue::OpenSquare,
                 ']' => TokenValue::CloseSquare,
+                '|' => TokenValue::VerticalPipe,
                 '\0' => return Some(Err(LexError::IllegalNullByte(start))),
                 '\'' => {
                     let (value, idx) = match self.next_char_literal(start) {

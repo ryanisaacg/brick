@@ -439,6 +439,7 @@ fn lower_node(decls: &HashMap<TypeID, &StaticDeclaration>, node: &AstNode<'_>) -
         | AstNodeValue::DictType(_, _)
         | AstNodeValue::ArrayType(_)
         | AstNodeValue::GeneratorType { .. } => unreachable!("Can't have these in a function body"),
+        AstNodeValue::Match(_) => todo!(),
     };
 
     HirNode::from_ast(node, value, node.ty.get().expect("type filled").clone())
