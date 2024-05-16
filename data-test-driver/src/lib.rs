@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fmt::Display,
     fs,
     path::{Path, PathBuf},
@@ -36,6 +37,7 @@ enum TestSuccessOrFailure {
         expected: TestValue,
         received: TestValue,
     },
+    SucceededButMarkedAsShouldFail(PathBuf),
 }
 
 impl Display for TestSuccessOrFailure {
@@ -64,6 +66,11 @@ impl Display for TestSuccessOrFailure {
                 "{}: Expected {expected:?}, received {received:?}",
                 path_display(path)
             ),
+            TestSuccessOrFailure::SucceededButMarkedAsShouldFail(path) => write!(
+                f,
+                "{}: Test succeeded, but it was marked as should fail",
+                path_display(path)
+            ),
         }
     }
 }
@@ -77,10 +84,11 @@ fn path_display(path: &Path) -> String {
     format!("{folder}/{path}")
 }
 
-pub fn test_folder(
+pub fn test_folder<'a>(
     mut path: PathBuf,
     check_does_compile: impl Fn(&str) -> anyhow::Result<()> + Send + Sync,
     execute: impl Fn(&str, &TestValue) -> anyhow::Result<TestValue> + Send + Sync,
+    should_fail: HashSet<&'a str>,
 ) {
     use rayon::prelude::*;
 
@@ -93,7 +101,8 @@ pub fn test_folder(
         .map(|entry| {
             let path = entry.unwrap();
             let contents = fs::read_to_string(&path).unwrap();
-            match parse_intended_result(&contents) {
+            let cloned_path = path.clone();
+            let result = match parse_intended_result(&contents) {
                 TestExpectation::Compiles => match check_does_compile(&contents) {
                     Ok(_) => TestSuccessOrFailure::Succeeded(path),
                     Err(error) => TestSuccessOrFailure::FailsToCompile(path, error),
@@ -120,6 +129,19 @@ pub fn test_folder(
                     },
                     Err(error) => TestSuccessOrFailure::FailsToCompile(path, error),
                 },
+            };
+            (cloned_path, result)
+        })
+        .map(|(path, result)| {
+            if should_fail.contains(&path_display(&path).as_str()) {
+                match result {
+                    TestSuccessOrFailure::Succeeded(path) => {
+                        TestSuccessOrFailure::SucceededButMarkedAsShouldFail(path)
+                    }
+                    _ => TestSuccessOrFailure::Succeeded(path),
+                }
+            } else {
+                result
             }
         })
         .collect();
@@ -127,10 +149,14 @@ pub fn test_folder(
     let success_count = results
         .iter()
         .filter(|test| matches!(test, TestSuccessOrFailure::Succeeded(_)))
-        .count();
+        .count()
+        - should_fail.len();
 
     println!("{success_count} tests passed");
-    if success_count < results.len() {
+    if should_fail.len() > 0 {
+        println!("{} tests failed as expected", should_fail.len());
+    }
+    if success_count + should_fail.len() < results.len() {
         println!("Failed tests:");
         for result in results.iter() {
             if !matches!(result, TestSuccessOrFailure::Succeeded(_)) {

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::bail;
 use brick::{check_types, eval_preserve_vm, Value};
 use data_test_driver::TestValue;
@@ -17,6 +19,7 @@ fn data() {
             let (mut results, memory) = eval_preserve_vm(contents)?;
             look_for_value(&mut results, &memory[..], expected)
         },
+        HashSet::new(),
     );
 }
 

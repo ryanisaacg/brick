@@ -48,6 +48,36 @@ fn data() {
 
             look_for_value(store, memory, func, expected)
         },
+        [
+            "collections/append_to_array.brick",
+            "collections/basic_dict_keys.brick",
+            "collections/dict_contains.brick",
+            "collections/insert_existing_dict.brick",
+            "collections/insert_new_in_dict.brick",
+            "collections/write_to_dict.brick",
+            "coroutine/count_up.brick",
+            "coroutine/echo.brick",
+            "coroutine/infinite.brick",
+            "coroutine/multiple_generators.brick",
+            "coroutine/mutable_ref.brick",
+            "coroutine/nested_coroutines.brick",
+            "coroutine/other_functions.brick",
+            "coroutine/regression_test_branch_in_yielding_loop.brick",
+            "coroutine/yield_basic.brick",
+            "coroutine/yield_once.brick",
+            "coroutine/yield_twice.brick",
+            "functions/can_assign_structs.brick",
+            "interfaces/can_assign_structs.brick",
+            "nullability/basic_null.brick",
+            "nullability/null_coalesce.brick",
+            "nullability/null_traverse_is_null.brick",
+            "nullability/null_traverse_union.brick",
+            "strings/concat.brick",
+            "unions/basic_construction.brick",
+            "unions/incorrect_access.brick",
+        ]
+        .into_iter()
+        .collect(),
     );
 }
 
