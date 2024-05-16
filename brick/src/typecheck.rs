@@ -265,6 +265,8 @@ pub enum TypecheckError {
     IllegalDotLHS(SourceRange),
     #[error("must return a generator: {0}")]
     MustReturnGenerator(SourceRange),
+    #[error("argument to case statement must be a union: {0}")]
+    CaseStatementRequiresUnion(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -1077,7 +1079,58 @@ fn typecheck_expression<'a>(
             }
         }
         AstNodeValue::Match(MatchDeclaration { value, cases }) => {
-            todo!();
+            let value_ty = typecheck_expression(
+                value,
+                outer_scopes,
+                current_scope,
+                context,
+                generator_input_ty,
+            )?;
+            let Some(StaticDeclaration::Union(value_ty)) =
+                value_ty.id().map(|ty_id| context.id_to_decl[ty_id])
+            else {
+                return Err(vec![TypecheckError::CaseStatementRequiresUnion(
+                    value.provenance.clone(),
+                )]);
+            };
+            let mut return_type = None;
+            for case in cases.iter() {
+                // TODO: multiple bindings in a single union
+                let mut binding = None;
+                for variant in case.variants.iter() {
+                    let variant_ty = &value_ty.variants[&variant.name];
+                    if let Some((binding_name, binding_ty)) = &binding {
+                        // TODO: ensure they all match
+                    } else {
+                        binding = Some((&variant.bindings[0], variant_ty));
+                    }
+                }
+                let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);
+                scopes.push(current_scope);
+                scopes.extend_from_slice(outer_scopes);
+                let mut child_scope = HashMap::new();
+                let (binding_name, binding_ty) = binding.unwrap();
+                child_scope.insert(
+                    binding_name.clone(),
+                    (case.var_id.into(), binding_ty.clone()),
+                );
+
+                // TODO: bindings
+                let body_ty = typecheck_expression(
+                    &case.body,
+                    outer_scopes,
+                    &mut child_scope,
+                    context,
+                    generator_input_ty,
+                )?;
+                if let Some(return_type) = &return_type {
+                    // TODO: ensure return types match
+                } else {
+                    return_type = Some(body_ty.clone());
+                }
+            }
+
+            return_type.unwrap_or(ExpressionType::Void)
         }
         AstNodeValue::Block(children) => {
             let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);

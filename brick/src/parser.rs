@@ -233,13 +233,14 @@ pub struct MatchDeclaration<'a> {
 #[derive(Debug, PartialEq)]
 pub struct MatchCaseDeclaration<'a> {
     pub variants: Vec<MatchCaseVariant>,
+    pub var_id: VariableID,
     pub body: AstNode<'a>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct MatchCaseVariant {
-    name: String,
-    bindings: Vec<String>,
+    pub name: String,
+    pub bindings: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -1754,8 +1755,16 @@ fn match_case_statement<'a>(
         .end();
         expr
     };
+    // TODO: variable number of variables
 
-    Ok((MatchCaseDeclaration { variants, body }, cursor))
+    Ok((
+        MatchCaseDeclaration {
+            variants,
+            var_id: VariableID::new(),
+            body,
+        },
+        cursor,
+    ))
 }
 
 fn match_case_variant<'a>(
