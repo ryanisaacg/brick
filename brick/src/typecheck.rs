@@ -475,12 +475,7 @@ fn typecheck_function<'a>(
             context,
             None,
         )?;
-        if !is_assignable_to(&context.id_to_decl, None, &function_type.returns, return_ty) {
-            return Err(vec![TypecheckError::TypeMismatch {
-                expected: function_type.returns.clone(),
-                received: return_ty.clone(),
-            }]);
-        }
+        assert_assignable_to(&context.id_to_decl, &function_type.returns, return_ty)?;
 
         typecheck_returns(context, &function_type.returns, function.body)?;
     }
@@ -538,13 +533,7 @@ fn typecheck_expression<'a>(
             if let Some(type_hint) = type_hint {
                 let ty =
                     resolve_type_expr(&context.name_to_type_id, type_hint).map_err(|e| vec![e])?;
-                // TODO: generate type error
-                if !is_assignable_to(&context.id_to_decl, None, &ty, value_ty) {
-                    return Err(vec![TypecheckError::TypeMismatch {
-                        expected: ty.clone(),
-                        received: value_ty.clone(),
-                    }]);
-                }
+                assert_assignable_to(&context.id_to_decl, &ty, value_ty)?;
                 type_hint.ty.set(ty.clone()).unwrap();
                 current_scope.insert(name.clone(), ((*variable_id).into(), ty));
             } else {
@@ -661,36 +650,41 @@ fn typecheck_expression<'a>(
         AstNodeValue::BinExpr(BinOp::Concat, left, right) => {
             let mut errors = Vec::new();
 
-            let left_ty = typecheck_expression(
-                left,
-                outer_scopes,
-                current_scope,
-                context,
-                generator_input_ty,
-            )?;
-            if left_ty != &ExpressionType::Collection(CollectionType::String) {
-                errors.push(TypecheckError::TypeMismatch {
-                    expected: ExpressionType::Collection(CollectionType::String),
-                    received: left_ty.clone(),
-                });
-            }
-            let right_ty = typecheck_expression(
-                right,
-                outer_scopes,
-                current_scope,
-                context,
-                generator_input_ty,
-            )?;
-            if right_ty != &ExpressionType::Collection(CollectionType::String) {
-                errors.push(TypecheckError::TypeMismatch {
-                    expected: ExpressionType::Collection(CollectionType::String),
-                    received: right_ty.clone(),
-                });
-            }
-
-            if !errors.is_empty() {
-                return Err(errors);
-            }
+            push_errors(
+                &mut errors,
+                typecheck_expression(
+                    left,
+                    outer_scopes,
+                    current_scope,
+                    context,
+                    generator_input_ty,
+                )
+                .and_then(|left_ty| {
+                    assert_assignable_to(
+                        &context.id_to_decl,
+                        &ExpressionType::Collection(CollectionType::String),
+                        left_ty,
+                    )
+                }),
+            );
+            push_errors(
+                &mut errors,
+                typecheck_expression(
+                    right,
+                    outer_scopes,
+                    current_scope,
+                    context,
+                    generator_input_ty,
+                )
+                .and_then(|right_ty| {
+                    assert_assignable_to(
+                        &context.id_to_decl,
+                        &ExpressionType::Collection(CollectionType::String),
+                        right_ty,
+                    )
+                }),
+            );
+            assert_no_errors(errors)?;
 
             ExpressionType::Collection(CollectionType::String)
         }
@@ -732,17 +726,11 @@ fn typecheck_expression<'a>(
                         context,
                         generator_input_ty,
                     )?;
-                    if !is_assignable_to(
+                    assert_assignable_to(
                         &context.id_to_decl,
-                        None,
                         &ExpressionType::Primitive(PrimitiveType::PointerSize),
                         index_ty,
-                    ) {
-                        return Err(vec![TypecheckError::TypeMismatch {
-                            received: index_ty.clone(),
-                            expected: ExpressionType::Primitive(PrimitiveType::Int32),
-                        }]);
-                    }
+                    )?;
 
                     *item_ty.clone()
                 }
@@ -754,12 +742,7 @@ fn typecheck_expression<'a>(
                         context,
                         generator_input_ty,
                     )?;
-                    if !is_assignable_to(&context.id_to_decl, None, index_ty, key_ty) {
-                        return Err(vec![TypecheckError::TypeMismatch {
-                            received: index_ty.clone(),
-                            expected: ExpressionType::Primitive(PrimitiveType::Int32),
-                        }]);
-                    }
+                    assert_assignable_to(&context.id_to_decl, index_ty, key_ty)?;
 
                     *value_ty.clone()
                 }
@@ -821,28 +804,24 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
 
-            if !is_assignable_to(
-                &context.id_to_decl,
-                None,
-                &ExpressionType::Primitive(PrimitiveType::Bool),
-                left,
-            ) {
-                return Err(vec![TypecheckError::TypeMismatch {
-                    received: left.clone(),
-                    expected: ExpressionType::Primitive(PrimitiveType::Bool),
-                }]);
-            }
-            if !is_assignable_to(
-                &context.id_to_decl,
-                None,
-                &ExpressionType::Primitive(PrimitiveType::Bool),
-                right,
-            ) {
-                return Err(vec![TypecheckError::TypeMismatch {
-                    received: right.clone(),
-                    expected: ExpressionType::Primitive(PrimitiveType::Bool),
-                }]);
-            }
+            let mut errors = Vec::new();
+            push_errors(
+                &mut errors,
+                assert_assignable_to(
+                    &context.id_to_decl,
+                    &ExpressionType::Primitive(PrimitiveType::Bool),
+                    left,
+                ),
+            );
+            push_errors(
+                &mut errors,
+                assert_assignable_to(
+                    &context.id_to_decl,
+                    &ExpressionType::Primitive(PrimitiveType::Bool),
+                    right,
+                ),
+            );
+            assert_no_errors(errors)?;
 
             ExpressionType::Primitive(PrimitiveType::Bool)
         }
@@ -904,12 +883,7 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
 
-            if !is_assignable_to(&context.id_to_decl, None, left_ty, right) {
-                return Err(vec![TypecheckError::TypeMismatch {
-                    received: right.clone(),
-                    expected: left_ty.clone(),
-                }]);
-            }
+            assert_assignable_to(&context.id_to_decl, left_ty, right)?;
 
             ExpressionType::Void
         }
@@ -944,12 +918,7 @@ fn typecheck_expression<'a>(
                 )]);
             }
 
-            if !is_assignable_to(&context.id_to_decl, None, left_ty, right) {
-                return Err(vec![TypecheckError::TypeMismatch {
-                    received: right.clone(),
-                    expected: left_ty.clone(),
-                }]);
-            }
+            assert_assignable_to(&context.id_to_decl, left_ty, right)?;
 
             ExpressionType::Void
         }
@@ -975,12 +944,7 @@ fn typecheck_expression<'a>(
             };
             let ty = *ty.clone();
 
-            if !is_assignable_to(&context.id_to_decl, None, &ty, right_ty) {
-                return Err(vec![TypecheckError::TypeMismatch {
-                    received: right_ty.clone(),
-                    expected: ty.clone(),
-                }]);
-            }
+            assert_assignable_to(&context.id_to_decl, &ty, right_ty)?;
 
             ty.clone()
         }
@@ -1234,12 +1198,7 @@ fn typecheck_expression<'a>(
                             generator_input_ty,
                         )?;
                         // TODO: generic generators?
-                        if !is_assignable_to(&context.id_to_decl, None, param_ty, arg) {
-                            return Err(vec![TypecheckError::TypeMismatch {
-                                received: arg.clone(),
-                                expected: *param_ty.clone(),
-                            }]);
-                        }
+                        assert_assignable_to(&context.id_to_decl, param_ty, arg)?;
                     }
                     *yield_ty.clone()
                 }
@@ -1266,26 +1225,37 @@ fn typecheck_expression<'a>(
                         )]);
                     }
 
+                    let mut errors = Vec::new();
                     for (name, param_field) in struct_type.fields.iter() {
                         let Some(arg_field) = fields.get(name) else {
                             return Err(vec![TypecheckError::MissingField(
                                 node.provenance.clone(),
                             )]);
                         };
-                        let arg_field = typecheck_expression(
+                        match typecheck_expression(
                             arg_field,
                             outer_scopes,
                             current_scope,
                             context,
                             generator_input_ty,
-                        )?;
-                        if !is_assignable_to(&context.id_to_decl, None, param_field, arg_field) {
-                            return Err(vec![TypecheckError::TypeMismatch {
-                                received: arg_field.clone(),
-                                expected: param_field.clone(),
-                            }]);
+                        ) {
+                            Ok(arg_field) => {
+                                push_errors(
+                                    &mut errors,
+                                    assert_assignable_to(
+                                        &context.id_to_decl,
+                                        param_field,
+                                        arg_field,
+                                    ),
+                                );
+                            }
+                            Err(field_errors) => {
+                                errors.extend(field_errors);
+                            }
                         }
                     }
+
+                    assert_no_errors(errors)?;
 
                     ExpressionType::InstanceOf(*ty_id)
                 }
@@ -1307,12 +1277,7 @@ fn typecheck_expression<'a>(
                         context,
                         generator_input_ty,
                     )?;
-                    if !is_assignable_to(&context.id_to_decl, None, param, arg) {
-                        return Err(vec![TypecheckError::TypeMismatch {
-                            received: param.clone(),
-                            expected: arg.clone(),
-                        }]);
-                    }
+                    assert_assignable_to(&context.id_to_decl, param, arg)?;
 
                     ExpressionType::InstanceOf(*ty_id)
                 }
@@ -1333,12 +1298,7 @@ fn typecheck_expression<'a>(
                     generator_input_ty,
                 )?;
                 if let Some(expected_key_ty) = result_key_ty {
-                    if !is_assignable_to(&context.id_to_decl, None, key_ty, expected_key_ty) {
-                        return Err(vec![TypecheckError::TypeMismatch {
-                            received: key_ty.clone(),
-                            expected: expected_key_ty.clone(),
-                        }]);
-                    }
+                    assert_assignable_to(&context.id_to_decl, key_ty, expected_key_ty)?;
                 } else {
                     result_key_ty = Some(key_ty);
                 }
@@ -1350,12 +1310,7 @@ fn typecheck_expression<'a>(
                     generator_input_ty,
                 )?;
                 if let Some(expected_value_ty) = result_value_ty {
-                    if !is_assignable_to(&context.id_to_decl, None, value_ty, expected_value_ty) {
-                        return Err(vec![TypecheckError::TypeMismatch {
-                            received: value_ty.clone(),
-                            expected: expected_value_ty.clone(),
-                        }]);
-                    }
+                    assert_assignable_to(&context.id_to_decl, value_ty, expected_value_ty)?;
                 } else {
                     result_value_ty = Some(value_ty);
                 }
@@ -1469,17 +1424,11 @@ fn typecheck_expression<'a>(
                     context,
                     generator_input_ty,
                 )?;
-                if !is_assignable_to(
+                assert_assignable_to(
                     &context.id_to_decl,
-                    None,
-                    child_ty,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
-                ) {
-                    return Err(vec![TypecheckError::TypeMismatch {
-                        expected: ExpressionType::Primitive(PrimitiveType::Bool),
-                        received: child_ty.clone(),
-                    }]);
-                }
+                    child_ty,
+                )?;
                 ExpressionType::Primitive(PrimitiveType::Bool)
             }
         },
@@ -1821,6 +1770,7 @@ pub fn is_assignable_to(
             Collection(CollectionType::Dict(left_key, left_value)),
             Collection(CollectionType::Dict(right_key, right_value)),
         ) => left_key == right_key && left_value == right_value,
+        (Collection(CollectionType::String), Collection(CollectionType::String)) => true,
         (Collection(_), Collection(_)) => false,
 
         (ExpressionType::FunctionReference { .. }, _)
