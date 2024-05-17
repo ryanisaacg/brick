@@ -604,6 +604,26 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
             ));
         }
         LinearNodeValue::Debug(_) => { /* TODO */ }
+        LinearNodeValue::Switch { value, cases } => {
+            // TODO: not necessarily the right block type
+            for _ in 0..cases.len() {
+                ctx.instructions.push(Instruction::Block(BlockType::Empty));
+            }
+            ctx.instructions.push(Instruction::Block(BlockType::Empty));
+            let block_count = cases.len() as u32;
+            encode_node(ctx, value);
+            ctx.instructions.push(Instruction::BrTable(
+                (0..block_count).collect(),
+                block_count,
+            ));
+            ctx.instructions.push(Instruction::End);
+            for (i, case) in cases.iter().enumerate() {
+                encode_node(ctx, case);
+                ctx.instructions
+                    .push(Instruction::Br(block_count - 1 - i as u32));
+                ctx.instructions.push(Instruction::End);
+            }
+        }
     }
 }
 
@@ -716,7 +736,9 @@ pub fn walk_vals_write_order(
                 }
             }
             TypeLayoutValue::Union(_variants) => {
-                // TODO
+                // TODO: ***EXTREMELY*** temp
+                callback(ValType::I32, offset);
+                callback(ValType::I32, offset + 4);
             }
         },
         PhysicalType::Nullable(inner) => {

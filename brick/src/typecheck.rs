@@ -6,7 +6,7 @@ use crate::{
     id::{AnyID, FunctionID, TypeID},
     parser::{
         AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
-        InterfaceDeclarationValue, StructDeclarationValue, UnaryOp,
+        InterfaceDeclarationValue, MatchDeclaration, StructDeclarationValue, UnaryOp,
     },
     provenance::SourceRange,
     runtime::{add_runtime_functions, array_runtime_functions, dictionary_runtime_functions},
@@ -202,6 +202,7 @@ pub struct FuncType {
 #[derive(Debug, PartialEq, Eq)]
 pub struct UnionType {
     pub id: TypeID,
+    pub variant_order: Vec<String>,
     pub variants: HashMap<String, ExpressionType>,
 }
 
@@ -265,6 +266,8 @@ pub enum TypecheckError {
     IllegalDotLHS(SourceRange),
     #[error("must return a generator: {0}")]
     MustReturnGenerator(SourceRange),
+    #[error("argument to case statement must be a union: {0}")]
+    CaseStatementRequiresUnion(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -1076,6 +1079,67 @@ fn typecheck_expression<'a>(
                 None => ExpressionType::Void,
             }
         }
+        AstNodeValue::Match(MatchDeclaration { value, cases }) => {
+            let value_ty = typecheck_expression(
+                value,
+                outer_scopes,
+                current_scope,
+                context,
+                generator_input_ty,
+            )?;
+            let Some(StaticDeclaration::Union(value_ty)) =
+                value_ty.id().map(|ty_id| context.id_to_decl[ty_id])
+            else {
+                return Err(vec![TypecheckError::CaseStatementRequiresUnion(
+                    value.provenance.clone(),
+                )]);
+            };
+            let mut return_type = None;
+            let mut errors = Vec::new();
+            for case in cases.iter() {
+                // TODO: multiple bindings in a single union
+                let mut binding: Option<(&String, &ExpressionType)> = None;
+                for variant in case.variants.iter() {
+                    let variant_ty = &value_ty.variants[&variant.name];
+                    if let Some((_binding_name, binding_ty)) = &binding {
+                        push_errors(
+                            &mut errors,
+                            assert_assignable_to(&context.id_to_decl, binding_ty, variant_ty),
+                        );
+                    } else {
+                        binding = Some((&variant.bindings[0], variant_ty));
+                    }
+                }
+                let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);
+                scopes.push(current_scope);
+                scopes.extend_from_slice(outer_scopes);
+                let mut child_scope = HashMap::new();
+                let (binding_name, binding_ty) = binding.unwrap();
+                child_scope.insert(
+                    binding_name.clone(),
+                    (case.var_id.into(), binding_ty.clone()),
+                );
+
+                let body_ty = typecheck_expression(
+                    &case.body,
+                    &scopes,
+                    &mut child_scope,
+                    context,
+                    generator_input_ty,
+                )?;
+                if let Some(return_type) = &return_type {
+                    push_errors(
+                        &mut errors,
+                        assert_assignable_to(&context.id_to_decl, return_type, body_ty),
+                    );
+                } else {
+                    return_type = Some(body_ty.clone());
+                }
+            }
+            assert_no_errors(errors)?;
+
+            return_type.unwrap_or(ExpressionType::Void)
+        }
         AstNodeValue::Block(children) => {
             let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);
             scopes.push(current_scope);
@@ -1508,6 +1572,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::Null
         | AstNodeValue::If(_)
         | AstNodeValue::While(_, _)
+        | AstNodeValue::Match(_)
         | AstNodeValue::Loop(_)
         | AstNodeValue::Call(_, _)
         | AstNodeValue::TakeUnique(_)
@@ -1773,5 +1838,34 @@ pub fn fully_dereference(ty: &ExpressionType) -> &ExpressionType {
         fully_dereference(inner)
     } else {
         ty
+    }
+}
+
+fn push_errors(errors: &mut Vec<TypecheckError>, result: Result<(), Vec<TypecheckError>>) {
+    if let Err(new_errors) = result {
+        errors.extend(new_errors);
+    }
+}
+
+fn assert_assignable_to(
+    id_to_decl: &HashMap<TypeID, &StaticDeclaration>,
+    lhs: &ExpressionType,
+    rhs: &ExpressionType,
+) -> Result<(), Vec<TypecheckError>> {
+    if is_assignable_to(id_to_decl, None, lhs, rhs) {
+        Ok(())
+    } else {
+        Err(vec![TypecheckError::TypeMismatch {
+            received: lhs.clone(),
+            expected: rhs.clone(),
+        }])
+    }
+}
+
+fn assert_no_errors(errors: Vec<TypecheckError>) -> Result<(), Vec<TypecheckError>> {
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
     }
 }

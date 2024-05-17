@@ -73,6 +73,8 @@ fn data() {
             "strings/concat.brick",
             "unions/basic_construction.brick",
             "unions/incorrect_access.brick",
+            "unions/case_statement_extracts_value.brick",
+            "unions/case_follows_or_pattern.brick",
         ]
         .into_iter()
         .collect(),

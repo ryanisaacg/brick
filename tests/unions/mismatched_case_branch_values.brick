@@ -1,0 +1,10 @@
+// NoCompile
+union Number {
+    int(i32),
+    float(f32),
+}
+
+let num = Number { int: 12 };
+case num {
+    int(value) | float(value) => value,
+}

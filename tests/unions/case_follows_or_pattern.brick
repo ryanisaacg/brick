@@ -1,0 +1,11 @@
+// Int | 2
+union ThreeWay {
+    one(i32),
+    two(i32),
+    three(i32),
+}
+let un = ThreeWay { two: 2 };
+case un {
+    one(val) | two(val) => val,
+    three(val) => 1000,
+}

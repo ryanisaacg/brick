@@ -161,14 +161,14 @@ anonymous types:
 - anonymous interface
 
 unions:
-- they work:
-    - union variants can be assigned to
+- unions can have empty variants
+- case statements can match through pointers:
+    - shared pointers
+    - unique pointers
+- write them with wasm
+- case statement exhaustiveness
 - union literal syntax that makes sense
 - unions can extend unions (refer to fields with nested access?)
-- unions can have empty variants
-- match statement (destructure unions, return value if exhaustive)
-- are unions the right choice?? not 100% sure
-- rename to enum? variant?
 
 boolean operators:
 - equality / inequality:

@@ -40,6 +40,20 @@ pub fn simplify_sequence_assignments(module: &mut HirModule) {
                 );
                 replace_last_with_assignment(node.provenance.clone(), else_branch, swapped_lhs);
             }
+            HirNodeValue::Switch { value: _, cases } => {
+                let mut swapped_lhs = HirNode::dummy();
+                std::mem::swap(&mut swapped_lhs, lhs);
+                for case in cases.iter_mut() {
+                    let HirNodeValue::Sequence(case) = &mut case.value else {
+                        unreachable!()
+                    };
+                    replace_last_with_assignment(
+                        node.provenance.clone(),
+                        case,
+                        swapped_lhs.clone(),
+                    );
+                }
+            }
             _ => return,
         }
         rhs.ty = ExpressionType::Void;
@@ -76,7 +90,7 @@ pub fn simplify_sequence_uses(
         node.walk_expected_types_for_children_mut(declarations, |ty, child| {
             if !matches!(
                 &child.value,
-                HirNodeValue::Sequence(_) | HirNodeValue::If(_, _, _),
+                HirNodeValue::Sequence(_) | HirNodeValue::If(_, _, _) | HirNodeValue::Switch { .. },
             ) {
                 return;
             }
@@ -102,6 +116,14 @@ pub fn simplify_sequence_uses(
                         else_branch,
                         lhs.clone(),
                     );
+                }
+                HirNodeValue::Switch { value: _, cases } => {
+                    for case in cases.iter_mut() {
+                        let HirNodeValue::Sequence(case) = &mut case.value else {
+                            unreachable!()
+                        };
+                        replace_last_with_assignment(child.provenance.clone(), case, lhs.clone());
+                    }
                 }
                 _ => unreachable!(),
             }
@@ -134,18 +156,19 @@ pub fn simplify_trailing_if(module: &mut HirModule) {
         if !matches!(
             children.last(),
             Some(HirNode {
-                value: HirNodeValue::If(_, _, Some(_)),
+                value: HirNodeValue::If(_, _, Some(_)) | HirNodeValue::Switch { .. },
                 ..
             }),
         ) {
             return;
         }
-        let if_statement = children.last_mut().unwrap();
-        if if_statement.ty == ExpressionType::Void || if_statement.ty == ExpressionType::Unreachable
+        let trailing_statement = children.last_mut().unwrap();
+        if trailing_statement.ty == ExpressionType::Void
+            || trailing_statement.ty == ExpressionType::Unreachable
         {
             return;
         }
-        let ty = if_statement.ty.clone();
+        let ty = trailing_statement.ty.clone();
 
         // Rewrite if statement use a temporary variable in both branches
         let temporary_var_id = VariableID::new();
@@ -153,17 +176,40 @@ pub fn simplify_trailing_if(module: &mut HirModule) {
             HirNodeValue::VariableReference(temporary_var_id.into()),
             ty.clone(),
         );
-        let HirNodeValue::If(_, if_branch, Some(else_branch)) = &mut if_statement.value else {
-            unreachable!();
-        };
-        let HirNodeValue::Sequence(if_branch) = &mut if_branch.value else {
-            unreachable!()
-        };
-        let HirNodeValue::Sequence(else_branch) = &mut else_branch.value else {
-            unreachable!()
-        };
-        replace_last_with_assignment(if_statement.provenance.clone(), if_branch, lhs.clone());
-        replace_last_with_assignment(if_statement.provenance.clone(), else_branch, lhs.clone());
+
+        match &mut trailing_statement.value {
+            HirNodeValue::If(_, if_branch, Some(else_branch)) => {
+                let HirNodeValue::Sequence(if_branch_children) = &mut if_branch.value else {
+                    unreachable!()
+                };
+                let HirNodeValue::Sequence(else_branch_children) = &mut else_branch.value else {
+                    unreachable!()
+                };
+                replace_last_with_assignment(
+                    if_branch.provenance.clone(),
+                    if_branch_children,
+                    lhs.clone(),
+                );
+                replace_last_with_assignment(
+                    else_branch.provenance.clone(),
+                    else_branch_children,
+                    lhs.clone(),
+                );
+            }
+            HirNodeValue::Switch { value: _, cases } => {
+                for case in cases.iter_mut() {
+                    let HirNodeValue::Sequence(case_children) = &mut case.value else {
+                        unreachable!()
+                    };
+                    replace_last_with_assignment(
+                        case.provenance.clone(),
+                        case_children,
+                        lhs.clone(),
+                    );
+                }
+            }
+            _ => unreachable!(),
+        }
 
         children.insert(
             children.len() - 1,

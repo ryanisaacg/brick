@@ -154,6 +154,12 @@ impl<'a> AstNode<'a> {
                     callback(field.ty);
                 }
             }
+            Match(case) => {
+                callback(case.value);
+                for case in case.cases.iter() {
+                    callback(&case.body);
+                }
+            }
             Name { .. }
             | Import(_)
             | Int(_)
@@ -219,6 +225,25 @@ pub struct IfDeclaration<'a> {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct MatchDeclaration<'a> {
+    pub value: &'a mut AstNode<'a>,
+    pub cases: Vec<MatchCaseDeclaration<'a>>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MatchCaseDeclaration<'a> {
+    pub variants: Vec<MatchCaseVariant>,
+    pub var_id: VariableID,
+    pub body: AstNode<'a>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct MatchCaseVariant {
+    pub name: String,
+    pub bindings: Vec<String>,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum AstNodeValue<'a> {
     // Statements
     FunctionDeclaration(FunctionDeclarationValue<'a>),
@@ -268,6 +293,7 @@ pub enum AstNodeValue<'a> {
     ArrayLiteralLength(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
     Block(Vec<AstNode<'a>>),
     Deref(&'a mut AstNode<'a>),
+    Match(MatchDeclaration<'a>),
 
     // Types
     // TODO: unify
@@ -1105,6 +1131,7 @@ fn expression_pratt<'a>(
         token @ (TokenValue::If | TokenValue::While) => {
             if_or_while(source, context, token, cursor)?
         }
+        TokenValue::Case => match_statement(source, context, cursor)?,
         TokenValue::Loop => parse_loop(source, context, cursor)?,
         TokenValue::OpenBracket => block(source, context, cursor)?,
         // Atoms
@@ -1647,6 +1674,126 @@ fn if_or_while<'a>(
     } else {
         AstNode::new(AstNodeValue::While(predicate_ptr, block_ptr), provenance)
     })
+}
+
+fn match_statement<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    cursor: SourceMarker,
+) -> Result<AstNode<'a>, ParseError> {
+    let start = cursor;
+    let match_value = expression(source, context, cursor, false)?;
+    let mut cursor = assert_next_lexeme_eq(
+        source,
+        TokenValue::OpenBracket,
+        match_value.provenance.end(),
+        "expected { after case value",
+    )?
+    .range
+    .end();
+    let match_value = context.alloc(match_value);
+    let mut cases = Vec::new();
+    while peek_token(source, cursor, "unexpected EOF in case statement")?.value
+        != TokenValue::CloseBracket
+    {
+        let (next_case, next_cursor) = match_case_statement(source, context, cursor)?;
+        cursor = next_cursor;
+        cases.push(next_case);
+    }
+    cursor = already_peeked_token(source)?.range.end();
+
+    Ok(AstNode::new(
+        AstNodeValue::Match(MatchDeclaration {
+            value: match_value,
+            cases,
+        }),
+        SourceRange::new(start, cursor),
+    ))
+}
+
+fn match_case_statement<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    mut cursor: SourceMarker,
+) -> Result<(MatchCaseDeclaration<'a>, SourceMarker), ParseError> {
+    let (variant, next_cursor) = match_case_variant(source, cursor)?;
+    let mut variants = vec![variant];
+    cursor = next_cursor;
+
+    while peek_token(source, cursor, "expected | or => after case variant")?.value
+        != TokenValue::CaseRocket
+    {
+        cursor = assert_next_lexeme_eq(
+            source,
+            TokenValue::VerticalPipe,
+            cursor,
+            "expected | or => after case variant",
+        )?
+        .range
+        .end();
+        let (variant, next_cursor) = match_case_variant(source, cursor)?;
+        variants.push(variant);
+        cursor = next_cursor;
+    }
+    cursor = already_peeked_token(source)?.range.end();
+    let body = if peek_token(source, cursor, "expected { or expression after =>")?.value
+        == TokenValue::OpenBracket
+    {
+        cursor = already_peeked_token(source)?.range.end();
+        let body = block(source, context, cursor)?;
+        cursor = body.provenance.end();
+        body
+    } else {
+        let expr = expression(source, context, cursor, true)?;
+        cursor = assert_next_lexeme_eq(
+            source,
+            TokenValue::Comma,
+            expr.provenance.end(),
+            "expected , after variant expression",
+        )?
+        .range
+        .end();
+        expr
+    };
+    // TODO: variable number of variables
+
+    Ok((
+        MatchCaseDeclaration {
+            variants,
+            var_id: VariableID::new(),
+            body,
+        },
+        cursor,
+    ))
+}
+
+fn match_case_variant(
+    source: &mut TokenIter,
+    mut cursor: SourceMarker,
+) -> Result<(MatchCaseVariant, SourceMarker), ParseError> {
+    let (name, range) = word(source, cursor, "expected name of case variant")?;
+    cursor = range.end();
+
+    let mut bindings = Vec::new();
+    if peek_token(source, cursor, "expected (, | or => after case name")?.value
+        == TokenValue::OpenParen
+    {
+        loop {
+            cursor = already_peeked_token(source)?.range.end();
+            let (binding, range) = word(source, cursor, "expected binding in case statement")?;
+            bindings.push(binding);
+            cursor = range.end();
+
+            let (list_ended, range) =
+                comma_or_end_list(source, TokenValue::CloseParen, cursor, "expected , or )")?;
+            cursor = range.end();
+            if list_ended {
+                break;
+            }
+        }
+    }
+
+    Ok((MatchCaseVariant { name, bindings }, cursor))
 }
 
 fn parse_loop<'a>(

@@ -40,7 +40,10 @@ fn look_for_value(
             if results.len() == 1 && results[0] == Value::Byte(0) {
                 Ok(TestValue::Null)
             } else {
-                bail!("wrong number of results returned: {}", results.len());
+                bail!(
+                    "wrong number of results returned: {:?}, expected 1",
+                    results
+                )
             }
         }
         TestValue::Nullable(expected) => {
@@ -56,7 +59,10 @@ fn look_for_value(
             if results.len() == 1 {
                 Ok(value_to_test_value(results.remove(0)))
             } else {
-                bail!("wrong number of results returned: {}", results.len());
+                bail!(
+                    "wrong number of results returned: {:?}, expected 1",
+                    results
+                )
             }
         }
         TestValue::String(_) => {
@@ -73,7 +79,10 @@ fn look_for_value(
                 let string = std::str::from_utf8(bytes)?;
                 Ok(TestValue::String(string.to_string()))
             } else {
-                bail!("wrong number of results returned: {}", results.len());
+                bail!(
+                    "wrong number of results returned: {:?}, expected 2",
+                    results
+                )
             }
         }
     }

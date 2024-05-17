@@ -30,6 +30,7 @@ pub enum TestValue {
 enum TestSuccessOrFailure {
     Succeeded(PathBuf),
     FailsToCompile(PathBuf, Error),
+    ErroredWhenRun(PathBuf, Error),
     CompiledButShouldnt(PathBuf),
     RanButShouldnt(PathBuf),
     MismatchedResult {
@@ -46,6 +47,9 @@ impl Display for TestSuccessOrFailure {
             TestSuccessOrFailure::Succeeded(path) => write!(f, "{}: Succeeded", path_display(path)),
             TestSuccessOrFailure::FailsToCompile(path, error) => {
                 write!(f, "{}: Compilation failed\n{error:?}\n", path_display(path))
+            }
+            TestSuccessOrFailure::ErroredWhenRun(path, error) => {
+                write!(f, "{}: Failed at runtime\n{error:?}\n", path_display(path))
             }
             TestSuccessOrFailure::CompiledButShouldnt(path) => write!(
                 f,
@@ -127,7 +131,7 @@ pub fn test_folder(
                         expected,
                         received,
                     },
-                    Err(error) => TestSuccessOrFailure::FailsToCompile(path, error),
+                    Err(error) => TestSuccessOrFailure::ErroredWhenRun(path, error),
                 },
             };
             (cloned_path, result)

@@ -224,6 +224,7 @@ fn find_moves_in_node(
         }
         HirNodeValue::NullableTraverse(val, _)
         | HirNodeValue::Access(val, _)
+        | HirNodeValue::UnionVariant(val, _)
         | HirNodeValue::Dereference(val) => {
             if is_affine(declarations, &expr.ty) {
                 find_moves_in_node(liveness, errors, declarations, val);
@@ -255,6 +256,8 @@ fn find_moves_in_node(
         HirNodeValue::GeneratorSuspend(_, _) => {}
         HirNodeValue::GeneratorCreate { .. } => {}
         HirNodeValue::StringConcat(_, _) => {}
+        HirNodeValue::Switch { .. } => {}
+        HirNodeValue::UnionTag(_) => {}
     }
 }
 
