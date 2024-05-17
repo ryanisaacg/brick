@@ -42,6 +42,7 @@ pub fn simplify_sequence_assignments(module: &mut HirModule) {
             }
             _ => return,
         }
+        rhs.ty = ExpressionType::Void;
         let mut temp = HirNode::dummy();
         std::mem::swap(&mut temp, rhs);
         *node = temp;
