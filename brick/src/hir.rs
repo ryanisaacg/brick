@@ -39,6 +39,7 @@ pub fn lower_module<'ast>(
 
     simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
     simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
+    simplify_sequence_expressions::simplify_trailing_if(&mut module);
 
     module
 }
