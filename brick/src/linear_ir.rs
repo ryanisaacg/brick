@@ -648,6 +648,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let ty = expr_ty_to_physical(&lhs.ty);
             let (location, offset) = lower_lvalue(ctx, *lhs);
             let rhs = lower_expression(ctx, *rhs);
+
             LinearNodeValue::WriteMemory {
                 location: Box::new(location),
                 offset,

@@ -1119,7 +1119,7 @@ fn typecheck_expression<'a>(
                 // TODO: bindings
                 let body_ty = typecheck_expression(
                     &case.body,
-                    outer_scopes,
+                    &scopes,
                     &mut child_scope,
                     context,
                     generator_input_ty,

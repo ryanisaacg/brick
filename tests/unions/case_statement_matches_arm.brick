@@ -5,7 +5,12 @@ union LeftOrRight {
 }
 
 let num = LeftOrRight { left: 0 };
-case num {
-    left(value) => 100,
-    right(value) => -100,
-}
+let result = case num {
+    left(value) => {
+        100
+    }
+    right(value) => {
+        -100
+    }
+};
+result
