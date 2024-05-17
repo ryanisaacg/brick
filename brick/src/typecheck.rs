@@ -202,6 +202,7 @@ pub struct FuncType {
 #[derive(Debug, PartialEq, Eq)]
 pub struct UnionType {
     pub id: TypeID,
+    pub variant_order: Vec<String>,
     pub variants: HashMap<String, ExpressionType>,
 }
 

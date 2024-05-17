@@ -255,6 +255,8 @@ fn find_moves_in_node(
         HirNodeValue::GeneratorSuspend(_, _) => {}
         HirNodeValue::GeneratorCreate { .. } => {}
         HirNodeValue::StringConcat(_, _) => {}
+        HirNodeValue::Switch { .. } => {}
+        HirNodeValue::UnionTag(_) => {}
     }
 }
 

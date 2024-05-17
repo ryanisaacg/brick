@@ -239,7 +239,10 @@ fn create_graph_for_node<'a>(
         | GeneratorResume(_)
         | GeneratorCreate { .. }
         | InterfaceAddress(_)
-        | StringConcat(_, _) => {
+        | StringConcat(_, _)
+        // TODO: handle switch in the CFG?
+        | Switch { .. }
+        | UnionTag(_) => {
             let start = graph.add_node(IntermediateNode::Expression(current));
 
             (start, start)

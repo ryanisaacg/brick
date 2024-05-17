@@ -124,6 +124,10 @@ fn resolve_declaration(
         AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, name, .. }) => {
             StaticDeclaration::Union(UnionType {
                 id: names_to_type_id[name.as_str()],
+                variant_order: variants
+                    .iter()
+                    .map(|variant| variant.name.clone())
+                    .collect(),
                 variants: variants
                     .iter()
                     .map(|NameAndType { name, ty: type_ }| {

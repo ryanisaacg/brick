@@ -385,6 +385,15 @@ impl HirNode {
                     right,
                 );
             }
+            HirNodeValue::Switch { value, cases } => {
+                callback(None, value);
+                for case in cases.iter() {
+                    callback(None, case);
+                }
+            }
+            HirNodeValue::UnionTag(inner) => {
+                callback(None, inner);
+            }
         }
     }
 
@@ -581,6 +590,15 @@ impl HirNode {
                     right,
                 );
             }
+            HirNodeValue::Switch { value, cases } => {
+                callback(None, value);
+                for case in cases.iter_mut() {
+                    callback(None, case);
+                }
+            }
+            HirNodeValue::UnionTag(inner) => {
+                callback(None, inner);
+            }
         }
     }
 }
@@ -661,6 +679,11 @@ pub enum HirNodeValue {
         generator_function: FunctionID,
         args: Vec<HirNode>,
     },
+    Switch {
+        value: Box<HirNode>,
+        cases: Vec<HirNode>,
+    },
+    UnionTag(Box<HirNode>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

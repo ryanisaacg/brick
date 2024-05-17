@@ -6,6 +6,6 @@ union Number {
 
 let num = Number { int: 12 };
 case num {
-    int(value) => value,
     float(value) => -1,
+    int(value) => value,
 }

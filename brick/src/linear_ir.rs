@@ -238,6 +238,10 @@ pub enum LinearNodeValue {
     Abort,
     Goto(Box<LinearNode>),
     GotoLabel(usize),
+    Switch {
+        value: Box<LinearNode>,
+        cases: Vec<LinearNode>,
+    },
 
     Sequence(Vec<LinearNode>),
     WriteRegister(RegisterID, Box<LinearNode>),
@@ -333,6 +337,12 @@ impl LinearNode {
             | LinearNodeValue::Loop(children)
             | LinearNodeValue::Sequence(children) => {
                 children.iter_mut().for_each(callback);
+            }
+            LinearNodeValue::Switch { value, cases } => {
+                callback(value);
+                for case in cases.iter_mut() {
+                    callback(case);
+                }
             }
             LinearNodeValue::Size(_)
             | LinearNodeValue::Int(_)
@@ -1124,6 +1134,21 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let right = lower_expression(ctx, *right);
             LinearNodeValue::RuntimeCall(LinearRuntimeFunction::StringConcat, vec![left, right])
         }
+        HirNodeValue::Switch { value, cases } => LinearNodeValue::Switch {
+            value: Box::new(lower_expression(ctx, *value)),
+            cases: cases
+                .into_iter()
+                .map(|case| lower_expression(ctx, case))
+                .collect(),
+        },
+        HirNodeValue::UnionTag(union) => {
+            let (location, offset) = lower_lvalue(ctx, *union);
+            LinearNodeValue::ReadMemory {
+                location: Box::new(location),
+                offset,
+                ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+            }
+        }
     };
 
     LinearNode { value, provenance }
@@ -1181,6 +1206,8 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
         HirNodeValue::GeneratorResume(_) => todo!(),
         HirNodeValue::GeneratorCreate { .. } => todo!(),
         HirNodeValue::StringConcat(_, _) => todo!(),
+        HirNodeValue::Switch { value, cases } => todo!(),
+        HirNodeValue::UnionTag(value) => todo!(),
     }
 }
 
@@ -1709,10 +1736,11 @@ fn layout_static_decl(
         StaticDeclaration::Union(union_ty) => {
             let mut largest_variant = 0;
             let variants = union_ty
-                .variants
+                .variant_order
                 .iter()
                 .enumerate()
-                .map(|(idx, (name, ty))| {
+                .map(|(idx, name)| {
+                    let ty = &union_ty.variants[name];
                     let variant = layout_type(declarations, layouts, ty);
                     let variant_size = variant.size(layouts);
                     if variant_size > largest_variant {

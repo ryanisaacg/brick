@@ -656,6 +656,13 @@ impl<'a> VM<'a> {
                     );
                 }
             }
+            LinearNodeValue::Switch { value, cases } => {
+                self.evaluate_node(params, value)?;
+                let Value::Size(idx) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.evaluate_node(params, &cases[idx])?;
+            }
         }
 
         Ok(())
