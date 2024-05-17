@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use crate::{
     hir::{
@@ -29,8 +29,7 @@ pub fn linearize_function(
     let HirNodeValue::Sequence(block) = function.body.value else {
         unreachable!()
     };
-    let mut body =
-        LinearContext::new(declarations, constant_data_region).linearize_nodes(block.into());
+    let mut body = LinearContext::new(declarations, constant_data_region).linearize_nodes(block);
     if let Some(GeneratorProperties {
         generator_var_id,
         param_var_id,
@@ -376,110 +375,11 @@ impl<'a> LinearContext<'a> {
         }
     }
 
-    pub fn linearize_nodes(&mut self, mut nodes: VecDeque<HirNode>) -> Vec<LinearNode> {
-        let mut values = Vec::new();
-
-        while let Some(node) = nodes.pop_front() {
-            match node.value {
-                HirNodeValue::Sequence(inner_nodes) => {
-                    nodes.reserve(inner_nodes.len());
-                    for node in inner_nodes.into_iter().rev() {
-                        nodes.push_front(node);
-                    }
-                }
-                HirNodeValue::Declaration(id) => {
-                    let ty = expr_ty_to_physical(&node.ty);
-                    values.push(LinearNode::new(LinearNodeValue::VariableInit(id, ty)));
-                }
-                HirNodeValue::Parameter(idx, id) => {
-                    let ty = expr_ty_to_physical(&node.ty);
-                    values.push(LinearNode::new(LinearNodeValue::VariableInit(id, ty)));
-
-                    let ty = expr_ty_to_physical(&node.ty);
-
-                    values.push(LinearNode::write_memory(
-                        LinearNode::new(LinearNodeValue::VariableLocation(id)),
-                        0,
-                        ty,
-                        LinearNode::new(LinearNodeValue::Parameter(idx)),
-                    ));
-                }
-                HirNodeValue::Assignment(lhs, rhs) => {
-                    let ty = expr_ty_to_physical(&lhs.ty);
-                    let (location, offset) = lower_lvalue(self, *lhs);
-                    let rhs = lower_expression(self, *rhs);
-                    values.push(LinearNode {
-                        value: LinearNodeValue::WriteMemory {
-                            location: Box::new(location),
-                            offset,
-                            value: Box::new(rhs),
-                            ty,
-                        },
-                        provenance: node.provenance,
-                    });
-                }
-
-                HirNodeValue::Return(expr) => {
-                    let expr = expr.map(|expr| Box::new(lower_expression(self, *expr)));
-                    values.push(LinearNode {
-                        value: LinearNodeValue::Return(expr),
-                        provenance: node.provenance,
-                    });
-                }
-                // TODO: should If be an expression in linear IR?
-                HirNodeValue::If(cond, if_block, else_block) => {
-                    let cond = lower_expression(self, *cond);
-                    let HirNodeValue::Sequence(if_block) = if_block.value else {
-                        unreachable!()
-                    };
-                    let if_block = self.linearize_nodes(if_block.into());
-                    let else_block = else_block.map(|else_block| {
-                        let HirNodeValue::Sequence(else_block) = else_block.value else {
-                            unreachable!()
-                        };
-                        self.linearize_nodes(else_block.into())
-                    });
-                    values.push(LinearNode::if_node(
-                        cond,
-                        if_block,
-                        else_block,
-                        node.provenance,
-                    ));
-                }
-                HirNodeValue::While(cond, block) => {
-                    let cond = lower_expression(self, *cond);
-                    let mut vec_deque = VecDeque::new();
-                    vec_deque.push_back(*block);
-                    let block = self.linearize_nodes(vec_deque);
-                    values.push(LinearNode {
-                        value: LinearNodeValue::Loop(vec![LinearNode::if_node(
-                            cond,
-                            block,
-                            Some(vec![LinearNode::new(LinearNodeValue::Break)]),
-                            None,
-                        )]),
-                        provenance: node.provenance,
-                    })
-                }
-                HirNodeValue::Loop(body) => {
-                    let provenance = body.provenance.clone();
-                    let mut vec_deque = VecDeque::new();
-                    vec_deque.push_back(*body);
-                    let body = self.linearize_nodes(vec_deque);
-                    values.push(LinearNode {
-                        value: LinearNodeValue::Loop(body),
-                        provenance,
-                    });
-                }
-
-                // TODO: auto-returns?
-                _ => {
-                    values.push(lower_expression(self, node));
-                }
-            }
-        }
-
-        values
+    pub fn linearize_nodes(&mut self, nodes: Vec<HirNode>) -> Vec<LinearNode> {
+        nodes
+            .into_iter()
+            .map(|node| lower_expression(self, node))
+            .collect()
     }
 }
 
@@ -686,17 +586,65 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 ty: expr_ty_to_physical(&ty),
             }
         }
-
-        HirNodeValue::If(_, _, _)
-        | HirNodeValue::While(_, _)
-        | HirNodeValue::Return(_)
-        | HirNodeValue::Loop(_) => {
-            unreachable!("all control flow must be removed from expressions in HIR")
+        HirNodeValue::If(cond, if_block, else_block) => {
+            let cond = lower_expression(ctx, *cond);
+            let HirNodeValue::Sequence(if_block) = if_block.value else {
+                unreachable!()
+            };
+            let if_block = ctx.linearize_nodes(if_block);
+            let else_block = else_block.map(|else_block| {
+                let HirNodeValue::Sequence(else_block) = else_block.value else {
+                    unreachable!()
+                };
+                ctx.linearize_nodes(else_block)
+            });
+            LinearNodeValue::If(Box::new(cond), if_block, else_block)
         }
-
-        HirNodeValue::Parameter(_, _) => todo!(),
-        HirNodeValue::Declaration(_) => todo!(),
-        HirNodeValue::Assignment(_, _) => todo!(),
+        HirNodeValue::Return(expr) => {
+            let expr = expr.map(|expr| Box::new(lower_expression(ctx, *expr)));
+            LinearNodeValue::Return(expr)
+        }
+        HirNodeValue::While(cond, block) => {
+            let cond = lower_expression(ctx, *cond);
+            let block = lower_expression(ctx, *block);
+            LinearNodeValue::Loop(vec![LinearNode::if_node(
+                cond,
+                vec![block],
+                Some(vec![LinearNode::new(LinearNodeValue::Break)]),
+                None,
+            )])
+        }
+        HirNodeValue::Loop(body) => {
+            let body = lower_expression(ctx, *body);
+            LinearNodeValue::Loop(vec![body])
+        }
+        HirNodeValue::Parameter(idx, id) => {
+            let ty = expr_ty_to_physical(&ty);
+            LinearNodeValue::Sequence(vec![
+                LinearNode::new(LinearNodeValue::VariableInit(id, ty.clone())),
+                LinearNode::write_memory(
+                    LinearNode::new(LinearNodeValue::VariableLocation(id)),
+                    0,
+                    ty,
+                    LinearNode::new(LinearNodeValue::Parameter(idx)),
+                ),
+            ])
+        }
+        HirNodeValue::Declaration(id) => {
+            let ty = expr_ty_to_physical(&ty);
+            LinearNodeValue::VariableInit(id, ty)
+        }
+        HirNodeValue::Assignment(lhs, rhs) => {
+            let ty = expr_ty_to_physical(&lhs.ty);
+            let (location, offset) = lower_lvalue(ctx, *lhs);
+            let rhs = lower_expression(ctx, *rhs);
+            LinearNodeValue::WriteMemory {
+                location: Box::new(location),
+                offset,
+                value: Box::new(rhs),
+                ty,
+            }
+        }
         HirNodeValue::TakeUnique(inner) | HirNodeValue::TakeShared(inner) => {
             let (ptr, offset) = lower_lvalue(ctx, *inner);
             LinearNodeValue::Arithmetic(
@@ -711,7 +659,12 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             offset: 0,
             ty: expr_ty_to_physical(&ty),
         },
-        HirNodeValue::Sequence(_) => todo!(),
+        HirNodeValue::Sequence(nodes) => LinearNodeValue::Sequence(
+            nodes
+                .into_iter()
+                .map(|node| lower_expression(ctx, node))
+                .collect(),
+        ),
         HirNodeValue::StructLiteral(struct_id, mut values) => {
             let Some(DeclaredTypeLayout {
                 value: TypeLayoutValue::Structure(layouts),

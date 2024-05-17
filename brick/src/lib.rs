@@ -166,7 +166,7 @@ pub fn lower_code(
         return_ty => Some(expr_ty_to_physical(return_ty)),
     });
     let statements =
-        LinearContext::new(&ty_declarations, &mut constant_data).linearize_nodes(statements.into());
+        LinearContext::new(&ty_declarations, &mut constant_data).linearize_nodes(statements);
 
     Ok(LowerResults {
         statements,
