@@ -91,7 +91,7 @@ fn look_for_value(
 fn value_to_test_value(val: Value) -> TestValue {
     match val {
         Value::FunctionID(_) => todo!(),
-        Value::Size(_) => todo!(),
+        Value::Size(val) => TestValue::Int(val as i64),
         Value::Byte(byte) => TestValue::Int(byte as i64),
         Value::Int32(val) => TestValue::Int(val as i64),
         Value::Int64(val) => TestValue::Int(val),

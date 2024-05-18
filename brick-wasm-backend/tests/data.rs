@@ -66,15 +66,17 @@ fn data() {
             "coroutine/yield_twice.brick",
             "functions/can_assign_structs.brick",
             "interfaces/can_assign_structs.brick",
+            // concat allocation
+            "strings/concat.brick",
+            // nulls not implemented
             "nullability/basic_null.brick",
             "nullability/null_coalesce.brick",
             "nullability/null_traverse_is_null.brick",
             "nullability/null_traverse_union.brick",
-            "strings/concat.brick",
             "unions/basic_construction.brick",
             "unions/incorrect_access.brick",
-            "unions/case_statement_extracts_value.brick",
-            "unions/case_follows_or_pattern.brick",
+            // non-i32 union branches
+            "unions/float_variant.brick",
         ]
         .into_iter()
         .collect(),

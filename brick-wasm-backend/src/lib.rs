@@ -21,6 +21,8 @@ const HEAP_MINIMUM_PAGES: u64 = 48;
 const MEMORY_MINIMUM_PAGES: u64 = STACK_PAGES + HEAP_MINIMUM_PAGES;
 const MAXIMUM_MEMORY: u64 = 16_384;
 
+const WASM_USIZE: usize = 4;
+
 pub fn compile(
     module_name: &str,
     source_name: &'static str,
@@ -34,7 +36,7 @@ pub fn compile(
         declarations: _,
         ty_declarations,
         constant_data,
-    } = lower_code(module_name, source_name, contents)?;
+    } = lower_code(module_name, source_name, contents, WASM_USIZE)?;
     let main = LinearFunction {
         id: FunctionID::new(),
         body: statements,

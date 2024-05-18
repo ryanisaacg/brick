@@ -8,6 +8,8 @@ use brick::{
 };
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
+use crate::WASM_USIZE;
+
 pub fn encode(
     function_id_to_idx: &HashMap<FunctionID, u32>,
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
@@ -135,7 +137,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
         }
         LinearNodeValue::VariableInit(var_id, ty) => {
             ctx.variable_locations.insert(*var_id, ctx.stack_size);
-            ctx.stack_size += ty.size(ctx.declarations) as i32;
+            ctx.stack_size += ty.size_from_decls(ctx.declarations, WASM_USIZE) as i32;
         }
         LinearNodeValue::VariableDestroy(_) => {
             // TODO: do we care
@@ -660,7 +662,20 @@ pub fn walk_vals_read_order(
                     }
                     callback(ValType::I32, offset);
                 }
-                TypeLayoutValue::Union(_) => todo!(),
+                TypeLayoutValue::Union(variants) => {
+                    let size = variants
+                        .values()
+                        .map(|(_, ty)| ty.size_from_decls(declarations, WASM_USIZE) as u64)
+                        .max();
+                    // largest variant
+                    if let Some(size) = size {
+                        for i in 1..=(size / 4) {
+                            callback(ValType::I32, offset + i * 4);
+                        }
+                    }
+                    // union tag
+                    callback(ValType::I32, offset);
+                }
             }
         }
         PhysicalType::Nullable(inner) => {
@@ -675,12 +690,12 @@ pub fn walk_vals_read_order(
         }
         PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
         | PhysicalType::Generator => {
-            callback(ValType::I32, offset + 16);
             callback(ValType::I32, offset + 8);
+            callback(ValType::I32, offset + 4);
             callback(ValType::I32, offset);
         }
         PhysicalType::Collection(PhysicalCollection::String) => {
-            callback(ValType::I32, offset + 8);
+            callback(ValType::I32, offset + 4);
             callback(ValType::I32, offset);
         }
     }
@@ -735,10 +750,19 @@ pub fn walk_vals_write_order(
                     offset += 4;
                 }
             }
-            TypeLayoutValue::Union(_variants) => {
-                // TODO: ***EXTREMELY*** temp
+            TypeLayoutValue::Union(variants) => {
+                let size = variants
+                    .values()
+                    .map(|(_, ty)| ty.size_from_decls(declarations, WASM_USIZE) as u64)
+                    .max();
+                // union tag
                 callback(ValType::I32, offset);
-                callback(ValType::I32, offset + 4);
+                // largest variant
+                if let Some(size) = size {
+                    for i in 1..=(size / 4) {
+                        callback(ValType::I32, offset + i * 4);
+                    }
+                }
             }
         },
         PhysicalType::Nullable(inner) => {
@@ -748,12 +772,12 @@ pub fn walk_vals_write_order(
         PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
         | PhysicalType::Generator => {
             callback(ValType::I32, offset);
+            callback(ValType::I32, offset + 4);
             callback(ValType::I32, offset + 8);
-            callback(ValType::I32, offset + 16);
         }
         PhysicalType::Collection(PhysicalCollection::String) => {
             callback(ValType::I32, offset);
-            callback(ValType::I32, offset + 8);
+            callback(ValType::I32, offset + 4);
         }
     }
 }

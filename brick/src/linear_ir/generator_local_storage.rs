@@ -1,16 +1,13 @@
 use std::collections::HashMap;
 
-use crate::{
-    id::{TypeID, VariableID},
-    linear_ir::POINTER_SIZE,
-};
+use crate::id::VariableID;
 
-use super::{DeclaredTypeLayout, LinearNode, LinearNodeValue, PhysicalPrimitive, PhysicalType};
+use super::{LinearContext, LinearNode, LinearNodeValue, PhysicalPrimitive, PhysicalType};
 
 pub fn generator_local_storage(
+    ctx: &LinearContext,
     generator_id: VariableID,
     param_var_id: Option<VariableID>,
-    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     body: &mut [LinearNode],
 ) {
     let mut variable_offsets = HashMap::new();
@@ -20,7 +17,7 @@ pub fn generator_local_storage(
             LinearNodeValue::VariableInit(var_id, ty)
                 if !is_special(generator_id, param_var_id, *var_id) =>
             {
-                let size = ty.size(declarations);
+                let size = ty.size(ctx);
                 variable_offsets.insert(*var_id, generator_size);
                 generator_size += size;
                 node.value = LinearNodeValue::Sequence(Vec::new());
@@ -37,7 +34,7 @@ pub fn generator_local_storage(
                             0,
                             PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                         ),
-                        POINTER_SIZE * 2,
+                        ctx.pointer_size * 2,
                         PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                     ),
                     LinearNode::size(offset),

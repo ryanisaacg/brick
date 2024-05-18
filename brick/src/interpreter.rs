@@ -82,6 +82,8 @@ pub struct VM<'a> {
     fns: &'a HashMap<FunctionID, Function>,
 }
 
+const USIZE: usize = std::mem::size_of::<usize>();
+
 impl<'a> VM<'a> {
     pub fn new(
         layouts: HashMap<TypeID, DeclaredTypeLayout>,
@@ -226,7 +228,7 @@ impl<'a> VM<'a> {
                 }
             }
             LinearNodeValue::VariableInit(var_id, ty) => {
-                self.stack_ptr -= ty.size(&self.layouts);
+                self.stack_ptr -= ty.size_from_decls(&self.layouts, USIZE);
                 self.variable_locations
                     .last_mut()
                     .unwrap()
@@ -239,7 +241,7 @@ impl<'a> VM<'a> {
                     .unwrap()
                     .remove(var_id)
                     .unwrap();
-                self.stack_ptr += ty.size(&self.layouts);
+                self.stack_ptr += ty.size_from_decls(&self.layouts, USIZE);
             }
             LinearNodeValue::VariableLocation(var_id) => {
                 self.op_stack.push(Value::Size(
@@ -729,7 +731,13 @@ fn write(
             }
             Value::Byte(_) => {
                 memory[location] = 1;
-                write(op_stack, layouts, memory, location + NULL_TAG_SIZE, ty);
+                write(
+                    op_stack,
+                    layouts,
+                    memory,
+                    location + NULL_TAG_SIZE.size(USIZE),
+                    ty,
+                );
             }
             _ => unreachable!(),
         },
@@ -823,7 +831,13 @@ fn read(
             if null_flag == 0 {
                 op_stack.push(bool_value(false));
             } else {
-                read(op_stack, layouts, memory, location + NULL_TAG_SIZE, ty);
+                read(
+                    op_stack,
+                    layouts,
+                    memory,
+                    location + NULL_TAG_SIZE.size(USIZE),
+                    ty,
+                );
                 op_stack.push(bool_value(true));
             }
         }

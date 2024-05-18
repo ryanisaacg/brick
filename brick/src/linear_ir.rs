@@ -25,11 +25,13 @@ pub fn linearize_function(
     constant_data_region: &mut Vec<u8>,
     declarations: &HashMap<TypeID, DeclaredTypeLayout>,
     function: HirFunction,
+    pointer_size: usize,
 ) -> LinearFunction {
     let HirNodeValue::Sequence(block) = function.body.value else {
         unreachable!()
     };
-    let mut body = LinearContext::new(declarations, constant_data_region).linearize_nodes(block);
+    let mut ctx = LinearContext::new(declarations, constant_data_region, pointer_size);
+    let mut body = ctx.linearize_nodes(block);
     if let Some(GeneratorProperties {
         generator_var_id,
         param_var_id,
@@ -37,9 +39,9 @@ pub fn linearize_function(
     }) = function.generator
     {
         generator_local_storage::generator_local_storage(
+            &ctx,
             generator_var_id,
             param_var_id,
-            declarations,
             &mut body[..],
         );
     }
@@ -372,16 +374,19 @@ impl LinearNode {
 pub struct LinearContext<'a> {
     declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
     constant_data_region: &'a mut Vec<u8>,
+    pointer_size: usize,
 }
 
 impl<'a> LinearContext<'a> {
     pub fn new(
         declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
         constant_data_region: &'a mut Vec<u8>,
+        pointer_size: usize,
     ) -> LinearContext<'a> {
         LinearContext {
             declarations,
             constant_data_region,
+            pointer_size,
         }
     }
 
@@ -496,7 +501,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                     Some(vec![
                         LinearNode::read_memory(
                             location,
-                            offset + UNION_TAG_SIZE,
+                            offset + UNION_TAG_SIZE.size(ctx.pointer_size),
                             variant_ty.clone(),
                         ),
                         LinearNode::bool_value(true),
@@ -507,8 +512,8 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 let (location, mut offset) = lower_lvalue(ctx, *lhs);
                 offset += match rhs.as_str() {
                     "function" => 0,
-                    "resume_point" => POINTER_SIZE,
-                    "stack_ptr" => POINTER_SIZE * 2,
+                    "resume_point" => ctx.pointer_size,
+                    "stack_ptr" => ctx.pointer_size * 2,
                     rhs => unreachable!("illegal rhs: {}", rhs),
                 };
                 LinearNodeValue::ReadMemory {
@@ -533,7 +538,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             };
             let mut ty = *ty;
 
-            let mut read_offset = NULL_TAG_SIZE;
+            let mut read_offset = NULL_TAG_SIZE.size(ctx.pointer_size);
             for name in rhs {
                 let PhysicalType::Referenced(id) = ty else {
                     unreachable!()
@@ -698,11 +703,11 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let ExpressionType::Collection(CollectionType::Array(inner_ty)) = ty else {
                 unreachable!()
             };
-            let size = expression_type_size(ctx.declarations, &inner_ty);
+            let inner_ty = expr_ty_to_physical(inner_ty.as_ref());
+            let size = inner_ty.size(ctx);
 
             let length = values.len();
 
-            let inner_ty = *inner_ty;
             let buffer_ptr = RegisterID::new();
 
             let mut instrs = vec![LinearNode::write_register(
@@ -713,7 +718,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 LinearNode::write_memory(
                     LinearNode::read_register(buffer_ptr),
                     size * idx,
-                    expr_ty_to_physical(&inner_ty),
+                    inner_ty.clone(),
                     lower_expression(ctx, value),
                 )
             }));
@@ -730,9 +735,9 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let ExpressionType::Collection(CollectionType::Array(inner_ty)) = ty else {
                 unreachable!()
             };
-            let size = expression_type_size(ctx.declarations, &inner_ty);
+            let inner_ty = expr_ty_to_physical(inner_ty.as_ref());
+            let size = inner_ty.size(ctx);
             let length = lower_expression(ctx, *length);
-            let inner_ty = *inner_ty;
 
             let length_register = RegisterID::new();
             let buffer_register = RegisterID::new();
@@ -769,7 +774,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                                 ),
                             ),
                             0,
-                            expr_ty_to_physical(&inner_ty),
+                            inner_ty,
                             lower_expression(ctx, *value),
                         ),
                         LinearNode::write_register(
@@ -813,7 +818,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 unreachable!()
             };
             let (table, mut offset) = lower_lvalue(ctx, *table);
-            offset += POINTER_SIZE;
+            offset += ctx.pointer_size;
             offset += fields
                 .iter()
                 .enumerate()
@@ -883,8 +888,8 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let key_ty = expr_ty_to_physical(&key_ty);
             let value_ty = expr_ty_to_physical(&value_ty);
 
-            let key_size = key_ty.size(ctx.declarations);
-            let value_size = value_ty.size(ctx.declarations);
+            let key_size = key_ty.size(ctx);
+            let value_size = value_ty.size(ctx);
             let entry_size = key_size + value_size;
 
             let length = entries.len();
@@ -949,7 +954,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let (location, offset) = lower_lvalue(ctx, *arr);
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
-                offset: offset + POINTER_SIZE,
+                offset: offset + ctx.pointer_size,
                 ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             }
         }
@@ -970,8 +975,9 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 location: Box::new(LinearNode::new(array_alloc_space_to_push(
                     location,
                     offset,
-                    array_inner_ty.size(ctx.declarations),
+                    array_inner_ty.size(ctx),
                     provenance.clone(),
+                    ctx.pointer_size,
                 ))),
                 offset: 0,
                 ty: array_inner_ty,
@@ -991,8 +997,8 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
 
             let key_ty = expr_ty_to_physical(key_ty);
             let value_ty = expr_ty_to_physical(value_ty);
-            let key_size = key_ty.size(ctx.declarations);
-            let entry_size = key_size + value_ty.size(ctx.declarations);
+            let key_size = key_ty.size(ctx);
+            let entry_size = key_size + value_ty.size(ctx);
             let PhysicalType::Primitive(key_ty) = key_ty else {
                 unreachable!()
             };
@@ -1054,6 +1060,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                                 dict_offset,
                                 entry_size,
                                 None,
+                                ctx.pointer_size,
                             )),
                         ),
                         LinearNode::write_memory(
@@ -1088,7 +1095,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
 
             let key_ty = expr_ty_to_physical(key_ty);
             let value_ty = expr_ty_to_physical(value_ty);
-            let entry_size = key_ty.size(ctx.declarations) + value_ty.size(ctx.declarations);
+            let entry_size = key_ty.size(ctx) + value_ty.size(ctx);
             let PhysicalType::Primitive(key_ty) = key_ty else {
                 unreachable!()
             };
@@ -1109,7 +1116,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let location = lower_expression(ctx, *generator);
             LinearNodeValue::WriteMemory {
                 location: Box::new(location),
-                offset: POINTER_SIZE,
+                offset: ctx.pointer_size,
                 ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                 value: Box::new(LinearNode::size(label)),
             }
@@ -1163,7 +1170,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let (location, offset) = lower_lvalue(ctx, *union);
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
-                offset: offset + UNION_TAG_SIZE,
+                offset: offset + UNION_TAG_SIZE.size(ctx.pointer_size),
                 ty: variant_ty.clone(),
             }
         }
@@ -1248,7 +1255,7 @@ fn access_location(ctx: &mut LinearContext<'_>, lhs: HirNode, rhs: String) -> (L
                 .find_map(|(name, offset, _)| if name == &rhs { Some(offset) } else { None })
                 .unwrap())
         }
-        TypeLayoutValue::Union(_) => UNION_TAG_SIZE,
+        TypeLayoutValue::Union(_) => UNION_TAG_SIZE.size(ctx.pointer_size),
         TypeLayoutValue::Interface(_fields) => todo!(), //*fields.get(&rhs).unwrap(),
     };
 
@@ -1261,7 +1268,7 @@ fn array_index_location(
     idx: HirNode,
     ty: &ExpressionType,
 ) -> (LinearNode, usize) {
-    let size = expression_type_size(ctx.declarations, ty);
+    let size = expr_ty_to_physical(ty).size(ctx);
     let idx = lower_expression(ctx, idx);
     let arr = lower_expression(ctx, arr);
 
@@ -1319,8 +1326,8 @@ fn dict_index_location_or_abort(
     let idx_ty = primitive_to_physical(*idx_ty);
 
     let key_ty = expr_ty_to_physical(key_ty);
-    let key_size = key_ty.size(ctx.declarations);
-    let value_size = expression_type_size(ctx.declarations, value_ty);
+    let key_size = key_ty.size(ctx);
+    let value_size = expr_ty_to_physical(value_ty).size(ctx);
     let entry_size = key_size + value_size;
 
     let dict = lower_expression(ctx, dict);
@@ -1362,9 +1369,10 @@ fn array_alloc_space_to_push(
     array_offset: usize,
     elem_size: usize,
     provenance: Option<SourceRange>,
+    pointer_size: usize,
 ) -> LinearNodeValue {
-    let length_offset = array_offset + POINTER_SIZE;
-    let capacity_offset = length_offset + POINTER_SIZE;
+    let length_offset = array_offset + pointer_size;
+    let capacity_offset = length_offset + pointer_size;
 
     let arr_ptr = RegisterID::new();
     let length_register = RegisterID::new();
@@ -1565,39 +1573,9 @@ fn dict_get_entry_for_key(
     ]))
 }
 
-// TODO: this should probably be determined by the backend...
-const POINTER_SIZE: usize = 8;
-// TODO: is this a good idea
-const UNION_TAG_SIZE: usize = 8;
-// TODO: alignment
-pub const NULL_TAG_SIZE: usize = 4;
+const UNION_TAG_SIZE: SizeInPointers = SizeInPointers(1);
+pub const NULL_TAG_SIZE: SizeInPointers = SizeInPointers(1);
 const FUNCTION_ID_SIZE: usize = 4;
-
-// TODO: delete this?
-fn expression_type_size(
-    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
-    expr: &ExpressionType,
-) -> usize {
-    // TODO: alignment
-    match expr {
-        ExpressionType::Void => 0,
-        ExpressionType::Unreachable => unreachable!(),
-        ExpressionType::Primitive(prim) => primitive_type_size(primitive_to_physical(*prim)),
-        ExpressionType::InstanceOf(id) => declarations[id].size(),
-        ExpressionType::Pointer(_, _) => POINTER_SIZE,
-        ExpressionType::Collection(CollectionType::Array(_)) => POINTER_SIZE * 3,
-        ExpressionType::Collection(CollectionType::Dict(..)) => POINTER_SIZE * 3,
-        ExpressionType::Collection(CollectionType::String) => POINTER_SIZE * 2,
-        ExpressionType::Null => 1,
-        ExpressionType::Nullable(inner) => {
-            NULL_TAG_SIZE + expression_type_size(declarations, inner)
-        }
-        ExpressionType::ReferenceTo(_) => todo!(),
-        ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => POINTER_SIZE * 3,
-        ExpressionType::FunctionReference { .. } => FUNCTION_ID_SIZE,
-    }
-}
 
 fn primitive_to_physical(p: PrimitiveType) -> PhysicalPrimitive {
     match p {
@@ -1612,14 +1590,14 @@ fn primitive_to_physical(p: PrimitiveType) -> PhysicalPrimitive {
     }
 }
 
-fn primitive_type_size(prim: PhysicalPrimitive) -> usize {
+fn primitive_type_size(prim: PhysicalPrimitive, pointer_size: usize) -> usize {
     match prim {
         PhysicalPrimitive::Int32 => 4,
         PhysicalPrimitive::Float32 => 4,
         PhysicalPrimitive::Int64 => 8,
         PhysicalPrimitive::Float64 => 8,
         PhysicalPrimitive::Byte => 1,
-        PhysicalPrimitive::PointerSize => POINTER_SIZE,
+        PhysicalPrimitive::PointerSize => pointer_size,
     }
 }
 
@@ -1674,18 +1652,30 @@ pub enum PhysicalCollection {
 }
 
 impl PhysicalType {
-    pub fn size(&self, declarations: &HashMap<TypeID, DeclaredTypeLayout>) -> usize {
+    pub fn size(&self, ctx: &LinearContext<'_>) -> usize {
+        let declarations = &ctx.declarations;
+        let pointer_size = ctx.pointer_size;
+        self.size_from_decls(declarations, pointer_size)
+    }
+
+    pub fn size_from_decls(
+        &self,
+        declarations: &HashMap<TypeID, DeclaredTypeLayout>,
+        pointer_size: usize,
+    ) -> usize {
         match self {
-            PhysicalType::Primitive(p) => primitive_type_size(*p),
+            PhysicalType::Primitive(p) => primitive_type_size(*p, pointer_size),
             PhysicalType::Referenced(id) => declarations[id].size(),
-            PhysicalType::Nullable(ty) => NULL_TAG_SIZE + ty.size(declarations),
+            PhysicalType::Nullable(ty) => {
+                NULL_TAG_SIZE.size(pointer_size) + ty.size_from_decls(declarations, pointer_size)
+            }
             PhysicalType::FunctionPointer => FUNCTION_ID_SIZE,
             PhysicalType::Collection(ty) => match ty {
-                PhysicalCollection::Array => POINTER_SIZE * 3,
-                PhysicalCollection::Dict => POINTER_SIZE * 3,
-                PhysicalCollection::String => POINTER_SIZE * 2,
+                PhysicalCollection::Array => pointer_size * 3,
+                PhysicalCollection::Dict => pointer_size * 3,
+                PhysicalCollection::String => pointer_size * 2,
             },
-            PhysicalType::Generator => POINTER_SIZE * 3,
+            PhysicalType::Generator => pointer_size * 3,
         }
     }
 }
@@ -1693,13 +1683,14 @@ impl PhysicalType {
 pub fn layout_types(
     declarations: &HashMap<String, StaticDeclaration>,
     layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
+    pointer_size: usize,
 ) {
     let declarations: HashMap<_, _> = declarations
         .iter()
         .map(|(_, decl)| (decl.id(), decl))
         .collect();
     for decl in declarations.values() {
-        layout_static_decl(&declarations, layouts, decl);
+        layout_static_decl(&declarations, layouts, decl, pointer_size);
     }
 }
 
@@ -1707,6 +1698,7 @@ fn layout_static_decl(
     declarations: &HashMap<TypeID, &StaticDeclaration>,
     layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
     decl: &StaticDeclaration,
+    pointer_size: usize,
 ) -> usize {
     if let Some(layout) = layouts.get(&decl.id()) {
         return layout.size;
@@ -1719,8 +1711,8 @@ fn layout_static_decl(
                 .fields
                 .iter()
                 .map(|(name, field)| {
-                    let field = layout_type(declarations, layouts, field);
-                    let field_size = field.size(layouts);
+                    let field = layout_type(declarations, layouts, field, pointer_size);
+                    let field_size = field.size_from_decls(layouts, pointer_size);
                     let offset = size;
                     size += field_size;
                     (name.clone(), offset, field)
@@ -1732,10 +1724,10 @@ fn layout_static_decl(
             }
         }
         StaticDeclaration::Func(_) => {
-            return POINTER_SIZE;
+            return pointer_size;
         }
         StaticDeclaration::Interface(interface_ty) => {
-            let mut size = POINTER_SIZE;
+            let mut size = pointer_size;
             let fields = interface_ty
                 .associated_functions
                 .values()
@@ -1760,8 +1752,8 @@ fn layout_static_decl(
                 .enumerate()
                 .map(|(idx, name)| {
                     let ty = &union_ty.variants[name];
-                    let variant = layout_type(declarations, layouts, ty);
-                    let variant_size = variant.size(layouts);
+                    let variant = layout_type(declarations, layouts, ty, pointer_size);
+                    let variant_size = variant.size_from_decls(layouts, pointer_size);
                     if variant_size > largest_variant {
                         largest_variant = variant_size;
                     }
@@ -1772,12 +1764,12 @@ fn layout_static_decl(
 
             DeclaredTypeLayout {
                 value: TypeLayoutValue::Union(variants),
-                size: UNION_TAG_SIZE + largest_variant,
+                size: UNION_TAG_SIZE.size(pointer_size) + largest_variant,
             }
         }
         // Modules are completely compiled out
         StaticDeclaration::Module(module) => {
-            layout_types(&module.exports, layouts);
+            layout_types(&module.exports, layouts, pointer_size);
             return 0;
         }
     };
@@ -1791,6 +1783,7 @@ fn layout_type(
     declarations: &HashMap<TypeID, &StaticDeclaration>,
     layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
     ty: &ExpressionType,
+    pointer_size: usize,
 ) -> PhysicalType {
     match ty {
         ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
@@ -1799,7 +1792,7 @@ fn layout_type(
             PhysicalType::Primitive(p)
         }
         ExpressionType::InstanceOf(id) => {
-            layout_static_decl(declarations, layouts, declarations[id]);
+            layout_static_decl(declarations, layouts, declarations[id], pointer_size);
             PhysicalType::Referenced(*id)
         }
         ExpressionType::Pointer(_, _) => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
@@ -1813,7 +1806,7 @@ fn layout_type(
             PhysicalType::Collection(PhysicalCollection::String)
         }
         ExpressionType::Nullable(inner) => {
-            let inner = layout_type(declarations, layouts, inner);
+            let inner = layout_type(declarations, layouts, inner, pointer_size);
             PhysicalType::Nullable(Box::new(inner))
         }
         ExpressionType::ReferenceTo(_) => todo!(),
@@ -1844,5 +1837,13 @@ pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => PhysicalType::Generator,
         ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,
+    }
+}
+
+pub struct SizeInPointers(pub usize);
+
+impl SizeInPointers {
+    pub fn size(&self, pointer_size: usize) -> usize {
+        self.0 * pointer_size
     }
 }
