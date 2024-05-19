@@ -273,6 +273,8 @@ pub enum TypecheckError {
     IllegalDotRHS(SourceRange),
     #[error("variant doesn't match previous count of bindings: {0}")]
     BindingCountDoesntMatch(SourceRange),
+    #[error("variant doesn't match binding name: {0}")]
+    BindingNameDoesntMatch(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -1115,7 +1117,7 @@ fn typecheck_expression<'a>(
                                 ));
                             }
                         }
-                        BindingState::Binding(_name, binding_ty) => {
+                        BindingState::Binding(name, binding_ty) => {
                             if let Some(variant_ty) = variant_ty {
                                 push_errors(
                                     &mut errors,
@@ -1125,6 +1127,11 @@ fn typecheck_expression<'a>(
                                         variant_ty,
                                     ),
                                 );
+                                if *name != &variant.bindings[0] {
+                                    errors.push(TypecheckError::BindingNameDoesntMatch(
+                                        variant.provenance.clone(),
+                                    ));
+                                }
                             } else {
                                 errors.push(TypecheckError::BindingCountDoesntMatch(
                                     variant.provenance.clone(),
