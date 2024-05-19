@@ -18,6 +18,7 @@ mod interface_conversion_pass;
 mod lower;
 mod rewrite_associated_functions;
 mod simplify_sequence_expressions;
+mod unions;
 mod widen_null;
 
 pub fn lower_module<'ast>(
@@ -28,6 +29,8 @@ pub fn lower_module<'ast>(
 
     // Important that this comes before ANY pass that uses the declarations
     coroutines::rewrite_generator_calls(&mut module);
+
+    unions::convert_calls_to_union_literals(&mut module, declarations);
 
     module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
 
@@ -89,6 +92,12 @@ pub struct HirNode {
     pub value: HirNodeValue,
     pub ty: ExpressionType,
     pub provenance: Option<SourceRange>,
+}
+
+impl Default for HirNode {
+    fn default() -> Self {
+        HirNode::dummy()
+    }
 }
 
 impl HirNode {
@@ -605,7 +614,7 @@ impl HirNode {
 
 // TODO: should struct fields also be referred to via opaque IDs?
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub enum HirNodeValue {
     /// Give the Nth parameter the given ID
     Parameter(usize, VariableID),
@@ -634,6 +643,7 @@ pub enum HirNodeValue {
     Float(f64),
     Bool(bool),
     PointerSize(usize),
+    #[default]
     Null,
     CharLiteral(char),
     StringLiteral(String),

@@ -4,5 +4,5 @@ union Number {
     float(f32),
 }
 
-let num = Number { int: 12 };
+let num = Number.int(12);
 num.int ?? 0

@@ -4,7 +4,7 @@ union LeftOrRight {
     right(i32),
 }
 
-let num = LeftOrRight { left: 0 };
+let num = LeftOrRight.left(0);
 case num {
     left(value) => {
         100

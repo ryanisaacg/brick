@@ -268,6 +268,8 @@ pub enum TypecheckError {
     MustReturnGenerator(SourceRange),
     #[error("argument to case statement must be a union: {0}")]
     CaseStatementRequiresUnion(SourceRange),
+    #[error("right side of dot operator must be a name: {0}")]
+    IllegalDotRHS(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -618,7 +620,9 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let AstNodeValue::Name { value: name, .. } = &right.value else {
-                panic!("TODO: right side of dot operator");
+                return Err(vec![TypecheckError::IllegalDotRHS(
+                    right.provenance.clone(),
+                )]);
             };
             match fully_dereference(left_ty) {
                 ExpressionType::InstanceOf(id) => {
@@ -626,6 +630,25 @@ fn typecheck_expression<'a>(
                     let ty = context.decl(id).unwrap().field_access(name);
                     ty
                 }
+                ExpressionType::ReferenceTo(id) => match context.decl(id).unwrap() {
+                    StaticDeclaration::Union(union_ty) => {
+                        // TODO: fallible
+                        let variant_ty = union_ty.variants.get(name).unwrap();
+
+                        ExpressionType::FunctionReference {
+                            parameters: vec![variant_ty.clone()],
+                            returns: Box::new(ExpressionType::InstanceOf(*id)),
+                        }
+                    }
+                    // TODO: module dot operator
+                    // TODO: static functions on structs?
+                    StaticDeclaration::Struct(_)
+                    | StaticDeclaration::Module(_)
+                    | StaticDeclaration::Func(_)
+                    | StaticDeclaration::Interface(_) => {
+                        return Err(vec![TypecheckError::IllegalDotLHS(left.provenance.clone())]);
+                    }
+                },
                 ExpressionType::Collection(CollectionType::Array(_item_ty)) => {
                     let runtime = array_runtime_functions();
                     if let Some(ty) = runtime.get(name) {
@@ -1201,6 +1224,29 @@ fn typecheck_expression<'a>(
                         assert_assignable_to(&context.id_to_decl, param_ty, arg)?;
                     }
                     *yield_ty.clone()
+                }
+                ExpressionType::FunctionReference {
+                    parameters,
+                    returns,
+                } => {
+                    let mut errors = Vec::new();
+                    for (arg, param) in args.iter().zip(parameters.iter()) {
+                        let arg = typecheck_expression(
+                            arg,
+                            outer_scopes,
+                            current_scope,
+                            context,
+                            generator_input_ty,
+                        )?;
+                        push_errors(
+                            &mut errors,
+                            assert_assignable_to(&context.id_to_decl, param, arg),
+                        );
+                    }
+
+                    assert_no_errors(errors)?;
+
+                    returns.as_ref().clone()
                 }
                 _ => return Err(vec![TypecheckError::CantCall(node.provenance.clone())]),
             }

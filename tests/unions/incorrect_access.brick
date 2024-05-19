@@ -4,5 +4,5 @@ union Number {
     b(i32),
 }
 
-let num = Number { a: 12 };
+let num = Number.a(12);
 num.b ?? -50

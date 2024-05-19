@@ -4,7 +4,7 @@ union Number {
     float(f32),
 }
 
-let num = Number { float: 5.5 };
+let num = Number.float(5.5);
 case num {
     float(value) => value,
     int(value) => -10.0,
