@@ -161,9 +161,6 @@ anonymous types:
 - anonymous interface
 
 unions:
-- case statements can match through pointers:
-    - shared pointers
-    - unique pointers
 - auto-cast non-i32 members when reading / writing in wasm
 - case statement exhaustiveness
 - unions can extend unions (refer to fields with nested access?)

@@ -1,0 +1,13 @@
+// NoCompile
+union Number {
+    left(i32),
+    right(i32),
+}
+
+let x = Number.left(8);
+case unique x {
+    left(val) => {
+        val = 5;
+    }
+    right(_) => {}
+}

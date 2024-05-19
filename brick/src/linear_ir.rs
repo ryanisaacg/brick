@@ -8,7 +8,9 @@ use crate::{
     id::{FunctionID, RegisterID, TypeID, VariableID},
     provenance::SourceRange,
     runtime::RuntimeFunction,
-    typecheck::{CollectionType, ExpressionType, PrimitiveType, StaticDeclaration},
+    typecheck::{
+        shallow_dereference, CollectionType, ExpressionType, PrimitiveType, StaticDeclaration,
+    },
 };
 
 mod generator_local_storage;
@@ -1164,7 +1166,11 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 .collect(),
         },
         HirNodeValue::UnionTag(union) => {
-            let (location, offset) = lower_lvalue(ctx, *union);
+            let (location, offset) = if matches!(union.ty, ExpressionType::Pointer(_, _)) {
+                (lower_expression(ctx, *union), 0)
+            } else {
+                lower_lvalue(ctx, *union)
+            };
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
@@ -1172,8 +1178,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             }
         }
         HirNodeValue::UnionVariant(union, variant) => {
-            let ty = union
-                .ty
+            let ty = shallow_dereference(&union.ty)
                 .id()
                 .and_then(|id| match &ctx.declarations[id].value {
                     TypeLayoutValue::Union(ty) => Some(ty),
@@ -1181,7 +1186,11 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 })
                 .unwrap();
             let (_variant_idx, variant_ty) = &ty[&variant];
-            let (location, offset) = lower_lvalue(ctx, *union);
+            let (location, offset) = if matches!(union.ty, ExpressionType::Pointer(_, _)) {
+                (lower_expression(ctx, *union), 0)
+            } else {
+                lower_lvalue(ctx, *union)
+            };
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset: offset + UNION_TAG_SIZE.size(ctx.pointer_size),
@@ -1258,7 +1267,7 @@ fn access_location(ctx: &mut LinearContext<'_>, lhs: HirNode, rhs: String) -> (L
             ExpressionType::InstanceOf(ty) => ty,
             _ => unreachable!(),
         },
-        _ => unreachable!(),
+        _ => unreachable!("{:?}", &lhs),
     };
     let DeclaredTypeLayout { value, .. } = &ctx.declarations[ty_id];
     let (lhs, mut offset) = lower_lvalue(ctx, lhs);

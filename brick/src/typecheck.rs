@@ -275,6 +275,8 @@ pub enum TypecheckError {
     BindingCountDoesntMatch(SourceRange),
     #[error("variant doesn't match binding name: {0}")]
     BindingNameDoesntMatch(SourceRange),
+    #[error("attempted to dereference a non-ptr value: {0}")]
+    DereferenceNonPointer(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -1076,15 +1078,16 @@ fn typecheck_expression<'a>(
             }
         }
         AstNodeValue::Match(MatchDeclaration { value, cases }) => {
-            let value_ty = typecheck_expression(
+            let input_ty = typecheck_expression(
                 value,
                 outer_scopes,
                 current_scope,
                 context,
                 generator_input_ty,
             )?;
-            let Some(StaticDeclaration::Union(value_ty)) =
-                value_ty.id().map(|ty_id| context.id_to_decl[ty_id])
+            let Some(StaticDeclaration::Union(union_ty)) = shallow_dereference(input_ty)
+                .id()
+                .map(|ty_id| context.id_to_decl[ty_id])
             else {
                 return Err(vec![TypecheckError::CaseStatementRequiresUnion(
                     value.provenance.clone(),
@@ -1096,7 +1099,7 @@ fn typecheck_expression<'a>(
                 // TODO: multiple bindings in a single union
                 let mut binding = BindingState::Uninit;
                 for variant in case.variants.iter() {
-                    let mut variant_ty = value_ty.variants[&variant.name].as_ref();
+                    let mut variant_ty = union_ty.variants[&variant.name].as_ref();
                     if !variant.bindings.is_empty() && variant.bindings[0] == "_" {
                         variant_ty = None;
                     }
@@ -1145,10 +1148,12 @@ fn typecheck_expression<'a>(
                 scopes.extend_from_slice(outer_scopes);
                 let mut child_scope = HashMap::new();
                 if let BindingState::Binding(binding_name, binding_ty) = binding {
-                    child_scope.insert(
-                        binding_name.clone(),
-                        (case.var_id.into(), binding_ty.clone()),
-                    );
+                    let binding_ty = if let ExpressionType::Pointer(ptr_ty, _) = input_ty {
+                        ExpressionType::Pointer(*ptr_ty, Box::new(binding_ty.clone()))
+                    } else {
+                        binding_ty.clone()
+                    };
+                    child_scope.insert(binding_name.clone(), (case.var_id.into(), binding_ty));
                 }
 
                 let body_ty = typecheck_expression(
@@ -1427,7 +1432,9 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let ExpressionType::Pointer(_, ty) = ty else {
-                todo!("compile error for illegal deref")
+                return Err(vec![TypecheckError::DereferenceNonPointer(
+                    inner.provenance.clone(),
+                )]);
             };
             *ty.clone()
         }
@@ -1862,6 +1869,14 @@ pub fn is_assignable_to(
 pub fn fully_dereference(ty: &ExpressionType) -> &ExpressionType {
     if let ExpressionType::Pointer(_, inner) = ty {
         fully_dereference(inner)
+    } else {
+        ty
+    }
+}
+
+pub fn shallow_dereference(ty: &ExpressionType) -> &ExpressionType {
+    if let ExpressionType::Pointer(_, inner) = ty {
+        inner
     } else {
         ty
     }

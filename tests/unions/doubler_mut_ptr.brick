@@ -1,0 +1,23 @@
+// Int | 16
+union Number {
+    left(i32),
+    right(i32),
+}
+
+fn double_in_place(num: unique Number) {
+    case num {
+        left(val) => {
+            *val *= 2;
+        }
+        right(val) => {
+            *val *= 2;
+        }
+    }
+}
+
+let x = Number.left(8);
+double_in_place(unique x);
+case x {
+    left(val) => val,
+    right(_) => 1000,
+}
