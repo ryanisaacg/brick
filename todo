@@ -1,61 +1,21 @@
-grammar:
-- there's an ambiguity between dereference / multiplication in if { body } * a += 1;
+misc:
+- automatically discard unused expression values
 
-error reporting:
-- typecheck errors
-- error presentation
-- ability to continue in face of errors
+borrow checker and lifetimes:
+- mutable references aren't moved when they're passed to functions
+- check borrows for function calls
+- handle assignments - both in terms of drop detection and borrow detection
+- allow disjoint borrows of struct fields
+- correctly mark references through collection indices
+- mark custom types as copy
+- copy vs clone vs affine vs linear?
+- drop (hard-coded)
+- drop (custom)
 
-- rework the hashmaps into an actual environment data structure that allows for generational indexing?
-
-compilation resume and reload:
-- differentiate modules and compilation units, or give up on first class modules
-- make IDs relative to compilation units
-- allow a compilation pass to have some existing compilation units to start off (for partial compilation)
-- REPL
-    - read
-    - evaluate
-    - print
-    - loop
-
-tooling:
-- LSP
-    - go-to-definition
-        - variable
-        - type
-        - field access
-    - find references
-    - hover
-    - rename (probably going to be very hard)
-    - list of compilation errors
-    - syntax highlighting
-- pretty-printer
-
-coroutines / generators / async:
-- stackless coroutines
-    - alloc the generator to match its proper size
-- support arguments to coroutines
-    - either ban references from coroutine args or note that they're borrowed as long as the generator lives
-    - copy arguments into the generator's initial state
-- generators on associated functions
-- non-infinite generators (e.g. generators should return Next(value) | Exhausted)
-- error guardrails:
-    - require coroutines to return generators
-    - prevent calling coroutine through immutable references
-
-static data:
-- add some syntax for declaring global state
-- handle global state in the HIR
-- handle global state in the LIR
-- handle global state in the interpreter
-
-type parameters:
-- non-reified / non-monomorphizing:
-    - generic type syntax
-    - types can be parameterized
-    - nested type parameters are correctly resolved
-- monomorphizing
-- generic types can be constrained by interfaces
+unions:
+- auto-cast non-i32 members when reading / writing in wasm
+- optional non-exhaustive cases?
+- allow case statements to take non-lvalues
 
 collections:
 - tuples
@@ -74,28 +34,14 @@ collections:
 - boxes (maybe not - maybe just RC?)
 - automatically convert types when assigning collections?
 
-borrow checker and lifetimes:
-- mutable references aren't moved when they're passed to functions
-- check borrows for function calls
-- handle assignments - both in terms of drop detection and borrow detection
-- allow disjoint borrows of struct fields
-- correctly mark references through collection indices
-- mark custom types as copy
-- copy vs clone vs affine vs linear?
-- drop (hard-coded)
-- drop (custom)
-
-metaprogramming:
-- proc macros? comptime? compile-time reflection (what is that even)? no metaprogramming?
-- use whatever mechanism above for ser/des
-
-allocator:
-- support dealloc
-
-syntax:
-- remove ; and , requirements?
-- keyword arguments
-- maybe separate syntax for i64 / f64 literals
+wasm backend:
+- compatibility with extern functions (https://github.com/WebAssembly/tool-conventions)
+- see unions - cast to i32
+- handle nullability
+- handle coroutines
+- handle string concat
+- figure out and fix issue with dictionaries
+- vtables / dynamic functions
 
 import support:
 - allow imports to have nested paths (sugar for recursively expanding?)
@@ -108,20 +54,12 @@ modules:
 - do files have to import each other?
 - how are modules declared?
 
-returns:
-- ensure returns get expected type checked against their function in HIR
-
-static function vs method:
-    - struct associated functions support "self"
-        - self can be declared as a typeless parameter syntactically
-        - allow calls to associated functions through references (checking correct reference type)
-        - self typechecks correctly
-        - IR transforms code properly to pass self into the function
-    - union associated functions support "self"
-    - static associated functions:
-        - structs
-        - unions
-        - interfaces?
+errors:
+- functions can define `throws`
+- throw operator creates and returns an error
+- try operator returns an error if one exists
+- functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
+- allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
 
 interfaces:
 - self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
@@ -146,13 +84,36 @@ interfaces:
 interface adapters:
 - allow an interface to define an impl for itself on foreign types, limited version of Rust's traits
 
-strings:
-- string manipulation
-- interpolation literals
-- multiline literals
+type parameters:
+- non-reified / non-monomorphizing:
+    - generic type syntax
+    - types can be parameterized
+    - nested type parameters are correctly resolved
+- monomorphizing
+- generic types can be constrained by interfaces
 
-semantic analysis:
-- handle return, break statements in CFG parsing
+coroutines / generators / async:
+- stackless coroutines
+    - alloc the generator to match its proper size
+- support arguments to coroutines
+    - either ban references from coroutine args or note that they're borrowed as long as the generator lives
+    - copy arguments into the generator's initial state
+- generators on associated functions
+- non-infinite generators (e.g. generators should return Next(value) | Exhausted)
+- error guardrails:
+    - require coroutines to return generators
+    - prevent calling coroutine through immutable references
+
+compilation resume and reload:
+- rework the hashmaps into an actual environment data structure that allows for generational indexing?
+- differentiate modules and compilation units, or give up on first class modules
+- make IDs relative to compilation units
+- allow a compilation pass to have some existing compilation units to start off (for partial compilation)
+- REPL
+    - read
+    - evaluate
+    - print
+    - loop
 
 anonymous types:
 - anonymous struct
@@ -160,10 +121,35 @@ anonymous types:
 - anonymous module
 - anonymous interface
 
-unions:
-- auto-cast non-i32 members when reading / writing in wasm
-- optional non-exhaustive cases?
-- allow case statements to take non-lvalues
+tooling:
+- LSP
+    - go-to-definition
+        - variable
+        - type
+        - field access
+    - find references
+    - hover
+    - rename (probably going to be very hard)
+    - list of compilation errors
+    - syntax highlighting
+- pretty-printer
+
+allocator:
+- support dealloc
+
+error reporting:
+- typecheck errors
+- error presentation
+
+metaprogramming:
+- proc macros? comptime? compile-time reflection (what is that even)? no metaprogramming?
+- use whatever mechanism above for ser/des
+
+static data:
+- add some syntax for declaring global state
+- handle global state in the HIR
+- handle global state in the LIR
+- handle global state in the interpreter
 
 boolean operators:
 - equality / inequality:
@@ -173,25 +159,6 @@ null:
 - ?. operator on union lvalues
 - ! operator, which throws if the value is an error (requires errors)
 - basic null flow analysis - maybe a special operation to de-null stuff
-
-errors:
-- functions can define `throws`
-- throw operator creates and returns an error
-- try operator returns an error if one exists
-- functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
-- allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
-
-misc:
-- automatically discard unused expression values
-
-wasm backend:
-- compatibility with extern functions (https://github.com/WebAssembly/tool-conventions)
-- handle unions
-- handle nullability
-- handle coroutines
-- handle string concat
-- figure out and fix issue with dictionaries
-- vtables / dynamic functions
 
 extern:
 - opaque extern pointers
@@ -208,4 +175,31 @@ units of measure:
 
 language rules:
 - don't allow recursive types without indirection
+
+returns:
+- ensure returns get expected type checked against their function in HIR
+
+static function vs method:
+    - struct associated functions support "self"
+        - self can be declared as a typeless parameter syntactically
+        - allow calls to associated functions through references (checking correct reference type)
+        - self typechecks correctly
+        - IR transforms code properly to pass self into the function
+    - union associated functions support "self"
+    - static associated functions:
+        - structs
+        - unions
+        - interfaces?
+
+strings:
+- string manipulation
+- interpolation literals
+- multiline literals
+
+syntax:
+- remove ; and , requirements?
+- keyword arguments
+- maybe separate syntax for i64 / f64 literals
+- there's an ambiguity between dereference / multiplication in if { body } * a += 1;
+
 
