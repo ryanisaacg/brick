@@ -1,11 +1,18 @@
-// Int | -10
-union Option {
-    Some(i32),
-    None
+// Int | 20
+union Number {
+    int(i32),
+    float(f32),
 }
 
-let num = Option.None;
-case num {
-    Some(num) => num,
-    None => -10,
+fn doubled(num: Number): Number {
+    case num {
+        int(val) => Number.int(val * 2),
+        float(val) => Number.float(val * 2),
+    }
+}
+
+let x = doubled(Number.int(10));
+case x {
+    int(val) => val,
+    float(_) => 1000,
 }

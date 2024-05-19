@@ -1,0 +1,18 @@
+// Int | 20
+union Number {
+    left(i32),
+    right(i32),
+}
+
+fn doubled(num: Number): Number {
+    case num {
+        left(val) => Number.left(val * 2),
+        right(val) => Number.right(val * 2),
+    }
+}
+
+let x = doubled(Number.left(10));
+case x {
+    left(val) => val,
+    right(_) => 1000,
+}

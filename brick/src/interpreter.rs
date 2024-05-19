@@ -816,7 +816,18 @@ fn read(
                     }
                     read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
                 }
-                TypeLayoutValue::Union(_) => todo!(),
+                TypeLayoutValue::Union(union) => {
+                    let largest_variant = union
+                        .values()
+                        .filter_map(|(_, ty)| ty.as_ref())
+                        .max_by(|a, b| {
+                            a.size_from_decls(layouts, 1, USIZE)
+                                .cmp(&b.size_from_decls(layouts, 1, USIZE))
+                        })
+                        .unwrap();
+                    read(op_stack, layouts, memory, location + USIZE, largest_variant);
+                    read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
+                }
             }
         }
         PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
