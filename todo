@@ -16,6 +16,7 @@ unions:
 - auto-cast non-i32 members when reading / writing in wasm
 - optional non-exhaustive cases?
 - allow case statements to take non-lvalues
+- faulthrough / default branch
 
 collections:
 - tuples
