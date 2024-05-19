@@ -162,8 +162,7 @@ anonymous types:
 
 unions:
 - auto-cast non-i32 members when reading / writing in wasm
-- case statement exhaustiveness
-- unions can extend unions (refer to fields with nested access?)
+- optional non-exhaustive cases?
 
 boolean operators:
 - equality / inequality:

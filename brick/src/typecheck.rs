@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
@@ -277,6 +277,8 @@ pub enum TypecheckError {
     BindingNameDoesntMatch(SourceRange),
     #[error("attempted to dereference a non-ptr value: {0}")]
     DereferenceNonPointer(SourceRange),
+    #[error("non-exhaustive case statement: {0}")]
+    NonExhaustiveCase(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -1095,10 +1097,12 @@ fn typecheck_expression<'a>(
             };
             let mut return_type = None;
             let mut errors = Vec::new();
+            let mut variants_matched_against = HashSet::new();
             for case in cases.iter() {
                 // TODO: multiple bindings in a single union
                 let mut binding = BindingState::Uninit;
                 for variant in case.variants.iter() {
+                    variants_matched_against.insert(&variant.name);
                     let mut variant_ty = union_ty.variants[&variant.name].as_ref();
                     if !variant.bindings.is_empty() && variant.bindings[0] == "_" {
                         variant_ty = None;
@@ -1172,6 +1176,14 @@ fn typecheck_expression<'a>(
                     return_type = Some(body_ty.clone());
                 }
             }
+            if !union_ty
+                .variants
+                .keys()
+                .all(|variant_name| variants_matched_against.contains(variant_name))
+            {
+                errors.push(TypecheckError::NonExhaustiveCase(node.provenance.clone()));
+            }
+
             assert_no_errors(errors)?;
 
             return_type.unwrap_or(ExpressionType::Void)

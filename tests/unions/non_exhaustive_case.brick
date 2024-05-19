@@ -1,0 +1,10 @@
+// NoCompile
+union ThreeWay {
+    one(i32),
+    two(i32),
+    three(i32),
+}
+let un = ThreeWay.three(3);
+case un {
+    one(val) | two(val) => 100,
+}
