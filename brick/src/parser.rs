@@ -151,7 +151,10 @@ impl<'a> AstNode<'a> {
                 variants: fields, ..
             }) => {
                 for field in fields.iter() {
-                    callback(field.ty);
+                    match field {
+                        UnionDeclarationVariant::WithValue(NameAndType { ty, .. }) => callback(ty),
+                        UnionDeclarationVariant::WithoutValue(_) => {}
+                    }
                 }
             }
             Match(case) => {
@@ -208,7 +211,13 @@ pub struct StructDeclarationValue<'a> {
 #[derive(Debug, PartialEq)]
 pub struct UnionDeclarationValue<'a> {
     pub name: String,
-    pub variants: Vec<NameAndType<'a>>,
+    pub variants: Vec<UnionDeclarationVariant<'a>>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum UnionDeclarationVariant<'a> {
+    WithValue(NameAndType<'a>),
+    WithoutValue(String),
 }
 
 #[derive(Debug, PartialEq)]
@@ -235,12 +244,15 @@ pub struct MatchCaseDeclaration<'a> {
     pub variants: Vec<MatchCaseVariant>,
     pub var_id: VariableID,
     pub body: AstNode<'a>,
+    pub provenance: SourceRange,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct MatchCaseVariant {
     pub name: String,
     pub bindings: Vec<String>,
+    pub provenance: SourceRange,
+    pub ty: OnceLock<Option<ExpressionType>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -676,28 +688,32 @@ fn union_declaration<'a>(
     let mut closed = false;
     while !closed {
         let (name, name_range) = word(source, cursor, "expected variant name")?;
-        let paren = assert_next_lexeme_eq(
-            source,
-            TokenValue::OpenParen,
-            name_range.end(),
-            "expected ( after variant name",
-        )?;
-        let ty = type_expression(source, context, paren.range.end())?;
-        let paren = assert_next_lexeme_eq(
-            source,
-            TokenValue::CloseParen,
-            ty.provenance.end(),
-            "expected ) after variant type",
-        )?;
-        variants.push(NameAndType {
-            name,
-            ty: add_node(context, ty),
-        });
+        cursor = name_range.end();
+        if peek_token(source, cursor, "unexpected EOF in union declaration")?.value
+            == TokenValue::OpenParen
+        {
+            let paren = already_peeked_token(source)?;
+            let ty = type_expression(source, context, paren.range.end())?;
+            let paren = assert_next_lexeme_eq(
+                source,
+                TokenValue::CloseParen,
+                ty.provenance.end(),
+                "expected ) after variant type",
+            )?;
+            cursor = paren.range.end();
+
+            variants.push(UnionDeclarationVariant::WithValue(NameAndType {
+                name,
+                ty: add_node(context, ty),
+            }));
+        } else {
+            variants.push(UnionDeclarationVariant::WithoutValue(name));
+        }
 
         let (should_end, range) = comma_or_end_list(
             source,
             TokenValue::CloseBracket,
-            paren.range.end(),
+            cursor,
             "expected either more variants or close bracket",
         )?;
         closed = should_end;
@@ -1696,8 +1712,8 @@ fn match_statement<'a>(
     while peek_token(source, cursor, "unexpected EOF in case statement")?.value
         != TokenValue::CloseBracket
     {
-        let (next_case, next_cursor) = match_case_statement(source, context, cursor)?;
-        cursor = next_cursor;
+        let next_case = match_case_statement(source, context, cursor)?;
+        cursor = next_case.provenance.end();
         cases.push(next_case);
     }
     cursor = already_peeked_token(source)?.range.end();
@@ -1715,10 +1731,11 @@ fn match_case_statement<'a>(
     source: &mut TokenIter,
     context: &'a Arena<AstNode<'a>>,
     mut cursor: SourceMarker,
-) -> Result<(MatchCaseDeclaration<'a>, SourceMarker), ParseError> {
-    let (variant, next_cursor) = match_case_variant(source, cursor)?;
+) -> Result<MatchCaseDeclaration<'a>, ParseError> {
+    let start = cursor;
+    let variant = match_case_variant(source, cursor)?;
+    cursor = variant.provenance.end();
     let mut variants = vec![variant];
-    cursor = next_cursor;
 
     while peek_token(source, cursor, "expected | or => after case variant")?.value
         != TokenValue::CaseRocket
@@ -1731,9 +1748,9 @@ fn match_case_statement<'a>(
         )?
         .range
         .end();
-        let (variant, next_cursor) = match_case_variant(source, cursor)?;
+        let variant = match_case_variant(source, cursor)?;
+        cursor = variant.provenance.end();
         variants.push(variant);
-        cursor = next_cursor;
     }
     cursor = already_peeked_token(source)?.range.end();
     let body = if peek_token(source, cursor, "expected { or expression after =>")?.value
@@ -1757,20 +1774,19 @@ fn match_case_statement<'a>(
     };
     // TODO: variable number of variables
 
-    Ok((
-        MatchCaseDeclaration {
-            variants,
-            var_id: VariableID::new(),
-            body,
-        },
-        cursor,
-    ))
+    Ok(MatchCaseDeclaration {
+        variants,
+        var_id: VariableID::new(),
+        body,
+        provenance: SourceRange::new(start, cursor),
+    })
 }
 
 fn match_case_variant(
     source: &mut TokenIter,
     mut cursor: SourceMarker,
-) -> Result<(MatchCaseVariant, SourceMarker), ParseError> {
+) -> Result<MatchCaseVariant, ParseError> {
+    let start = cursor;
     let (name, range) = word(source, cursor, "expected name of case variant")?;
     cursor = range.end();
 
@@ -1793,7 +1809,12 @@ fn match_case_variant(
         }
     }
 
-    Ok((MatchCaseVariant { name, bindings }, cursor))
+    Ok(MatchCaseVariant {
+        name,
+        bindings,
+        provenance: SourceRange::new(start, cursor),
+        ty: OnceLock::new(),
+    })
 }
 
 fn parse_loop<'a>(

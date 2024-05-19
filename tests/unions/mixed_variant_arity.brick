@@ -1,4 +1,4 @@
-// Int | -10
+// NoCompile
 union Option {
     Some(i32),
     None
@@ -6,6 +6,5 @@ union Option {
 
 let num = Option.None;
 case num {
-    Some(num) => num,
-    None => -10,
+    Some(value) | None => 5,
 }

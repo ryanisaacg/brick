@@ -161,7 +161,6 @@ anonymous types:
 - anonymous interface
 
 unions:
-- unions can have empty variants
 - case statements can match through pointers:
     - shared pointers
     - unique pointers

@@ -162,7 +162,8 @@ impl StaticDeclaration {
                     .variants
                     .get(field)
                     .expect("TODO: variant is present")
-                    .clone(),
+                    .clone()
+                    .expect("TODO: variant yields value"),
             )),
             StaticDeclaration::Module(lhs_type) => lhs_type
                 .exports
@@ -203,7 +204,7 @@ pub struct FuncType {
 pub struct UnionType {
     pub id: TypeID,
     pub variant_order: Vec<String>,
-    pub variants: HashMap<String, ExpressionType>,
+    pub variants: HashMap<String, Option<ExpressionType>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -270,6 +271,8 @@ pub enum TypecheckError {
     CaseStatementRequiresUnion(SourceRange),
     #[error("right side of dot operator must be a name: {0}")]
     IllegalDotRHS(SourceRange),
+    #[error("variant doesn't match previous count of bindings: {0}")]
+    BindingCountDoesntMatch(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -635,9 +638,13 @@ fn typecheck_expression<'a>(
                         // TODO: fallible
                         let variant_ty = union_ty.variants.get(name).unwrap();
 
-                        ExpressionType::FunctionReference {
-                            parameters: vec![variant_ty.clone()],
-                            returns: Box::new(ExpressionType::InstanceOf(*id)),
+                        if let Some(variant_ty) = variant_ty {
+                            ExpressionType::FunctionReference {
+                                parameters: vec![variant_ty.clone()],
+                                returns: Box::new(ExpressionType::InstanceOf(*id)),
+                            }
+                        } else {
+                            ExpressionType::InstanceOf(*id)
                         }
                     }
                     // TODO: module dot operator
@@ -1085,27 +1092,57 @@ fn typecheck_expression<'a>(
             let mut errors = Vec::new();
             for case in cases.iter() {
                 // TODO: multiple bindings in a single union
-                let mut binding: Option<(&String, &ExpressionType)> = None;
+                let mut binding = BindingState::Uninit;
                 for variant in case.variants.iter() {
-                    let variant_ty = &value_ty.variants[&variant.name];
-                    if let Some((_binding_name, binding_ty)) = &binding {
-                        push_errors(
-                            &mut errors,
-                            assert_assignable_to(&context.id_to_decl, binding_ty, variant_ty),
-                        );
-                    } else {
-                        binding = Some((&variant.bindings[0], variant_ty));
+                    let mut variant_ty = value_ty.variants[&variant.name].as_ref();
+                    if !variant.bindings.is_empty() && variant.bindings[0] == "_" {
+                        variant_ty = None;
+                    }
+                    variant.ty.set(variant_ty.cloned()).unwrap();
+                    match &binding {
+                        BindingState::Uninit => {
+                            binding = match variant_ty {
+                                Some(variant_ty) => {
+                                    BindingState::Binding(&variant.bindings[0], variant_ty)
+                                }
+                                _ => BindingState::NoBinding,
+                            };
+                        }
+                        BindingState::NoBinding => {
+                            if variant_ty.is_some() {
+                                errors.push(TypecheckError::BindingCountDoesntMatch(
+                                    variant.provenance.clone(),
+                                ));
+                            }
+                        }
+                        BindingState::Binding(_name, binding_ty) => {
+                            if let Some(variant_ty) = variant_ty {
+                                push_errors(
+                                    &mut errors,
+                                    assert_assignable_to(
+                                        &context.id_to_decl,
+                                        binding_ty,
+                                        variant_ty,
+                                    ),
+                                );
+                            } else {
+                                errors.push(TypecheckError::BindingCountDoesntMatch(
+                                    variant.provenance.clone(),
+                                ));
+                            }
+                        }
                     }
                 }
                 let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);
                 scopes.push(current_scope);
                 scopes.extend_from_slice(outer_scopes);
                 let mut child_scope = HashMap::new();
-                let (binding_name, binding_ty) = binding.unwrap();
-                child_scope.insert(
-                    binding_name.clone(),
-                    (case.var_id.into(), binding_ty.clone()),
-                );
+                if let BindingState::Binding(binding_name, binding_ty) = binding {
+                    child_scope.insert(
+                        binding_name.clone(),
+                        (case.var_id.into(), binding_ty.clone()),
+                    );
+                }
 
                 let body_ty = typecheck_expression(
                     &case.body,
@@ -1305,28 +1342,8 @@ fn typecheck_expression<'a>(
 
                     ExpressionType::InstanceOf(*ty_id)
                 }
-                StaticDeclaration::Union(union_ty) => {
-                    if fields.len() != 1 {
-                        return Err(vec![TypecheckError::WrongArgsCount(
-                            node.provenance.clone(),
-                        )]);
-                    }
-
-                    let (name, arg) = fields.iter().next().unwrap();
-                    let Some(param) = union_ty.variants.get(name) else {
-                        return Err(vec![TypecheckError::MissingField(node.provenance.clone())]);
-                    };
-                    let arg = typecheck_expression(
-                        arg,
-                        outer_scopes,
-                        current_scope,
-                        context,
-                        generator_input_ty,
-                    )?;
-                    assert_assignable_to(&context.id_to_decl, param, arg)?;
-
-                    ExpressionType::InstanceOf(*ty_id)
-                }
+                // TODO: don't panic
+                StaticDeclaration::Union(_) => todo!(),
                 StaticDeclaration::Func(_) => todo!(),
                 StaticDeclaration::Interface(_) => todo!(),
                 StaticDeclaration::Module(_) => todo!(),
@@ -1483,6 +1500,12 @@ fn typecheck_expression<'a>(
     node.ty.set(ty).expect("each node should be visited once");
 
     Ok(node.ty.get().expect("just set"))
+}
+
+enum BindingState<'a> {
+    Uninit,
+    NoBinding,
+    Binding(&'a String, &'a ExpressionType),
 }
 
 // TODO: fallible, report errors

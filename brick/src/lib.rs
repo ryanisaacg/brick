@@ -93,7 +93,13 @@ pub fn interpret_code(
         declarations,
         ty_declarations,
         constant_data,
-    } = lower_code("main", source_name, contents, std::mem::size_of::<usize>())?;
+    } = lower_code(
+        "main",
+        source_name,
+        contents,
+        1,
+        std::mem::size_of::<usize>(),
+    )?;
     let mut functions: HashMap<_, _> = functions
         .into_iter()
         .map(|func| (func.id, Function::Ir(func)))
@@ -134,6 +140,7 @@ pub fn lower_code(
     module_name: &str,
     source_name: &'static str,
     contents: String,
+    byte_size: usize,
     pointer_size: usize,
 ) -> Result<LowerResults, CompileError> {
     let CompilationResults {
@@ -142,7 +149,7 @@ pub fn lower_code(
     } = typecheck_module(module_name, source_name, contents)?;
 
     let mut ty_declarations = HashMap::new();
-    layout_types(&declarations, &mut ty_declarations, pointer_size);
+    layout_types(&declarations, &mut ty_declarations, byte_size, pointer_size);
 
     let mut statements = Vec::new();
     let mut functions = Vec::new();
@@ -158,6 +165,7 @@ pub fn lower_code(
                 &mut constant_data,
                 &ty_declarations,
                 function,
+                byte_size,
                 pointer_size,
             ));
         }
@@ -167,8 +175,13 @@ pub fn lower_code(
         ExpressionType::Void | ExpressionType::Unreachable => None,
         return_ty => Some(expr_ty_to_physical(return_ty)),
     });
-    let statements = LinearContext::new(&ty_declarations, &mut constant_data, pointer_size)
-        .linearize_nodes(statements);
+    let statements = LinearContext::new(
+        &ty_declarations,
+        &mut constant_data,
+        byte_size,
+        pointer_size,
+    )
+    .linearize_nodes(statements);
 
     Ok(LowerResults {
         statements,

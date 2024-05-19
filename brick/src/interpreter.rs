@@ -228,7 +228,7 @@ impl<'a> VM<'a> {
                 }
             }
             LinearNodeValue::VariableInit(var_id, ty) => {
-                self.stack_ptr -= ty.size_from_decls(&self.layouts, USIZE);
+                self.stack_ptr -= ty.size_from_decls(&self.layouts, 1, USIZE);
                 self.variable_locations
                     .last_mut()
                     .unwrap()
@@ -241,7 +241,7 @@ impl<'a> VM<'a> {
                     .unwrap()
                     .remove(var_id)
                     .unwrap();
-                self.stack_ptr += ty.size_from_decls(&self.layouts, USIZE);
+                self.stack_ptr += ty.size_from_decls(&self.layouts, 1, USIZE);
             }
             LinearNodeValue::VariableLocation(var_id) => {
                 self.op_stack.push(Value::Size(
@@ -686,32 +686,50 @@ fn write(
         PhysicalType::Primitive(_) => {
             write_primitive(op_stack, memory, location);
         }
-        PhysicalType::Referenced(id) => match &layouts[id].value {
-            TypeLayoutValue::Structure(fields) => {
-                for (_, offset, ty) in fields.iter() {
-                    let location = location + offset;
-                    write(op_stack, layouts, memory, location, ty);
+        PhysicalType::Referenced(id) => {
+            let ty = &layouts[id];
+            match &ty.value {
+                TypeLayoutValue::Structure(fields) => {
+                    for (_, offset, ty) in fields.iter() {
+                        let location = location + offset;
+                        write(op_stack, layouts, memory, location, ty);
+                    }
+                }
+                TypeLayoutValue::Interface(fields) => {
+                    let mut offset = write_primitive(op_stack, memory, location);
+                    for _field in fields.iter() {
+                        offset += write_primitive(op_stack, memory, location + offset);
+                    }
+                }
+                TypeLayoutValue::Union(variants) => {
+                    let Value::Size(variant) = op_stack.pop().unwrap() else {
+                        unreachable!()
+                    };
+                    op_stack.push(Value::Size(variant));
+                    let offset = write_primitive(op_stack, memory, location);
+                    let variant =
+                        variants
+                            .values()
+                            .find_map(|(id, ty)| if *id == variant { ty.as_ref() } else { None });
+                    if let Some(variant) = variant {
+                        write(op_stack, layouts, memory, location + offset, variant);
+                    }
+                    let variant_size = variant
+                        .map(|ty| ty.size_from_decls(layouts, 1, USIZE))
+                        .unwrap_or(0);
+                    let mut padding_to_drop = ty.size - USIZE - variant_size;
+                    while padding_to_drop > 0 {
+                        let padding = op_stack.pop().unwrap();
+                        padding_to_drop -= match padding {
+                            Value::FunctionID(_) | Value::Int32(_) | Value::Float32(_) => 4,
+                            Value::Int64(_) | Value::Float64(_) => 4,
+                            Value::Size(_) => USIZE,
+                            Value::Byte(_) => 1,
+                        };
+                    }
                 }
             }
-            TypeLayoutValue::Interface(fields) => {
-                let mut offset = write_primitive(op_stack, memory, location);
-                for _field in fields.iter() {
-                    offset += write_primitive(op_stack, memory, location + offset);
-                }
-            }
-            TypeLayoutValue::Union(variants) => {
-                let Value::Size(variant) = op_stack.pop().unwrap() else {
-                    unreachable!()
-                };
-                op_stack.push(Value::Size(variant));
-                let offset = write_primitive(op_stack, memory, location);
-                let variant = variants
-                    .values()
-                    .find_map(|(id, ty)| if *id == variant { Some(ty) } else { None })
-                    .unwrap();
-                write(op_stack, layouts, memory, location + offset, variant);
-            }
-        },
+        }
         PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
         | PhysicalType::Generator => {
             write_primitive(op_stack, memory, location);

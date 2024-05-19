@@ -219,13 +219,15 @@ impl HirNode {
                 );
             }
             HirNodeValue::UnionLiteral(ty, variant, child) => {
-                let variant_ty = declarations.map(|declarations| {
+                let variant_ty = declarations.and_then(|declarations| {
                     let StaticDeclaration::Union(ty) = declarations[ty as &TypeID] else {
                         unreachable!()
                     };
-                    &ty.variants[variant as &String]
+                    ty.variants[variant as &String].as_ref()
                 });
-                callback(variant_ty, child);
+                if let Some(child) = child {
+                    callback(variant_ty, child);
+                }
             }
             HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
                 if let Some(declarations) = declarations {
@@ -425,13 +427,15 @@ impl HirNode {
                 );
             }
             HirNodeValue::UnionLiteral(ty, variant, child) => {
-                let variant_ty = declarations.map(|declarations| {
+                let variant_ty = declarations.and_then(|declarations| {
                     let StaticDeclaration::Union(ty) = declarations[ty as &TypeID] else {
                         unreachable!()
                     };
-                    &ty.variants[variant as &String]
+                    ty.variants[variant as &String].as_ref()
                 });
-                callback(variant_ty, child);
+                if let Some(child) = child {
+                    callback(variant_ty, child);
+                }
             }
             HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
                 if let Some(declarations) = declarations {
@@ -666,7 +670,7 @@ pub enum HirNodeValue {
     While(Box<HirNode>, Box<HirNode>),
     Loop(Box<HirNode>),
     StructLiteral(TypeID, HashMap<String, HirNode>),
-    UnionLiteral(TypeID, String, Box<HirNode>),
+    UnionLiteral(TypeID, String, Option<Box<HirNode>>),
     ArrayLiteral(Vec<HirNode>),
     ArrayLiteralLength(Box<HirNode>, Box<HirNode>),
     DictLiteral(Vec<(HirNode, HirNode)>),

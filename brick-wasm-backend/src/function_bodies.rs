@@ -8,7 +8,7 @@ use brick::{
 };
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
-use crate::WASM_USIZE;
+use crate::{WASM_BOOL_SIZE, WASM_USIZE};
 
 pub fn encode(
     function_id_to_idx: &HashMap<FunctionID, u32>,
@@ -137,7 +137,8 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
         }
         LinearNodeValue::VariableInit(var_id, ty) => {
             ctx.variable_locations.insert(*var_id, ctx.stack_size);
-            ctx.stack_size += ty.size_from_decls(ctx.declarations, WASM_USIZE) as i32;
+            ctx.stack_size +=
+                ty.size_from_decls(ctx.declarations, WASM_BOOL_SIZE, WASM_USIZE) as i32;
         }
         LinearNodeValue::VariableDestroy(_) => {
             // TODO: do we care
@@ -665,7 +666,13 @@ pub fn walk_vals_read_order(
                 TypeLayoutValue::Union(variants) => {
                     let size = variants
                         .values()
-                        .map(|(_, ty)| ty.size_from_decls(declarations, WASM_USIZE) as u64)
+                        .map(|(_, ty)| {
+                            ty.as_ref()
+                                .map(|ty| {
+                                    ty.size_from_decls(declarations, WASM_BOOL_SIZE, WASM_USIZE)
+                                })
+                                .unwrap_or(0) as u64
+                        })
                         .max();
                     // largest variant
                     if let Some(size) = size {
@@ -753,7 +760,11 @@ pub fn walk_vals_write_order(
             TypeLayoutValue::Union(variants) => {
                 let size = variants
                     .values()
-                    .map(|(_, ty)| ty.size_from_decls(declarations, WASM_USIZE) as u64)
+                    .map(|(_, ty)| {
+                        ty.as_ref()
+                            .map(|ty| ty.size_from_decls(declarations, WASM_BOOL_SIZE, WASM_USIZE))
+                            .unwrap_or(0) as u64
+                    })
                     .max();
                 // union tag
                 callback(ValType::I32, offset);

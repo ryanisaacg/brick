@@ -232,7 +232,7 @@ fn find_moves_in_node(
                 find_references_in_node(liveness, errors, declarations, val);
             }
         }
-        HirNodeValue::UnionLiteral(_, _, child)
+        HirNodeValue::UnionLiteral(_, _, Some(child))
         | HirNodeValue::Return(Some(child))
         | HirNodeValue::Yield(Some(child))
         | HirNodeValue::Assignment(_, child) => {
@@ -258,6 +258,7 @@ fn find_moves_in_node(
         HirNodeValue::StringConcat(_, _) => {}
         HirNodeValue::Switch { .. } => {}
         HirNodeValue::UnionTag(_) => {}
+        HirNodeValue::UnionLiteral(_, _, None) => {}
     }
 }
 

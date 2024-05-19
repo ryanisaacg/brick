@@ -5,6 +5,7 @@ use crate::{
     parser::{
         AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
         InterfaceDeclarationValue, NameAndType, StructDeclarationValue, UnionDeclarationValue,
+        UnionDeclarationVariant,
     },
 };
 
@@ -126,12 +127,22 @@ fn resolve_declaration(
                 id: names_to_type_id[name.as_str()],
                 variant_order: variants
                     .iter()
-                    .map(|variant| variant.name.clone())
+                    .map(|variant| match variant {
+                        UnionDeclarationVariant::WithValue(name_and_type) => {
+                            name_and_type.name.clone()
+                        }
+                        UnionDeclarationVariant::WithoutValue(name) => name.clone(),
+                    })
                     .collect(),
                 variants: variants
                     .iter()
-                    .map(|NameAndType { name, ty: type_ }| {
-                        Ok((name.clone(), resolve_type_expr(names_to_type_id, type_)?))
+                    .map(|variant| {
+                        Ok(match variant {
+                            UnionDeclarationVariant::WithValue(NameAndType { name, ty }) => {
+                                (name.clone(), Some(resolve_type_expr(names_to_type_id, ty)?))
+                            }
+                            UnionDeclarationVariant::WithoutValue(name) => (name.clone(), None),
+                        })
                     })
                     .collect::<Result<HashMap<_, _>, _>>()?,
             })

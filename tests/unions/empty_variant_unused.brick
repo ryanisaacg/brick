@@ -1,10 +1,10 @@
-// Int | -10
+// Int | 5
 union Option {
     Some(i32),
     None
 }
 
-let num = Option.None;
+let num = Option.Some(5);
 case num {
     Some(num) => num,
     None => -10,
