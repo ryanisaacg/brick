@@ -163,6 +163,7 @@ anonymous types:
 unions:
 - auto-cast non-i32 members when reading / writing in wasm
 - optional non-exhaustive cases?
+- allow case statements to take non-lvalues
 
 boolean operators:
 - equality / inequality:
@@ -181,7 +182,6 @@ errors:
 - allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
 
 misc:
-- automatically create temporaries when trying to get lvalues of function calls
 - automatically discard unused expression values
 
 wasm backend:

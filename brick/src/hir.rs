@@ -14,6 +14,7 @@ use crate::{
 mod auto_deref_dot;
 mod auto_numeric_cast;
 mod coroutines;
+mod create_temp_vars_for_lvalues;
 mod interface_conversion_pass;
 mod lower;
 mod rewrite_associated_functions;
@@ -30,16 +31,19 @@ pub fn lower_module<'ast>(
     // Important that this comes before ANY pass that uses the declarations
     coroutines::rewrite_generator_calls(&mut module);
 
+    // This should come before anyone looks too hard at dot operators and function calls
     unions::convert_calls_to_union_literals(&mut module, declarations);
-
+    // Associated function rewriting needs to come before auto_deref
     module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
-
-    coroutines::rewrite_yields(&mut module);
     interface_conversion_pass::rewrite(&mut module, declarations);
+    // These passes can be in any order
+    coroutines::rewrite_yields(&mut module);
     auto_deref_dot::auto_deref_dot(&mut module);
     auto_numeric_cast::auto_numeric_cast(&mut module, declarations);
     widen_null::widen_null(&mut module, declarations);
+    create_temp_vars_for_lvalues::create_temp_vars_for_lvalues(&mut module);
 
+    // These should go last, to clean up any sequences that are created by earlier passes
     simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
     simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
     simplify_sequence_expressions::simplify_trailing_if(&mut module);
@@ -699,6 +703,20 @@ pub enum HirNodeValue {
     },
     UnionTag(Box<HirNode>),
     UnionVariant(Box<HirNode>, String),
+}
+
+impl HirNodeValue {
+    pub fn lvalue_mut(&mut self) -> Option<&mut HirNode> {
+        match self {
+            HirNodeValue::Call(lvalue, _)
+            | HirNodeValue::Access(lvalue, _)
+            | HirNodeValue::NullableTraverse(lvalue, _)
+            | HirNodeValue::TakeUnique(lvalue)
+            | HirNodeValue::TakeShared(lvalue)
+            | HirNodeValue::UnionVariant(lvalue, _) => Some(lvalue),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

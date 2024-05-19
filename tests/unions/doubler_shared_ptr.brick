@@ -11,9 +11,8 @@ fn doubled(num: ref Number): Number {
     }
 }
 
-let a = Number.right(15);
-let x = doubled(ref a);
-case x {
+let doubled_val = doubled(ref Number.right(15));
+case doubled_val {
     left(val) => 10000,
     right(val) => val,
 }

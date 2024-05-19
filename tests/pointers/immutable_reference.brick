@@ -3,5 +3,4 @@ fn plus_one(x: ref i32): i32 {
     *x + 1
 }
 
-let x = 2;
-plus_one(ref x)
+plus_one(ref 2)

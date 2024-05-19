@@ -1,0 +1,11 @@
+// Int | 123
+
+struct Data {
+    value: i32
+}
+fn produce(): Data {
+    Data {
+        value: 123
+    }
+}
+produce().value
