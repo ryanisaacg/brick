@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::{
     id::{AnyID, FunctionID, TypeID},
+    multi_error::{merge_results, print_multi_errors, MultiError},
     parser::{
         AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
         InterfaceDeclarationValue, MatchDeclaration, StructDeclarationValue, UnaryOp,
@@ -238,6 +239,8 @@ pub enum PrimitiveType {
 
 #[derive(Debug, Error)]
 pub enum TypecheckError {
+    #[error("{}", print_multi_errors(&.0[..]))]
+    MultiError(Vec<TypecheckError>),
     #[error("arithmetic")]
     ArithmeticMismatch(SourceRange), // TODO
     #[error("mismatched types: received {received:?}, expected {expected:?}")]
@@ -285,6 +288,21 @@ pub enum TypecheckError {
     IllegalNonRefBorrow(SourceRange),
     #[error("right hand side of 'borrow' statement must be a valid lvalue: {0}")]
     IllegalNonLvalueBorrow(SourceRange),
+    #[error("illegal reference inside data type: {0}")]
+    IllegalReferenceInsideDataType(SourceRange),
+}
+
+impl MultiError for TypecheckError {
+    fn from_error_list(list: Vec<Self>) -> Self {
+        TypecheckError::MultiError(list)
+    }
+
+    fn as_error_list(&mut self) -> Option<&mut Vec<Self>> {
+        match self {
+            TypecheckError::MultiError(list) => Some(list),
+            _ => None,
+        }
+    }
 }
 
 struct Declarations<'a> {
@@ -325,7 +343,7 @@ pub fn typecheck<'a>(
     file: impl Iterator<Item = &'a AstNode<'a>>,
     current_module_name: &str,
     declarations: &HashMap<String, StaticDeclaration>,
-) -> Result<TypecheckedFile<'a>, Vec<TypecheckError>> {
+) -> Result<TypecheckedFile<'a>, TypecheckError> {
     // TODO: verify validity of type and function declarations
 
     let mut name_to_context_entry = HashMap::new();
@@ -364,29 +382,26 @@ pub fn typecheck<'a>(
     let mut functions = Vec::new();
     let mut top_level_statements = Vec::new();
     let mut top_level_scope = HashMap::new();
-    let mut all_errors = Vec::new();
+    let mut results = Ok(());
 
     for statement in file {
-        let result = typecheck_node(
-            statement,
-            &context,
-            &mut top_level_scope,
-            &mut functions,
-            &mut top_level_statements,
+        merge_results(
+            &mut results,
+            typecheck_node(
+                statement,
+                &context,
+                &mut top_level_scope,
+                &mut functions,
+                &mut top_level_statements,
+            ),
         );
-        if let Err(errors) = result {
-            all_errors.extend(errors.into_iter());
-        }
     }
+    results?;
 
-    if all_errors.is_empty() {
-        Ok(TypecheckedFile {
-            functions,
-            top_level_statements,
-        })
-    } else {
-        Err(all_errors)
-    }
+    Ok(TypecheckedFile {
+        functions,
+        top_level_statements,
+    })
 }
 
 fn typecheck_node<'ast>(
@@ -395,7 +410,7 @@ fn typecheck_node<'ast>(
     top_level_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     functions: &mut Vec<TypecheckedFunction<'ast>>,
     top_level_statements: &mut Vec<&AstNode<'ast>>,
-) -> Result<(), Vec<TypecheckError>> {
+) -> Result<(), TypecheckError> {
     match &statement.value {
         AstNodeValue::FunctionDeclaration(func) => {
             typecheck_function(func, context)?;
@@ -454,7 +469,7 @@ fn typecheck_node<'ast>(
 fn typecheck_function<'a>(
     function: &'a FunctionDeclarationValue<'a>,
     context: &Declarations,
-) -> Result<(), Vec<TypecheckError>> {
+) -> Result<(), TypecheckError> {
     let function_type = find_func(&context.id_to_decl, function.id).unwrap();
     let parameters = function
         .params
@@ -466,9 +481,9 @@ fn typecheck_function<'a>(
 
     if function.is_coroutine {
         let ExpressionType::Generator { param_ty, .. } = &function_type.returns else {
-            return Err(vec![TypecheckError::MustReturnGenerator(
+            return Err(TypecheckError::MustReturnGenerator(
                 function_type.provenance.clone().unwrap(),
-            )]);
+            ));
         };
         let return_ty = typecheck_expression(
             function.body,
@@ -479,10 +494,10 @@ fn typecheck_function<'a>(
         )?;
 
         if return_ty != &ExpressionType::Void && return_ty != &ExpressionType::Unreachable {
-            return Err(vec![TypecheckError::TypeMismatch {
+            return Err(TypecheckError::TypeMismatch {
                 expected: ExpressionType::Void,
                 received: return_ty.clone(),
-            }]);
+            });
         }
     } else {
         let return_ty = typecheck_expression(
@@ -508,7 +523,7 @@ fn typecheck_expression<'a>(
     current_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     context: &Declarations,
     generator_input_ty: Option<&ExpressionType>,
-) -> Result<&'a ExpressionType, Vec<TypecheckError>> {
+) -> Result<&'a ExpressionType, TypecheckError> {
     let ty = match &node.value {
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
@@ -547,24 +562,29 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            let mut errors = Vec::new();
+            let mut result = Ok(());
             if matches!(value_ty, ExpressionType::Pointer(_, _)) {
-                errors.push(TypecheckError::IllegalFirstClassReference(
-                    node.provenance.clone(),
-                ));
+                merge_results(
+                    &mut result,
+                    Err(TypecheckError::IllegalFirstClassReference(
+                        node.provenance.clone(),
+                    )),
+                );
             }
 
             if let Some(type_hint) = type_hint {
-                let hint_ty =
-                    resolve_type_expr(&context.name_to_type_id, type_hint).map_err(|e| vec![e])?;
+                let hint_ty = resolve_type_expr(&context.name_to_type_id, type_hint)?;
                 if matches!(hint_ty, ExpressionType::Pointer(_, _)) {
-                    errors.push(TypecheckError::IllegalFirstClassReference(
-                        node.provenance.clone(),
-                    ));
+                    merge_results(
+                        &mut result,
+                        Err(TypecheckError::IllegalFirstClassReference(
+                            node.provenance.clone(),
+                        )),
+                    );
                 }
 
-                push_errors(
-                    &mut errors,
+                merge_results(
+                    &mut result,
                     assert_assignable_to(&context.id_to_decl, &hint_ty, value_ty),
                 );
                 type_hint.ty.set(hint_ty.clone()).unwrap();
@@ -574,14 +594,12 @@ fn typecheck_expression<'a>(
                     || value_ty == &ExpressionType::Unreachable
                     || value_ty == &ExpressionType::Void
                 {
-                    return Err(vec![TypecheckError::NoNullDeclarations(
-                        node.provenance.clone(),
-                    )]);
+                    return Err(TypecheckError::NoNullDeclarations(node.provenance.clone()));
                 }
                 current_scope.insert(name.clone(), ((*variable_id).into(), value_ty.clone()));
             }
 
-            assert_no_errors(errors)?;
+            result?;
 
             ExpressionType::Void
         }
@@ -595,17 +613,23 @@ fn typecheck_expression<'a>(
             )?;
             current_scope.insert(name.clone(), ((*variable_id).into(), value_ty.clone()));
 
-            let mut errors = Vec::new();
+            let mut results = Ok(());
             if let AstNodeValue::TakeRef(child) | AstNodeValue::TakeUnique(child) = &value.value {
                 if !validate_lvalue(child) {
-                    errors.push(TypecheckError::IllegalNonLvalueBorrow(
-                        node.provenance.clone(),
-                    ));
+                    merge_results(
+                        &mut results,
+                        Err(TypecheckError::IllegalNonLvalueBorrow(
+                            node.provenance.clone(),
+                        )),
+                    );
                 }
             } else {
-                errors.push(TypecheckError::IllegalNonRefBorrow(node.provenance.clone()));
+                merge_results(
+                    &mut results,
+                    Err(TypecheckError::IllegalNonRefBorrow(node.provenance.clone())),
+                );
             };
-            assert_no_errors(errors)?;
+            results?;
 
             ExpressionType::Void
         }
@@ -625,7 +649,7 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::Yield(yielded) => {
             let Some(yield_ctx_ty) = generator_input_ty else {
-                return Err(vec![TypecheckError::CannotYield(node.provenance.clone())]);
+                return Err(TypecheckError::CannotYield(node.provenance.clone()));
             };
             if let Some(yielded) = yielded {
                 typecheck_expression(
@@ -644,7 +668,7 @@ fn typecheck_expression<'a>(
             referenced_id,
         } => {
             let (ref_id, expr) = resolve_name(name, current_scope, outer_scopes)
-                .ok_or_else(|| vec![TypecheckError::NameNotFound(node.provenance.clone())])?;
+                .ok_or_else(|| TypecheckError::NameNotFound(node.provenance.clone()))?;
             referenced_id
                 .set(ref_id)
                 .expect("each node should be visited once");
@@ -677,9 +701,7 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let AstNodeValue::Name { value: name, .. } = &right.value else {
-                return Err(vec![TypecheckError::IllegalDotRHS(
-                    right.provenance.clone(),
-                )]);
+                return Err(TypecheckError::IllegalDotRHS(right.provenance.clone()));
             };
             match fully_dereference(left_ty) {
                 ExpressionType::InstanceOf(id) => {
@@ -707,7 +729,7 @@ fn typecheck_expression<'a>(
                     | StaticDeclaration::Module(_)
                     | StaticDeclaration::Func(_)
                     | StaticDeclaration::Interface(_) => {
-                        return Err(vec![TypecheckError::IllegalDotLHS(left.provenance.clone())]);
+                        return Err(TypecheckError::IllegalDotLHS(left.provenance.clone()));
                     }
                 },
                 ExpressionType::Collection(CollectionType::Array(_item_ty)) => {
@@ -727,15 +749,15 @@ fn typecheck_expression<'a>(
                     }
                 }
                 _ => {
-                    return Err(vec![TypecheckError::IllegalDotLHS(left.provenance.clone())]);
+                    return Err(TypecheckError::IllegalDotLHS(left.provenance.clone()));
                 }
             }
         }
         AstNodeValue::BinExpr(BinOp::Concat, left, right) => {
-            let mut errors = Vec::new();
+            let mut results = Ok(());
 
-            push_errors(
-                &mut errors,
+            merge_results(
+                &mut results,
                 typecheck_expression(
                     left,
                     outer_scopes,
@@ -751,8 +773,8 @@ fn typecheck_expression<'a>(
                     )
                 }),
             );
-            push_errors(
-                &mut errors,
+            merge_results(
+                &mut results,
                 typecheck_expression(
                     right,
                     outer_scopes,
@@ -768,7 +790,7 @@ fn typecheck_expression<'a>(
                     )
                 }),
             );
-            assert_no_errors(errors)?;
+            results?;
 
             ExpressionType::Collection(CollectionType::String)
         }
@@ -846,9 +868,7 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(left) else {
-                return Err(vec![TypecheckError::ArithmeticMismatch(
-                    node.provenance.clone(),
-                )]);
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             let right = typecheck_expression(
                 right,
@@ -858,18 +878,14 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(right) else {
-                return Err(vec![TypecheckError::ArithmeticMismatch(
-                    node.provenance.clone(),
-                )]);
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             if is_assignable_to(&context.id_to_decl, None, left, right) {
                 left.clone()
             } else if is_assignable_to(&context.id_to_decl, None, right, left) {
                 right.clone()
             } else {
-                return Err(vec![TypecheckError::ArithmeticMismatch(
-                    node.provenance.clone(),
-                )]);
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
         }
         AstNodeValue::BinExpr(BinOp::BooleanAnd | BinOp::BooleanOr, left, right) => {
@@ -888,24 +904,24 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
 
-            let mut errors = Vec::new();
-            push_errors(
-                &mut errors,
+            let mut results = Ok(());
+            merge_results(
+                &mut results,
                 assert_assignable_to(
                     &context.id_to_decl,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
                     left,
                 ),
             );
-            push_errors(
-                &mut errors,
+            merge_results(
+                &mut results,
                 assert_assignable_to(
                     &context.id_to_decl,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
                     right,
                 ),
             );
-            assert_no_errors(errors)?;
+            results?;
 
             ExpressionType::Primitive(PrimitiveType::Bool)
         }
@@ -928,9 +944,7 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(left) else {
-                return Err(vec![TypecheckError::ArithmeticMismatch(
-                    node.provenance.clone(),
-                )]);
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
             let right = typecheck_expression(
                 right,
@@ -940,9 +954,7 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(right) else {
-                return Err(vec![TypecheckError::ArithmeticMismatch(
-                    node.provenance.clone(),
-                )]);
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
 
             ExpressionType::Primitive(PrimitiveType::Bool)
@@ -957,7 +969,7 @@ fn typecheck_expression<'a>(
             )?;
             // TODO: validate legal type to assign
             if !validate_lvalue(left) {
-                return Err(vec![TypecheckError::IllegalLvalue(left.provenance.clone())]);
+                return Err(TypecheckError::IllegalLvalue(left.provenance.clone()));
             }
             let right = typecheck_expression(
                 right,
@@ -984,7 +996,7 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             if !validate_lvalue(left) {
-                return Err(vec![TypecheckError::IllegalLvalue(left.provenance.clone())]);
+                return Err(TypecheckError::IllegalLvalue(left.provenance.clone()));
             }
             let right = typecheck_expression(
                 right,
@@ -997,9 +1009,7 @@ fn typecheck_expression<'a>(
             if !matches!(fully_dereference(left_ty), ExpressionType::Primitive(_))
                 || !matches!(fully_dereference(right), ExpressionType::Primitive(_))
             {
-                return Err(vec![TypecheckError::ArithmeticMismatch(
-                    node.provenance.clone(),
-                )]);
+                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
 
             assert_assignable_to(&context.id_to_decl, left_ty, right)?;
@@ -1022,9 +1032,7 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let ExpressionType::Nullable(ty) = left_ty else {
-                return Err(vec![TypecheckError::ExpectedNullableLHS(
-                    left.provenance.clone(),
-                )]);
+                return Err(TypecheckError::ExpectedNullableLHS(left.provenance.clone()));
             };
             let ty = *ty.clone();
 
@@ -1045,10 +1053,10 @@ fn typecheck_expression<'a>(
                 condition_deref,
                 ExpressionType::Primitive(PrimitiveType::Bool)
             ) {
-                return Err(vec![TypecheckError::TypeMismatch {
+                return Err(TypecheckError::TypeMismatch {
                     received: condition.clone(),
                     expected: ExpressionType::Primitive(PrimitiveType::Bool),
-                }]);
+                });
             }
 
             typecheck_expression(
@@ -1088,10 +1096,10 @@ fn typecheck_expression<'a>(
                 condition_deref,
                 ExpressionType::Primitive(PrimitiveType::Bool)
             ) {
-                return Err(vec![TypecheckError::TypeMismatch {
+                return Err(TypecheckError::TypeMismatch {
                     received: condition.clone(),
                     expected: ExpressionType::Primitive(PrimitiveType::Bool),
-                }]);
+                });
             }
 
             let if_branch = typecheck_expression(
@@ -1139,12 +1147,12 @@ fn typecheck_expression<'a>(
                 .id()
                 .map(|ty_id| context.id_to_decl[ty_id])
             else {
-                return Err(vec![TypecheckError::CaseStatementRequiresUnion(
+                return Err(TypecheckError::CaseStatementRequiresUnion(
                     value.provenance.clone(),
-                )]);
+                ));
             };
             let mut return_type = None;
-            let mut errors = Vec::new();
+            let mut results = Ok(());
             let mut variants_matched_against = HashSet::new();
             for case in cases.iter() {
                 // TODO: multiple bindings in a single union
@@ -1167,15 +1175,18 @@ fn typecheck_expression<'a>(
                         }
                         BindingState::NoBinding => {
                             if variant_ty.is_some() {
-                                errors.push(TypecheckError::BindingCountDoesntMatch(
-                                    variant.provenance.clone(),
-                                ));
+                                merge_results(
+                                    &mut results,
+                                    Err(TypecheckError::BindingCountDoesntMatch(
+                                        variant.provenance.clone(),
+                                    )),
+                                );
                             }
                         }
                         BindingState::Binding(name, binding_ty) => {
                             if let Some(variant_ty) = variant_ty {
-                                push_errors(
-                                    &mut errors,
+                                merge_results(
+                                    &mut results,
                                     assert_assignable_to(
                                         &context.id_to_decl,
                                         binding_ty,
@@ -1183,14 +1194,20 @@ fn typecheck_expression<'a>(
                                     ),
                                 );
                                 if *name != &variant.bindings[0] {
-                                    errors.push(TypecheckError::BindingNameDoesntMatch(
-                                        variant.provenance.clone(),
-                                    ));
+                                    merge_results(
+                                        &mut results,
+                                        Err(TypecheckError::BindingNameDoesntMatch(
+                                            variant.provenance.clone(),
+                                        )),
+                                    );
                                 }
                             } else {
-                                errors.push(TypecheckError::BindingCountDoesntMatch(
-                                    variant.provenance.clone(),
-                                ));
+                                merge_results(
+                                    &mut results,
+                                    Err(TypecheckError::BindingCountDoesntMatch(
+                                        variant.provenance.clone(),
+                                    )),
+                                );
                             }
                         }
                     }
@@ -1216,8 +1233,8 @@ fn typecheck_expression<'a>(
                     generator_input_ty,
                 )?;
                 if let Some(return_type) = &return_type {
-                    push_errors(
-                        &mut errors,
+                    merge_results(
+                        &mut results,
                         assert_assignable_to(&context.id_to_decl, return_type, body_ty),
                     );
                 } else {
@@ -1229,10 +1246,13 @@ fn typecheck_expression<'a>(
                 .keys()
                 .all(|variant_name| variants_matched_against.contains(variant_name))
             {
-                errors.push(TypecheckError::NonExhaustiveCase(node.provenance.clone()));
+                merge_results(
+                    &mut results,
+                    Err(TypecheckError::NonExhaustiveCase(node.provenance.clone())),
+                );
             }
 
-            assert_no_errors(errors)?;
+            results?;
 
             return_type.unwrap_or(ExpressionType::Void)
         }
@@ -1258,10 +1278,10 @@ fn typecheck_expression<'a>(
                 if index != children.len() - 1
                     && !(expr_ty == ExpressionType::Void || expr_ty == ExpressionType::Unreachable)
                 {
-                    return Err(vec![TypecheckError::TypeMismatch {
+                    return Err(TypecheckError::TypeMismatch {
                         expected: ExpressionType::Void,
                         received: expr_ty,
-                    }]);
+                    });
                 }
             }
             expr_ty
@@ -1282,9 +1302,7 @@ fn typecheck_expression<'a>(
                         &func.params[..]
                     };
                     if params.len() != args.len() {
-                        return Err(vec![TypecheckError::WrongArgsCount(
-                            node.provenance.clone(),
-                        )]);
+                        return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
                     }
                     let mut generic_args = vec![ExpressionType::Unreachable; func.type_param_count];
 
@@ -1298,10 +1316,10 @@ fn typecheck_expression<'a>(
                         )?;
                         find_generic_bindings(&mut generic_args[..], param, arg);
                         if !is_assignable_to(&context.id_to_decl, Some(&generic_args), param, arg) {
-                            return Err(vec![TypecheckError::TypeMismatch {
+                            return Err(TypecheckError::TypeMismatch {
                                 received: arg.clone(),
                                 expected: param.clone(),
-                            }]);
+                            });
                         }
                     }
 
@@ -1311,15 +1329,11 @@ fn typecheck_expression<'a>(
                     // TODO: allow more than one parameter
                     if param_ty.as_ref() == &ExpressionType::Void {
                         if !args.is_empty() {
-                            return Err(vec![TypecheckError::WrongArgsCount(
-                                node.provenance.clone(),
-                            )]);
+                            return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
                         }
                     } else {
                         if args.len() != 1 {
-                            return Err(vec![TypecheckError::WrongArgsCount(
-                                node.provenance.clone(),
-                            )]);
+                            return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
                         }
                         let arg = args.last().unwrap();
                         let arg = typecheck_expression(
@@ -1338,7 +1352,7 @@ fn typecheck_expression<'a>(
                     parameters,
                     returns,
                 } => {
-                    let mut errors = Vec::new();
+                    let mut results = Ok(());
                     for (arg, param) in args.iter().zip(parameters.iter()) {
                         let arg = typecheck_expression(
                             arg,
@@ -1347,17 +1361,17 @@ fn typecheck_expression<'a>(
                             context,
                             generator_input_ty,
                         )?;
-                        push_errors(
-                            &mut errors,
+                        merge_results(
+                            &mut results,
                             assert_assignable_to(&context.id_to_decl, param, arg),
                         );
                     }
 
-                    assert_no_errors(errors)?;
+                    results?;
 
                     returns.as_ref().clone()
                 }
-                _ => return Err(vec![TypecheckError::CantCall(node.provenance.clone())]),
+                _ => return Err(TypecheckError::CantCall(node.provenance.clone())),
             }
         }
         AstNodeValue::RecordLiteral { name, fields } => {
@@ -1369,23 +1383,19 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?
             else {
-                return Err(vec![TypecheckError::CantCall(node.provenance.clone())]);
+                return Err(TypecheckError::CantCall(node.provenance.clone()));
             };
 
             match context.decl(ty_id).unwrap() {
                 StaticDeclaration::Struct(struct_type) => {
                     if struct_type.fields.len() != fields.len() {
-                        return Err(vec![TypecheckError::WrongArgsCount(
-                            node.provenance.clone(),
-                        )]);
+                        return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
                     }
 
-                    let mut errors = Vec::new();
+                    let mut results = Ok(());
                     for (name, param_field) in struct_type.fields.iter() {
                         let Some(arg_field) = fields.get(name) else {
-                            return Err(vec![TypecheckError::MissingField(
-                                node.provenance.clone(),
-                            )]);
+                            return Err(TypecheckError::MissingField(node.provenance.clone()));
                         };
                         match typecheck_expression(
                             arg_field,
@@ -1395,8 +1405,8 @@ fn typecheck_expression<'a>(
                             generator_input_ty,
                         ) {
                             Ok(arg_field) => {
-                                push_errors(
-                                    &mut errors,
+                                merge_results(
+                                    &mut results,
                                     assert_assignable_to(
                                         &context.id_to_decl,
                                         param_field,
@@ -1404,13 +1414,13 @@ fn typecheck_expression<'a>(
                                     ),
                                 );
                             }
-                            Err(field_errors) => {
-                                errors.extend(field_errors);
+                            err => {
+                                merge_results(&mut results, err.map(|_| {}));
                             }
                         }
                     }
 
-                    assert_no_errors(errors)?;
+                    results?;
 
                     ExpressionType::InstanceOf(*ty_id)
                 }
@@ -1492,9 +1502,9 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let ExpressionType::Pointer(_, ty) = ty else {
-                return Err(vec![TypecheckError::DereferenceNonPointer(
+                return Err(TypecheckError::DereferenceNonPointer(
                     inner.provenance.clone(),
-                )]);
+                ));
             };
             *ty.clone()
         }
@@ -1520,10 +1530,10 @@ fn typecheck_expression<'a>(
                     generator_input_ty,
                 )?;
                 if &ty != this_ty {
-                    return Err(vec![TypecheckError::TypeMismatch {
+                    return Err(TypecheckError::TypeMismatch {
                         received: this_ty.clone(),
                         expected: ty,
-                    }]);
+                    });
                 }
             }
             ExpressionType::Collection(CollectionType::Array(Box::new(ty)))
@@ -1545,10 +1555,10 @@ fn typecheck_expression<'a>(
             )?;
             // TODO: array index type
             if length != &ExpressionType::Primitive(PrimitiveType::Int32) {
-                return Err(vec![TypecheckError::TypeMismatch {
+                return Err(TypecheckError::TypeMismatch {
                     expected: ExpressionType::Primitive(PrimitiveType::Int32),
                     received: length.clone(),
-                }]);
+                });
             }
             ExpressionType::Collection(CollectionType::Array(Box::new(inner.clone())))
         }
@@ -1604,32 +1614,28 @@ fn typecheck_returns<'a>(
     context: &Declarations,
     expected_ty: &ExpressionType,
     current: &'a AstNode<'a>,
-) -> Result<(), Vec<TypecheckError>> {
-    let mut errors = Vec::new();
+) -> Result<(), TypecheckError> {
+    let mut results = Ok(());
     if let AstNodeValue::Return(child) = &current.value {
         let return_ty = child
             .as_ref()
             .map(|child| child.ty.get().unwrap())
             .unwrap_or(&ExpressionType::Void);
         if !is_assignable_to(&context.id_to_decl, None, expected_ty, return_ty) {
-            errors.push(TypecheckError::TypeMismatch {
-                expected: expected_ty.clone(),
-                received: return_ty.clone(),
-            });
+            merge_results(
+                &mut results,
+                Err(TypecheckError::TypeMismatch {
+                    expected: expected_ty.clone(),
+                    received: return_ty.clone(),
+                }),
+            );
         }
     }
-    current.children(
-        |child| match typecheck_returns(context, expected_ty, child) {
-            Ok(()) => {}
-            Err(mut errs) => errors.append(&mut errs),
-        },
-    );
+    current.children(|child| {
+        merge_results(&mut results, typecheck_returns(context, expected_ty, child))
+    });
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    results
 }
 
 fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
@@ -1943,31 +1949,17 @@ pub fn shallow_dereference(ty: &ExpressionType) -> &ExpressionType {
     }
 }
 
-fn push_errors(errors: &mut Vec<TypecheckError>, result: Result<(), Vec<TypecheckError>>) {
-    if let Err(new_errors) = result {
-        errors.extend(new_errors);
-    }
-}
-
 fn assert_assignable_to(
     id_to_decl: &HashMap<TypeID, &StaticDeclaration>,
     lhs: &ExpressionType,
     rhs: &ExpressionType,
-) -> Result<(), Vec<TypecheckError>> {
+) -> Result<(), TypecheckError> {
     if is_assignable_to(id_to_decl, None, lhs, rhs) {
         Ok(())
     } else {
-        Err(vec![TypecheckError::TypeMismatch {
+        Err(TypecheckError::TypeMismatch {
             received: lhs.clone(),
             expected: rhs.clone(),
-        }])
-    }
-}
-
-fn assert_no_errors(errors: Vec<TypecheckError>) -> Result<(), Vec<TypecheckError>> {
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
+        })
     }
 }

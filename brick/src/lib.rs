@@ -56,8 +56,8 @@ pub enum CompileError {
     ParseError(#[from] ParseError),
     #[error("filesystem error: {0} {1}")]
     FilesystemError(io::Error, String),
-    #[error("typecheck errors: {0:?}")]
-    TypecheckError(Vec<TypecheckError>),
+    #[error("typecheck errors: {0}")]
+    TypecheckError(#[from] TypecheckError),
     #[error("lifetime errors: {0}")]
     LifetimeError(#[from] LifetimeError),
 }
@@ -230,15 +230,27 @@ pub fn typecheck_module(
         });
     }
 
-    let mut modules = modules
+    let module_results = modules
         .par_iter()
-        .map(|(name, contents)| {
-            let types = typecheck(contents.iter(), name, &declarations)?;
-            let ir = lower_module(types, &id_decls);
-            Ok((name.clone(), ir))
-        })
-        .collect::<Result<HashMap<_, _>, Vec<TypecheckError>>>()
-        .map_err(CompileError::TypecheckError)?;
+        .map(
+            |(name, contents)| -> Result<(String, HirModule), TypecheckError> {
+                let types = typecheck(contents.iter(), name, &declarations)?;
+                let ir = lower_module(types, &id_decls);
+                Ok((name.clone(), ir))
+            },
+        )
+        .collect::<Vec<_>>();
+    let mut modules = HashMap::new();
+    let mut typecheck_errors = Ok(());
+    for module_result in module_results {
+        if let Ok((name, module)) = module_result {
+            modules.insert(name, module);
+        } else {
+            multi_error::merge_results(&mut typecheck_errors, module_result.map(|_| {}));
+        }
+    }
+    typecheck_errors?;
+
     let mut lifetime_errors = Ok(());
     for module in modules.values_mut() {
         multi_error::merge_results(
