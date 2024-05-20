@@ -1,9 +1,6 @@
 // NoCompile
-// TODO: borrow check non-main
-fn main(): i32 {
-    let x = 30;
-    let ref1 = unique x;
-    let ref2 = unique x;
-    *ref1 += 1;
-    *ref1
-}
+let x = 30;
+let ref1 = unique x;
+let ref2 = unique x;
+*ref1 += 1;
+*ref1
