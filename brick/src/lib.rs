@@ -21,6 +21,7 @@ mod borrowck;
 mod hir;
 mod interpreter;
 mod linear_ir;
+mod multi_error;
 mod parser;
 mod provenance;
 mod runtime;
@@ -240,7 +241,7 @@ pub fn typecheck_module(
         .map_err(CompileError::TypecheckError)?;
     let mut lifetime_errors = Ok(());
     for module in modules.values_mut() {
-        borrowck::merge_results(
+        multi_error::merge_results(
             &mut lifetime_errors,
             borrowck::borrow_check(module, &id_decls),
         );

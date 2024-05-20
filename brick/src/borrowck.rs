@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::{
     hir::{HirModule, HirNode},
     id::{AnyID, NodeID, TypeID, VariableID},
+    multi_error::{merge_results, print_multi_errors, MultiError},
     typecheck::{ExpressionType, PointerKind},
     HirNodeValue, SourceRange, StaticDeclaration,
 };
@@ -21,13 +22,13 @@ mod control_flow_graph;
 
 #[derive(Debug, Error)]
 pub enum LifetimeError {
+    #[error("{}",  print_multi_errors(&.0[..]))]
+    MultiError(Vec<LifetimeError>),
     #[error("use after move{}; moved{}", maybe_range(.use_point), maybe_range(.move_point))]
     UseAfterMove {
         use_point: Option<SourceRange>,
         move_point: Option<SourceRange>,
     },
-    #[error("{}",  print_multi_errors(&.0[..]))]
-    MultiError(Vec<LifetimeError>),
     #[error("borrow used after move{}; moved{}", maybe_range(.use_point), maybe_range(.move_point))]
     BorrowUseAfterMove {
         use_point: Option<SourceRange>,
@@ -45,20 +46,25 @@ pub enum LifetimeError {
     },
 }
 
+impl MultiError for LifetimeError {
+    fn from_error_list(list: Vec<Self>) -> Self {
+        LifetimeError::MultiError(list)
+    }
+
+    fn as_error_list(&mut self) -> Option<&mut Vec<Self>> {
+        match self {
+            LifetimeError::MultiError(list) => Some(list),
+            _ => None,
+        }
+    }
+}
+
 fn maybe_range(range: &Option<SourceRange>) -> String {
     if let Some(range) = range {
         format!(": {range}")
     } else {
         " in generated code, this is probably an ICE".to_string()
     }
-}
-
-fn print_multi_errors(errors: &[LifetimeError]) -> String {
-    let mut string = String::new();
-    for error in errors.iter() {
-        string.push_str(&format!("{error}\n"));
-    }
-    string
 }
 
 pub fn borrow_check(
@@ -437,33 +443,5 @@ fn find_id_for_lvalue(lvalue: &HirNode) -> &AnyID {
         | HirNodeValue::TakeUnique(child)
         | HirNodeValue::TakeShared(child) => find_id_for_lvalue(child),
         other => panic!("ICE: illegal lvalue: {other:?}"),
-    }
-}
-
-pub fn merge_results(current: &mut Result<(), LifetimeError>, new: Result<(), LifetimeError>) {
-    match (current.as_mut(), new) {
-        (Ok(_), Ok(_)) | (Err(_), Ok(_)) => {}
-        (Ok(_), new @ Err(_)) => {
-            *current = new;
-        }
-        (Err(old), Err(new)) => match (old, new) {
-            (LifetimeError::MultiError(old), LifetimeError::MultiError(new)) => {
-                old.extend(new);
-            }
-            (LifetimeError::MultiError(old), new_error) => {
-                old.push(new_error);
-            }
-            (_, LifetimeError::MultiError(mut list)) => {
-                let mut temp = Ok(());
-                std::mem::swap(&mut temp, current);
-                list.push(temp.unwrap_err());
-                *current = Err(LifetimeError::MultiError(list));
-            }
-            (_, b) => {
-                let mut temp = Ok(());
-                std::mem::swap(&mut temp, current);
-                *current = Err(LifetimeError::MultiError(vec![temp.unwrap_err(), b]));
-            }
-        },
     }
 }
