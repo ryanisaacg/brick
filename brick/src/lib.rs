@@ -1,5 +1,7 @@
 #![allow(clippy::result_large_err)]
 
+use multi_error::merge_result_list;
+use rayon::prelude::*;
 use std::{
     collections::{HashMap, HashSet},
     fs, io,
@@ -212,17 +214,7 @@ pub fn typecheck_module(
     let parse_arena = Arena::new();
     let modules = collect_modules(&parse_arena, module_name.to_string(), source_name, contents)?;
 
-    let declarations = modules
-        .par_iter()
-        .map(|(name, module)| {
-            let name = name.clone();
-            let module = StaticDeclaration::Module(ModuleType {
-                id: TypeID::new(),
-                exports: resolve_module(&module[..]),
-            });
-            (name, module)
-        })
-        .collect::<HashMap<_, _>>();
+    let declarations = collect_declarations(&modules)?;
     let mut id_decls = HashMap::new();
     for decl in declarations.values() {
         decl.visit(&mut |decl: &StaticDeclaration| {
@@ -271,22 +263,11 @@ pub fn typecheck_file(
     source_name: &'static str,
     contents: String,
 ) -> Result<(HirModule, HashMap<String, StaticDeclaration>), CompileError> {
-    use rayon::prelude::*;
-
     let parse_arena = Arena::new();
     let modules = collect_modules(&parse_arena, module_name.to_string(), source_name, contents)?;
 
-    let declarations = modules
-        .par_iter()
-        .map(|(name, module)| {
-            let name = name.clone();
-            let module = StaticDeclaration::Module(ModuleType {
-                id: TypeID::new(),
-                exports: resolve_module(&module[..]),
-            });
-            (name, module)
-        })
-        .collect::<HashMap<_, _>>();
+    let declarations = collect_declarations(&modules)?;
+
     let mut id_decls = HashMap::new();
     for decl in declarations.values() {
         decl.visit(&mut |decl: &StaticDeclaration| {
@@ -295,11 +276,27 @@ pub fn typecheck_file(
     }
 
     let parsed_module = &modules[module_name];
-    let types = typecheck(parsed_module.iter(), module_name, &declarations)
-        .map_err(CompileError::TypecheckError)?;
+    let types = typecheck(parsed_module.iter(), module_name, &declarations)?;
     let ir = lower_module(types, &id_decls);
 
     Ok((ir, declarations))
+}
+
+fn collect_declarations(
+    modules: &HashMap<String, Vec<AstNode>>,
+) -> Result<HashMap<String, StaticDeclaration>, TypecheckError> {
+    let results: Vec<_> = modules
+        .par_iter()
+        .map(|(name, module)| {
+            let name = name.clone();
+            let module = StaticDeclaration::Module(ModuleType {
+                id: TypeID::new(),
+                exports: resolve_module(&module[..])?,
+            });
+            Ok((name, module))
+        })
+        .collect();
+    merge_result_list(results.into_iter())
 }
 
 struct ParseQueueEntry {

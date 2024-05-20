@@ -1,0 +1,4 @@
+// NoCompile
+union IllegalHasReference {
+    Reference(ref i32),
+}

@@ -5,6 +5,29 @@ pub trait MultiError: Sized {
     fn as_error_list(&mut self) -> Option<&mut Vec<Self>>;
 }
 
+pub fn merge_result_list<T, F: FromIterator<T>, E: MultiError>(
+    values: impl Iterator<Item = Result<T, E>>,
+) -> Result<F, E> {
+    let mut results = Ok(());
+
+    let from_iter =
+        F::from_iter(values.filter_map(|value| merge_results_or_value(&mut results, value)));
+    results.map(|_| from_iter)
+}
+
+pub fn merge_results_or_value<T, E: MultiError>(
+    current: &mut Result<(), E>,
+    new: Result<T, E>,
+) -> Option<T> {
+    match new {
+        Ok(val) => Some(val),
+        Err(err) => {
+            merge_results(current, Err(err));
+            None
+        }
+    }
+}
+
 pub fn merge_results<E: MultiError>(current: &mut Result<(), E>, new: Result<(), E>) {
     match (current.as_mut(), new) {
         (Ok(_), Ok(_)) | (Err(_), Ok(_)) => {}

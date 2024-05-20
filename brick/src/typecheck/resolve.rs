@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     id::TypeID,
+    multi_error::{merge_result_list, merge_results},
     parser::{
         AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
         InterfaceDeclarationValue, NameAndType, StructDeclarationValue, UnionDeclarationValue,
@@ -14,7 +15,9 @@ use super::{
     StaticDeclaration, StructType, TypecheckError, UnionType,
 };
 
-pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, StaticDeclaration> {
+pub fn resolve_module(
+    source: &[AstNode<'_>],
+) -> Result<HashMap<String, StaticDeclaration>, TypecheckError> {
     let mut names_to_declarations = HashMap::new();
     for statement in source.iter() {
         match &statement.value {
@@ -29,10 +32,9 @@ pub fn resolve_module(source: &[AstNode<'_>]) -> HashMap<String, StaticDeclarati
         }
     }
 
-    resolve_top_level_declarations(&names_to_declarations).unwrap()
+    resolve_top_level_declarations(&names_to_declarations)
 }
 
-// TODO
 pub fn resolve_top_level_declarations(
     names_to_declarations: &HashMap<String, &AstNode<'_>>,
 ) -> Result<HashMap<String, StaticDeclaration>, TypecheckError> {
@@ -40,15 +42,18 @@ pub fn resolve_top_level_declarations(
         .iter()
         .map(|(name, _)| (name.as_str(), TypeID::new()))
         .collect();
-    names_to_declarations
-        .iter()
-        .map(|(name, node)| {
-            Ok((
-                name.clone(),
-                resolve_declaration(&name_to_type_id, node, false)?,
-            ))
-        })
-        .collect::<Result<HashMap<_, _>, _>>()
+    let mut declarations = HashMap::new();
+    let mut decl_result = Ok(());
+    for (name, node) in names_to_declarations.iter() {
+        match resolve_declaration(&name_to_type_id, node, false) {
+            Ok(declaration) => {
+                declarations.insert(name.clone(), declaration);
+            }
+            Err(err) => merge_results(&mut decl_result, Err(err)),
+        }
+    }
+    decl_result?;
+    Ok(declarations)
 }
 
 fn resolve_declaration(
@@ -62,9 +67,21 @@ fn resolve_declaration(
             associated_functions,
             name,
         }) => {
-            let fields = fields.iter().map(|NameAndType { name, ty }| {
-                Ok((name.clone(), resolve_type_expr(names_to_type_id, ty)?))
-            });
+            let fields: HashMap<_, _> = merge_result_list(fields.iter().map(
+                |NameAndType {
+                     name,
+                     ty,
+                     provenance,
+                 }| {
+                    let ty = resolve_type_expr(names_to_type_id, ty)?;
+                    if matches!(ty, ExpressionType::Pointer(_, _)) {
+                        return Err(TypecheckError::IllegalReferenceInsideDataType(
+                            provenance.clone(),
+                        ));
+                    }
+                    Ok((name.clone(), ty))
+                },
+            ))?;
             let associated_functions = associated_functions
                 .iter()
                 .map(|node| {
@@ -82,7 +99,6 @@ fn resolve_declaration(
                     })
                 })
                 .collect::<Result<HashMap<_, _>, _>>()?;
-            let fields = fields.collect::<Result<_, _>>()?;
 
             StaticDeclaration::Struct(StructType {
                 id: names_to_type_id[name.as_str()],
@@ -122,10 +138,32 @@ fn resolve_declaration(
                 associated_functions,
             })
         }
-        AstNodeValue::UnionDeclaration(UnionDeclarationValue { variants, name, .. }) => {
+        AstNodeValue::UnionDeclaration(UnionDeclarationValue {
+            variants: variant_ast,
+            name,
+            ..
+        }) => {
+            let variants = merge_result_list(variant_ast.iter().map(|variant| {
+                Ok(match variant {
+                    UnionDeclarationVariant::WithValue(NameAndType {
+                        name,
+                        ty,
+                        provenance,
+                    }) => {
+                        let ty = resolve_type_expr(names_to_type_id, ty)?;
+                        if matches!(ty, ExpressionType::Pointer(_, _)) {
+                            return Err(TypecheckError::IllegalReferenceInsideDataType(
+                                provenance.clone(),
+                            ));
+                        }
+                        (name.clone(), Some(ty))
+                    }
+                    UnionDeclarationVariant::WithoutValue(name) => (name.clone(), None),
+                })
+            }))?;
             StaticDeclaration::Union(UnionType {
                 id: names_to_type_id[name.as_str()],
-                variant_order: variants
+                variant_order: variant_ast
                     .iter()
                     .map(|variant| match variant {
                         UnionDeclarationVariant::WithValue(name_and_type) => {
@@ -134,17 +172,7 @@ fn resolve_declaration(
                         UnionDeclarationVariant::WithoutValue(name) => name.clone(),
                     })
                     .collect(),
-                variants: variants
-                    .iter()
-                    .map(|variant| {
-                        Ok(match variant {
-                            UnionDeclarationVariant::WithValue(NameAndType { name, ty }) => {
-                                (name.clone(), Some(resolve_type_expr(names_to_type_id, ty)?))
-                            }
-                            UnionDeclarationVariant::WithoutValue(name) => (name.clone(), None),
-                        })
-                    })
-                    .collect::<Result<HashMap<_, _>, _>>()?,
+                variants,
             })
         }
         AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {

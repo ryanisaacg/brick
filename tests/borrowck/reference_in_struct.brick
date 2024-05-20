@@ -1,0 +1,4 @@
+// NoCompile
+struct IllegalHasReference {
+    reference: ref i32,
+}

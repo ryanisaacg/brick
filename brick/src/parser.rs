@@ -14,6 +14,7 @@ use crate::{
 pub struct NameAndType<'a> {
     pub name: String,
     pub ty: &'a AstNode<'a>,
+    pub provenance: SourceRange,
 }
 
 #[derive(Debug, PartialEq)]
@@ -644,7 +645,11 @@ fn interface_or_struct_body<'a>(
             cursor = range.end();
             let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
             let kind = add_node(context, kind);
-            fields.push(NameAndType { name, ty: kind });
+            fields.push(NameAndType {
+                name,
+                ty: kind,
+                provenance: SourceRange::new(range.start(), kind.provenance.end()),
+            });
 
             let (should_end, range) = comma_or_end_list(
                 source,
@@ -688,6 +693,7 @@ fn union_declaration<'a>(
         {
             let paren = already_peeked_token(source)?;
             let ty = type_expression(source, context, paren.range.end())?;
+            let ty = add_node(context, ty);
             let paren = assert_next_lexeme_eq(
                 source,
                 TokenValue::CloseParen,
@@ -698,7 +704,8 @@ fn union_declaration<'a>(
 
             variants.push(UnionDeclarationVariant::WithValue(NameAndType {
                 name,
-                ty: add_node(context, ty),
+                ty,
+                provenance: SourceRange::new(name_range.start(), ty.provenance.end()),
             }));
         } else {
             variants.push(UnionDeclarationVariant::WithoutValue(name));
@@ -852,7 +859,11 @@ fn function_header<'a>(
                 cursor = range.end();
                 let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
                 let kind = add_node(context, kind);
-                params.push(NameAndType { name, ty: kind });
+                params.push(NameAndType {
+                    name,
+                    ty: kind,
+                    provenance: SourceRange::new(range.start(), kind.provenance.end()),
+                });
             }
         }
     }

@@ -1,6 +1,5 @@
 borrow checker and lifetimes:
 - check borrows for function calls
-- disallow references within data structures
 - allow disjoint borrows of struct fields
 - correctly mark references through collection indices
 - mark custom types as copy
