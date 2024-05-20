@@ -1,0 +1,9 @@
+// NoCompile
+struct Data{}
+
+fn drop(x: Data) {}
+
+let x = Data{};
+borrow x1 = unique x;
+drop(x);
+drop(*x1);

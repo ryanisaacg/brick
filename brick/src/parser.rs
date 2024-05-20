@@ -48,7 +48,8 @@ impl<'a> AstNode<'a> {
             | Deref(child)
             | UnaryExpr(_, child)
             | ArrayType(child)
-            | Loop(child) => {
+            | Loop(child)
+            | BorrowDeclaration(_, child, _) => {
                 callback(child);
             }
             DictType(left, right)
@@ -270,6 +271,7 @@ pub enum AstNodeValue<'a> {
         &'a mut AstNode<'a>,
         VariableID,
     ),
+    BorrowDeclaration(String, &'a mut AstNode<'a>, VariableID),
     Import(String),
     Return(Option<&'a mut AstNode<'a>>),
     Yield(Option<&'a mut AstNode<'a>>),
@@ -413,6 +415,7 @@ fn statement<'a>(
     Ok(
         match peek_token(source, cursor, "expected let, fn, or expression")?.value {
             TokenValue::Let
+            | TokenValue::Borrow
             | TokenValue::Import
             | TokenValue::Function
             | TokenValue::Gen
@@ -424,17 +427,8 @@ fn statement<'a>(
                 let Token { range, value, .. } = already_peeked_token(source)?;
                 let cursor = range.end();
                 match value {
-                    TokenValue::Let => {
-                        let statement = variable_declaration(source, context, cursor)?;
-                        assert_next_lexeme_eq(
-                            source,
-                            TokenValue::Semicolon,
-                            statement.provenance.end(),
-                            "expected ; after 'let' statement",
-                        )?;
-
-                        statement
-                    }
+                    TokenValue::Let => variable_declaration(source, context, cursor)?,
+                    TokenValue::Borrow => borrow_declaration(source, context, cursor)?,
                     TokenValue::Import => {
                         let statement = import_declaration(source, cursor)?;
                         if let Some(Token {
@@ -910,7 +904,6 @@ fn variable_declaration<'a>(
     context: &'a Arena<AstNode<'a>>,
     cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
-    // TODO: store type hint in declarations
     let (name, mut provenance, type_hint) = name_and_type_hint(
         source,
         context,
@@ -930,9 +923,49 @@ fn variable_declaration<'a>(
 
     let type_hint = type_hint.map(|type_hint| add_node(context, type_hint));
 
+    assert_next_lexeme_eq(
+        source,
+        TokenValue::Semicolon,
+        provenance.end(),
+        "expected ; after 'let' statement",
+    )?;
+
     Ok(AstNode::new(
         AstNodeValue::Declaration(name, type_hint, add_node(context, value), VariableID::new()),
         provenance,
+    ))
+}
+
+fn borrow_declaration<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    mut cursor: SourceMarker,
+) -> Result<AstNode<'a>, ParseError> {
+    let start = cursor;
+    let (name, span) = word(source, cursor, "expected name after borrow")?;
+    cursor = span.end();
+    cursor = assert_next_lexeme_eq(
+        source,
+        TokenValue::Assign,
+        cursor,
+        "expected = after let binding target",
+    )?
+    .range
+    .end();
+    let rhs = expression(source, context, cursor, true)?;
+    cursor = rhs.provenance.end();
+    let rhs = context.alloc(rhs);
+
+    assert_next_lexeme_eq(
+        source,
+        TokenValue::Semicolon,
+        cursor,
+        "expected ; after 'borrow' statement",
+    )?;
+
+    Ok(AstNode::new(
+        AstNodeValue::BorrowDeclaration(name, rhs, VariableID::new()),
+        SourceRange::new(start, cursor),
     ))
 }
 

@@ -5,7 +5,7 @@ use std::{
     fs, io,
 };
 
-use borrowck::BorrowError;
+use borrowck::LifetimeError;
 use hir::HirModule;
 use interpreter::{Function, VM};
 use linear_ir::{expr_ty_to_physical, layout_types, linearize_function, LinearContext};
@@ -31,7 +31,6 @@ use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
 use crate::{
-    borrowck::borrow_check,
     hir::lower_module,
     id::TypeID,
     typecheck::{ModuleType, TypecheckError},
@@ -56,10 +55,10 @@ pub enum CompileError {
     ParseError(#[from] ParseError),
     #[error("filesystem error: {0} {1}")]
     FilesystemError(io::Error, String),
-    #[error("borrow check errors: {0:?}")]
-    BorrowcheckError(Vec<BorrowError>),
     #[error("typecheck errors: {0:?}")]
     TypecheckError(Vec<TypecheckError>),
+    #[error("lifetime errors: {0}")]
+    LifetimeError(#[from] LifetimeError),
 }
 
 pub fn eval(source: &str) -> Result<Vec<Value>, IntepreterError> {
@@ -239,12 +238,14 @@ pub fn typecheck_module(
         })
         .collect::<Result<HashMap<_, _>, Vec<TypecheckError>>>()
         .map_err(CompileError::TypecheckError)?;
+    let mut lifetime_errors = Ok(());
     for module in modules.values_mut() {
-        let errors = borrow_check(module, &id_decls);
-        if !errors.is_empty() {
-            return Err(CompileError::BorrowcheckError(errors));
-        }
+        borrowck::merge_results(
+            &mut lifetime_errors,
+            borrowck::borrow_check(module, &id_decls),
+        );
     }
+    lifetime_errors?;
 
     Ok(CompilationResults {
         modules,

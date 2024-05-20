@@ -1,0 +1,5 @@
+// NoCompile
+let x = 5;
+borrow x1 = ref x;
+borrow x2 = unique x;
+*x1

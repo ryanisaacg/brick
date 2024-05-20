@@ -1,0 +1,9 @@
+// NoCompile
+struct Data{}
+
+fn drop(x: Data) {}
+
+let x = Data{};
+while true {
+    drop(x);
+}

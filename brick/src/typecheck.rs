@@ -279,6 +279,12 @@ pub enum TypecheckError {
     DereferenceNonPointer(SourceRange),
     #[error("non-exhaustive case statement: {0}")]
     NonExhaustiveCase(SourceRange),
+    #[error("references may not be assigned to variables, use 'borrow' instead of 'let': {0}")]
+    IllegalFirstClassReference(SourceRange),
+    #[error("right hand side of 'borrow' statement must be a reference: {0}")]
+    IllegalNonRefBorrow(SourceRange),
+    #[error("right hand side of 'borrow' statement must be a valid lvalue: {0}")]
+    IllegalNonLvalueBorrow(SourceRange),
 }
 
 struct Declarations<'a> {
@@ -541,12 +547,28 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
+            let mut errors = Vec::new();
+            if matches!(value_ty, ExpressionType::Pointer(_, _)) {
+                errors.push(TypecheckError::IllegalFirstClassReference(
+                    node.provenance.clone(),
+                ));
+            }
+
             if let Some(type_hint) = type_hint {
-                let ty =
+                let hint_ty =
                     resolve_type_expr(&context.name_to_type_id, type_hint).map_err(|e| vec![e])?;
-                assert_assignable_to(&context.id_to_decl, &ty, value_ty)?;
-                type_hint.ty.set(ty.clone()).unwrap();
-                current_scope.insert(name.clone(), ((*variable_id).into(), ty));
+                if matches!(hint_ty, ExpressionType::Pointer(_, _)) {
+                    errors.push(TypecheckError::IllegalFirstClassReference(
+                        node.provenance.clone(),
+                    ));
+                }
+
+                push_errors(
+                    &mut errors,
+                    assert_assignable_to(&context.id_to_decl, &hint_ty, value_ty),
+                );
+                type_hint.ty.set(hint_ty.clone()).unwrap();
+                current_scope.insert(name.clone(), ((*variable_id).into(), hint_ty));
             } else {
                 if value_ty == &ExpressionType::Null
                     || value_ty == &ExpressionType::Unreachable
@@ -558,6 +580,32 @@ fn typecheck_expression<'a>(
                 }
                 current_scope.insert(name.clone(), ((*variable_id).into(), value_ty.clone()));
             }
+
+            assert_no_errors(errors)?;
+
+            ExpressionType::Void
+        }
+        AstNodeValue::BorrowDeclaration(name, value, variable_id) => {
+            let value_ty = typecheck_expression(
+                value,
+                outer_scopes,
+                current_scope,
+                context,
+                generator_input_ty,
+            )?;
+            current_scope.insert(name.clone(), ((*variable_id).into(), value_ty.clone()));
+
+            let mut errors = Vec::new();
+            if let AstNodeValue::TakeRef(child) | AstNodeValue::TakeUnique(child) = &value.value {
+                if !validate_lvalue(child) {
+                    errors.push(TypecheckError::IllegalNonLvalueBorrow(
+                        node.provenance.clone(),
+                    ));
+                }
+            } else {
+                errors.push(TypecheckError::IllegalNonRefBorrow(node.provenance.clone()));
+            };
+            assert_no_errors(errors)?;
 
             ExpressionType::Void
         }
@@ -1633,7 +1681,8 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::DictType(_, _)
         | AstNodeValue::UnaryExpr(_, _)
         | AstNodeValue::NullableType(_)
-        | AstNodeValue::GeneratorType { .. } => false,
+        | AstNodeValue::GeneratorType { .. }
+        | AstNodeValue::BorrowDeclaration(..) => false,
     }
 }
 

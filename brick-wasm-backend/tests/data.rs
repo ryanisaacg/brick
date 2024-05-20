@@ -58,6 +58,7 @@ fn data() {
             "coroutine/infinite.brick",
             "coroutine/multiple_generators.brick",
             "coroutine/mutable_ref.brick",
+            "coroutine/mutable_ref_repeated.brick",
             "coroutine/nested_coroutines.brick",
             "coroutine/other_functions.brick",
             "coroutine/regression_test_branch_in_yielding_loop.brick",

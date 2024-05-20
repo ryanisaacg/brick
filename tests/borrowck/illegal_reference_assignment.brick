@@ -1,0 +1,5 @@
+// NoCompile
+let value = 1234;
+
+let val_ref = ref value;
+*val_ref

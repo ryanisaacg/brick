@@ -1,0 +1,12 @@
+// Int | 35
+
+struct Value {
+    val: i32
+}
+
+fn drop(val: Value) {}
+
+let x = Value { val: 12 };
+drop(x);
+x = Value { val: 35 };
+x

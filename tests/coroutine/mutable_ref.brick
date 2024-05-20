@@ -4,6 +4,6 @@ gen fn basic(): generator[i32, void] {
 }
 
 let seq = basic();
-let seq_ref = unique seq;
+borrow seq_ref = unique seq;
 seq_ref()
 

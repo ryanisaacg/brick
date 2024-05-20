@@ -1,6 +1,5 @@
 // NoCompile
 struct Data {}
-fn drop(x: Data){}
 
 let x = Data{};
 if 1 > 5 {

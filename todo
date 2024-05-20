@@ -1,10 +1,6 @@
-misc:
-- automatically discard unused expression values
-
 borrow checker and lifetimes:
-- mutable references aren't moved when they're passed to functions
 - check borrows for function calls
-- handle assignments - both in terms of drop detection and borrow detection
+- disallow references within data structures
 - allow disjoint borrows of struct fields
 - correctly mark references through collection indices
 - mark custom types as copy
@@ -17,6 +13,10 @@ unions:
 - optional non-exhaustive cases?
 - allow case statements to take non-lvalues
 - faulthrough / default branch
+
+misc:
+- automatically discard unused expression values
+- short-circuiting boolean evaluation
 
 collections:
 - tuples
@@ -43,6 +43,7 @@ wasm backend:
 - handle string concat
 - figure out and fix issue with dictionaries
 - vtables / dynamic functions
+- trailing return statements in functions cause miscompilations
 
 import support:
 - allow imports to have nested paths (sugar for recursively expanding?)

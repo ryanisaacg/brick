@@ -421,20 +421,6 @@ fn lower_node(decls: &HashMap<TypeID, &StaticDeclaration>, node: &AstNode<'_>) -
             HirNodeValue::ArrayLiteralLength(elem, count)
         }
 
-        AstNodeValue::FunctionDeclaration(_)
-        | AstNodeValue::ExternFunctionBinding(_)
-        | AstNodeValue::StructDeclaration(_)
-        | AstNodeValue::UnionDeclaration(_)
-        | AstNodeValue::InterfaceDeclaration(_)
-        | AstNodeValue::Import(_)
-        | AstNodeValue::UniqueType(_)
-        | AstNodeValue::VoidType
-        | AstNodeValue::SharedType(_)
-        | AstNodeValue::NullableType(_)
-        | AstNodeValue::RequiredFunction(_)
-        | AstNodeValue::DictType(_, _)
-        | AstNodeValue::ArrayType(_)
-        | AstNodeValue::GeneratorType { .. } => unreachable!("Can't have these in a function body"),
         AstNodeValue::Match(match_decl) => {
             let union_node = lower_node_alloc(decls, match_decl.value);
             let match_decl_ty = match_decl.value.ty.get().unwrap();
@@ -536,6 +522,45 @@ fn lower_node(decls: &HashMap<TypeID, &StaticDeclaration>, node: &AstNode<'_>) -
 
             HirNodeValue::Switch { value, cases }
         }
+        // TODO: do we need to know the difference between 'borrow' and 'let' in the IR?
+        AstNodeValue::BorrowDeclaration(_name, value, variable_id) => {
+            let rvalue = lower_node_alloc(decls, value);
+            let lvalue = Box::new(HirNode {
+                id: NodeID::new(),
+                value: HirNodeValue::VariableReference((*variable_id).into()),
+                ty: rvalue.ty.clone(),
+                provenance: Some(node.provenance.clone()),
+            });
+            let statements = vec![
+                HirNode::from_ast(
+                    node,
+                    HirNodeValue::Declaration(*variable_id),
+                    rvalue.ty.clone(),
+                ),
+                HirNode {
+                    id: NodeID::new(),
+                    value: HirNodeValue::Assignment(lvalue, rvalue),
+                    ty: ExpressionType::Void,
+                    provenance: Some(node.provenance.clone()),
+                },
+            ];
+            HirNodeValue::Sequence(statements)
+        }
+
+        AstNodeValue::FunctionDeclaration(_)
+        | AstNodeValue::ExternFunctionBinding(_)
+        | AstNodeValue::StructDeclaration(_)
+        | AstNodeValue::UnionDeclaration(_)
+        | AstNodeValue::InterfaceDeclaration(_)
+        | AstNodeValue::Import(_)
+        | AstNodeValue::UniqueType(_)
+        | AstNodeValue::VoidType
+        | AstNodeValue::SharedType(_)
+        | AstNodeValue::NullableType(_)
+        | AstNodeValue::RequiredFunction(_)
+        | AstNodeValue::DictType(_, _)
+        | AstNodeValue::ArrayType(_)
+        | AstNodeValue::GeneratorType { .. } => unreachable!("Can't have these in a function body"),
     };
 
     HirNode::from_ast(node, value, node.ty.get().expect("type filled").clone())

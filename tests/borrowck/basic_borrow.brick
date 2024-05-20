@@ -1,0 +1,6 @@
+// Int | 5678
+let value = 5678;
+
+borrow val_ref = ref value;
+*val_ref
+

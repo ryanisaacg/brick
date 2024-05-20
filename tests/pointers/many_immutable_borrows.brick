@@ -1,5 +1,5 @@
 // Int | 30
 let x = 30;
-let ref1 = ref x;
-let ref2 = ref x;
+borrow ref1 = ref x;
+borrow ref2 = ref x;
 *ref1

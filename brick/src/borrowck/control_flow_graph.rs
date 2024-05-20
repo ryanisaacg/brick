@@ -1,13 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use crate::{
-    hir::{BinaryLogicalOp, HirNode, HirNodeValue},
-    id::{NodeID, VariableID},
-};
+use crate::{hir::HirNode, HirNodeValue};
 
 // Based on https://ics.uci.edu/~lopes/teaching/inf212W12/readings/rep-analysis-soft.pdf
 
 use petgraph::stable_graph::{NodeIndex, StableGraph};
+
+use super::BlockLiveness;
 
 pub type ControlFlowGraph<'a> = StableGraph<CfgNode<'a>, CfgEdge>;
 
@@ -27,7 +26,9 @@ pub fn build_control_flow_graph(body: &HirNode) -> FunctionCFG {
 
     let (start_body, end_body) = create_graph_for_node(body, &mut intermediate_cfg, exit);
     intermediate_cfg.add_edge(intermediate_entrance, start_body, CfgEdge::Flow);
-    intermediate_cfg.add_edge(end_body, exit, CfgEdge::Flow);
+    if let Some(end_body) = end_body {
+        intermediate_cfg.add_edge(end_body, exit, CfgEdge::Flow);
+    }
 
     let mut cfg = StableGraph::new();
 
@@ -36,7 +37,7 @@ pub fn build_control_flow_graph(body: &HirNode) -> FunctionCFG {
         intermediate_entrance,
         cfg.add_node(CfgNode::Block {
             expressions: Vec::new(),
-            liveness: HashMap::new(),
+            life_state: BlockLiveness::new(),
         }),
     );
     // Calculate leaders
@@ -57,7 +58,7 @@ pub fn build_control_flow_graph(body: &HirNode) -> FunctionCFG {
             end,
             cfg.add_node(CfgNode::Block {
                 expressions: Vec::new(),
-                liveness: HashMap::new(),
+                life_state: BlockLiveness::new(),
             }),
         );
         // All nodes following a goto are also leaders
@@ -74,13 +75,13 @@ pub fn build_control_flow_graph(body: &HirNode) -> FunctionCFG {
                 endpoint,
                 cfg.add_node(CfgNode::Block {
                     expressions: Vec::new(),
-                    liveness: HashMap::new(),
+                    life_state: BlockLiveness::new(),
                 }),
             );
         }
     }
     let cfg_end = cfg.add_node(CfgNode::Exit {
-        liveness: HashMap::new(),
+        life_state: BlockLiveness::new(),
     });
     // Create blocks
     for (node_idx, leader_idx) in leaders.iter() {
@@ -109,7 +110,7 @@ fn collect_blocks_to_add<'a>(
     cfg_end: NodeIndex,
     current: NodeIndex,
 ) {
-    if let Some(IntermediateNode::Expression(expr)) = intermediate_cfg.node_weight(current) {
+    if let Some(IntermediateNode::Node(expr)) = intermediate_cfg.node_weight(current) {
         let Some(CfgNode::Block {
             expressions: block, ..
         }) = cfg.node_weight_mut(leader)
@@ -135,41 +136,30 @@ fn collect_blocks_to_add<'a>(
 pub enum CfgNode<'a> {
     Block {
         expressions: Vec<&'a HirNode>,
-        liveness: HashMap<VariableID, Liveness>,
+        life_state: BlockLiveness,
     },
     Exit {
-        liveness: HashMap<VariableID, Liveness>,
+        life_state: BlockLiveness,
     },
 }
 
 impl CfgNode<'_> {
-    pub fn liveness(&self) -> &HashMap<VariableID, Liveness> {
+    pub fn life_state(&self) -> &BlockLiveness {
         match self {
-            CfgNode::Block { liveness, .. } => liveness,
-            CfgNode::Exit { liveness } => liveness,
+            CfgNode::Exit { life_state } | CfgNode::Block { life_state, .. } => life_state,
         }
     }
 
-    pub fn liveness_mut(&mut self) -> &mut HashMap<VariableID, Liveness> {
+    pub fn life_state_mut(&mut self) -> &mut BlockLiveness {
         match self {
-            CfgNode::Block { liveness, .. } => liveness,
-            CfgNode::Exit { liveness } => liveness,
+            CfgNode::Exit { life_state } | CfgNode::Block { life_state, .. } => life_state,
         }
     }
-}
-
-#[derive(Debug)]
-pub enum Liveness {
-    Moved(NodeID),
-    MovedInParents(HashSet<NodeIndex>),
-
-    Referenced(NodeID),
-    ParentReferenced,
 }
 
 #[derive(Debug)]
 pub enum IntermediateNode<'a> {
-    Expression(&'a HirNode),
+    Node(&'a HirNode),
     Empty,
     Entrance,
     Exit,
@@ -179,14 +169,16 @@ pub enum IntermediateNode<'a> {
 pub enum CfgEdge {
     Flow,
     Goto,
+    Loop,
     If,
+    // TODO: is else required?
     Else,
 }
 
 impl CfgEdge {
     fn is_goto(&self) -> bool {
         match self {
-            CfgEdge::Goto | CfgEdge::If | CfgEdge::Else => true,
+            CfgEdge::Goto | CfgEdge::If | CfgEdge::Else | CfgEdge::Loop => true,
             CfgEdge::Flow => false,
         }
     }
@@ -196,58 +188,10 @@ fn create_graph_for_node<'a>(
     current: &'a HirNode,
     graph: &mut IntermediateCFG<'a>,
     function_exit: NodeIndex,
-) -> (NodeIndex, NodeIndex) {
+) -> (NodeIndex, Option<NodeIndex>) {
     use HirNodeValue::*;
 
     match &current.value {
-        VariableReference(_)
-        | Int(_)
-        | Float(_)
-        | Bool(_)
-        | Null
-        | CharLiteral(_)
-        | StringLiteral(_)
-        | Declaration(_)
-        | UnaryLogical(_, _)
-        | Arithmetic(_, _, _)
-        | Comparison(_, _, _)
-        | Dereference(_)
-        | Call(_, _)
-        | VtableCall(_, _, _)
-        | RuntimeCall(_, _)
-        | TakeUnique(_)
-        | TakeShared(_)
-        | StructLiteral { .. }
-        | ArrayLiteral(_)
-        | ArrayLiteralLength(_, _)
-        | Assignment(_, _)
-        | StructToInterface { .. }
-        | NumericCast { .. }
-        | Parameter(_, _)
-        | Access(_, _)
-        | NullableTraverse(_, _)
-        | ArrayIndex(_, _)
-        | DictIndex(_, _)
-        | DictLiteral(_)
-        | MakeNullable(_)
-        | UnionLiteral(_, _, _)
-        // Technically control flow leaves *and then comes back*. not sure how to express that here
-        // yet
-        | GeneratorSuspend(_, _)
-        // the start of the function can jump to these, but only sort of?
-        | GotoLabel(_)
-        | GeneratorResume(_)
-        | GeneratorCreate { .. }
-        | InterfaceAddress(_)
-        | StringConcat(_, _)
-        // TODO: handle switch in the CFG?
-        | Switch { .. }
-        | UnionTag(_)
-        | UnionVariant(_, _) => {
-            let start = graph.add_node(IntermediateNode::Expression(current));
-
-            (start, start)
-        }
         Sequence(children) => {
             let start = graph.add_node(IntermediateNode::Empty);
             let mut current_node = start;
@@ -255,77 +199,101 @@ fn create_graph_for_node<'a>(
             for child in children.iter() {
                 let (start_child, end_child) = create_graph_for_node(child, graph, function_exit);
                 graph.add_edge(current_node, start_child, CfgEdge::Flow);
-                current_node = end_child;
+                if let Some(end_child) = end_child {
+                    current_node = end_child;
+                } else {
+                    // TODO: warn about dead code?
+                    return (start, None);
+                }
             }
 
-            (start, current_node)
+            (start, Some(current_node))
         }
         Yield(_) | Return(_) => {
-            let node = graph.add_node(IntermediateNode::Expression(current));
+            let node = graph.add_node(IntermediateNode::Node(current));
             graph.add_edge(node, function_exit, CfgEdge::Goto);
 
             // TODO: what should the exit be?
-            (node, node)
+            (node, None)
         }
-        BinaryLogical(BinaryLogicalOp::BooleanAnd, lhs, rhs) => {
-            let (start_lhs, end_lhs) = create_graph_for_node(lhs, graph, function_exit);
-            let (start_rhs, end_rhs) = create_graph_for_node(rhs, graph, function_exit);
-
-            let virtual_next = graph.add_node(IntermediateNode::Empty);
-            graph.add_edge(end_lhs, virtual_next, CfgEdge::Else);
-            graph.add_edge(end_lhs, start_rhs, CfgEdge::If);
-            graph.add_edge(end_rhs, virtual_next, CfgEdge::Flow);
-
-            (start_lhs, virtual_next)
-        }
-        BinaryLogical(BinaryLogicalOp::BooleanOr, lhs, rhs) | NullCoalesce(lhs, rhs) => {
-            let (start_lhs, end_lhs) = create_graph_for_node(lhs, graph, function_exit);
-            let (start_rhs, end_rhs) = create_graph_for_node(rhs, graph, function_exit);
-
-            let virtual_next = graph.add_node(IntermediateNode::Empty);
-            graph.add_edge(end_lhs, virtual_next, CfgEdge::If);
-            graph.add_edge(end_lhs, start_rhs, CfgEdge::Else);
-            graph.add_edge(end_rhs, virtual_next, CfgEdge::Flow);
-
-            (start_lhs, virtual_next)
-        }
+        // TODO: short-circuiting boolean logic
         If(condition, if_branch, else_branch) => {
             let (start_condition, end_condition) =
                 create_graph_for_node(condition, graph, function_exit);
+            let Some(end_condition) = end_condition else {
+                return (start_condition, None);
+            };
             let (start_body, end_body) = create_graph_for_node(if_branch, graph, function_exit);
             graph.add_edge(end_condition, start_body, CfgEdge::If);
 
-            let virtual_next = graph.add_node(IntermediateNode::Empty);
-            if let Some(else_branch) = else_branch {
-                let (start_else, end_else) =
-                    create_graph_for_node(else_branch, graph, function_exit);
-                graph.add_edge(end_condition, start_else, CfgEdge::Else);
-                graph.add_edge(end_else, virtual_next, CfgEdge::Flow);
-            } else {
-                graph.add_edge(end_condition, virtual_next, CfgEdge::Else);
-                graph.add_edge(end_body, virtual_next, CfgEdge::Flow);
+            let rejoin_node = graph.add_node(IntermediateNode::Empty);
+            if let Some(end_body) = end_body {
+                graph.add_edge(end_body, rejoin_node, CfgEdge::Flow);
             }
 
-            (start_condition, virtual_next)
+            let else_destination = if let Some(else_branch) = else_branch {
+                let (start_else, end_else) =
+                    create_graph_for_node(else_branch, graph, function_exit);
+
+                if let Some(end_else) = end_else {
+                    graph.add_edge(end_else, rejoin_node, CfgEdge::Flow);
+                }
+
+                start_else
+            } else {
+                rejoin_node
+            };
+            graph.add_edge(end_condition, else_destination, CfgEdge::Else);
+
+            (start_condition, Some(rejoin_node))
+        }
+        Switch { value, cases } => {
+            let (start_value, end_value) = create_graph_for_node(value, graph, function_exit);
+            let Some(end_value) = end_value else {
+                return (start_value, None);
+            };
+
+            let rejoin_node = graph.add_node(IntermediateNode::Empty);
+            for case in cases.iter() {
+                let (start_case, end_case) = create_graph_for_node(case, graph, function_exit);
+                graph.add_edge(end_value, start_case, CfgEdge::If);
+                if let Some(end_case) = end_case {
+                    graph.add_edge(end_case, rejoin_node, CfgEdge::Flow);
+                }
+            }
+
+            (start_value, Some(rejoin_node))
         }
         While(condition, body) => {
             let (start_condition, end_condition) =
                 create_graph_for_node(condition, graph, function_exit);
+            let Some(end_condition) = end_condition else {
+                return (start_condition, None);
+            };
             let (start_body, end_body) = create_graph_for_node(body, graph, function_exit);
             graph.add_edge(end_condition, start_body, CfgEdge::If);
 
-            let virtual_next = graph.add_node(IntermediateNode::Empty);
-            graph.add_edge(end_condition, virtual_next, CfgEdge::Else);
-            graph.add_edge(end_body, start_condition, CfgEdge::Flow);
+            let after_loop = graph.add_node(IntermediateNode::Empty);
+            graph.add_edge(end_condition, after_loop, CfgEdge::Else);
+            if let Some(end_body) = end_body {
+                graph.add_edge(end_body, start_condition, CfgEdge::Loop);
+            }
 
-            (start_condition, virtual_next)
+            (start_condition, Some(after_loop))
         }
         Loop(body) => {
             let (start_child, end_child) = create_graph_for_node(body, graph, function_exit);
-            graph.add_edge(end_child, start_child, CfgEdge::Goto);
-
-            (start_child, end_child)
+            if let Some(end_child) = end_child {
+                graph.add_edge(end_child, start_child, CfgEdge::Loop);
+                (start_child, Some(end_child))
+            } else {
+                (start_child, None)
+            }
         }
-        PointerSize(_) => todo!(),
+        _ => {
+            let node = graph.add_node(IntermediateNode::Node(current));
+
+            (node, Some(node))
+        }
     }
 }

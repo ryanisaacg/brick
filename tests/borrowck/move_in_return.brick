@@ -1,0 +1,13 @@
+// Int | 90
+struct Value {
+    val: i32
+}
+
+fn test(): Value {
+    let x = Value { val: 90 };
+    while true {
+        return x;
+    }
+    Value { val: 10 }
+}
+test()
