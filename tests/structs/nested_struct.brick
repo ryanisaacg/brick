@@ -1,5 +1,4 @@
-// NoCompile
-// TODO: allow marking structs as copy
+// Int | 100
 struct Point2 {
     x: i32,
     y: i32,
@@ -26,6 +25,5 @@ let tl = Point2 { x: 0, y : 0 };
 let br = Point2 { x: 10, y: 10 };
 
 let rect = Rectangle { tl, br };
-tl = Point2 { x: 1000, y: 1000 };
 
 rect.area()

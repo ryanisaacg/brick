@@ -66,6 +66,7 @@ fn resolve_declaration(
             fields,
             associated_functions,
             name,
+            properties,
         }) => {
             let fields: HashMap<_, _> = merge_result_list(fields.iter().map(
                 |NameAndType {
@@ -99,11 +100,24 @@ fn resolve_declaration(
                     })
                 })
                 .collect::<Result<HashMap<_, _>, _>>()?;
+            let mut is_affine = false;
+            for property in properties.iter() {
+                match property.as_str() {
+                    "Move" => is_affine = true,
+                    _ => {
+                        return Err(TypecheckError::UnknownProperty(
+                            property.clone(),
+                            node.provenance.clone(),
+                        ))
+                    }
+                }
+            }
 
             StaticDeclaration::Struct(StructType {
                 id: names_to_type_id[name.as_str()],
                 fields,
                 associated_functions,
+                is_affine,
             })
         }
         AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
@@ -141,7 +155,7 @@ fn resolve_declaration(
         AstNodeValue::UnionDeclaration(UnionDeclarationValue {
             variants: variant_ast,
             name,
-            ..
+            properties,
         }) => {
             let variants = merge_result_list(variant_ast.iter().map(|variant| {
                 Ok(match variant {
@@ -161,6 +175,20 @@ fn resolve_declaration(
                     UnionDeclarationVariant::WithoutValue(name) => (name.clone(), None),
                 })
             }))?;
+
+            let mut is_affine = false;
+            for property in properties.iter() {
+                match property.as_str() {
+                    "Move" => is_affine = true,
+                    _ => {
+                        return Err(TypecheckError::UnknownProperty(
+                            property.clone(),
+                            node.provenance.clone(),
+                        ))
+                    }
+                }
+            }
+
             StaticDeclaration::Union(UnionType {
                 id: names_to_type_id[name.as_str()],
                 variant_order: variant_ast
@@ -173,6 +201,7 @@ fn resolve_declaration(
                     })
                     .collect(),
                 variants,
+                is_affine,
             })
         }
         AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {

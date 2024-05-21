@@ -55,6 +55,24 @@ impl ExpressionType {
             | ExpressionType::FunctionReference { .. } => None,
         }
     }
+
+    pub fn is_affine(&self, declarations: &HashMap<TypeID, &StaticDeclaration>) -> bool {
+        match self {
+            ExpressionType::Nullable(inner) => inner.is_affine(declarations),
+            ExpressionType::Void
+                | ExpressionType::Unreachable
+                | ExpressionType::Null
+                // Only if references truly aren't allowed in re-assignments
+                | ExpressionType::Pointer(_, _)
+                | ExpressionType::Primitive(_) => false,
+            ExpressionType::InstanceOf(id) => declarations[id].is_affine(),
+            ExpressionType::ReferenceTo(_)
+                | ExpressionType::TypeParameterReference(_)
+                | ExpressionType::Collection(_)
+                | ExpressionType::Generator { .. }
+            | ExpressionType::FunctionReference { .. } => true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,6 +115,16 @@ impl StaticDeclaration {
             StaticDeclaration::Interface(inner) => inner.id.into(),
             StaticDeclaration::Union(inner) => inner.id.into(),
             StaticDeclaration::Module(inner) => inner.id.into(),
+        }
+    }
+
+    pub fn is_affine(&self) -> bool {
+        match self {
+            StaticDeclaration::Func(_) => false,
+            StaticDeclaration::Struct(decl) => decl.is_affine,
+            StaticDeclaration::Interface(_) => true,
+            StaticDeclaration::Union(decl) => decl.is_affine,
+            StaticDeclaration::Module(_) => false,
         }
     }
 
@@ -187,6 +215,7 @@ pub struct StructType {
     pub id: TypeID,
     pub fields: HashMap<String, ExpressionType>,
     pub associated_functions: HashMap<String, StaticDeclaration>,
+    pub is_affine: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -206,6 +235,7 @@ pub struct UnionType {
     pub id: TypeID,
     pub variant_order: Vec<String>,
     pub variants: HashMap<String, Option<ExpressionType>>,
+    pub is_affine: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -290,6 +320,8 @@ pub enum TypecheckError {
     IllegalNonLvalueBorrow(SourceRange),
     #[error("illegal reference inside data type: {0}")]
     IllegalReferenceInsideDataType(SourceRange),
+    #[error("unknown property {0}: {1}")]
+    UnknownProperty(String, SourceRange),
 }
 
 impl MultiError for TypecheckError {

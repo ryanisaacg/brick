@@ -1,4 +1,4 @@
-// NoCompile
+// Compile
 struct Data {}
 
 let x = Data{};

@@ -1,9 +1,6 @@
-// NoCompile
+// Compile
 struct Data {}
-fn drop(x: Data){}
 
 let x = Data{};
-if 1 > 5 {
-    let y = x;
-}
+let y = x;
 x

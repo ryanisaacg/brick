@@ -208,12 +208,14 @@ pub struct StructDeclarationValue<'a> {
     pub name: String,
     pub fields: Vec<NameAndType<'a>>,
     pub associated_functions: Vec<AstNode<'a>>,
+    pub properties: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct UnionDeclarationValue<'a> {
     pub name: String,
     pub variants: Vec<UnionDeclarationVariant<'a>>,
+    pub properties: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -517,19 +519,54 @@ fn return_declaration<'a>(
 fn struct_declaration<'a>(
     source: &mut TokenIter,
     context: &'a Arena<AstNode<'a>>,
-    cursor: SourceMarker,
+    mut cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
+    let start = cursor;
     let (name, provenance) = word(source, cursor, "expected name after 'struct'")?;
+    cursor = provenance.end();
+    let (properties, cursor) = property_list(source, cursor)?;
     let (end, fields, associated_functions) =
-        interface_or_struct_body(source, context, provenance.end(), false)?;
+        interface_or_struct_body(source, context, cursor, false)?;
 
     Ok(AstNode::new(
         AstNodeValue::StructDeclaration(StructDeclarationValue {
             name,
             fields,
             associated_functions,
+            properties,
         }),
-        SourceRange::new(cursor, end),
+        SourceRange::new(start, end),
+    ))
+}
+
+fn property_list(
+    source: &mut TokenIter,
+    mut cursor: SourceMarker,
+) -> Result<(Vec<String>, SourceMarker), ParseError> {
+    Ok((
+        if peek_token(source, cursor, "unexpected EOL in struct")?.value == TokenValue::Colon {
+            cursor = already_peeked_token(source)?.range.end();
+            let mut properties = Vec::new();
+            loop {
+                let (word, range) = word(source, cursor, "expected property name")?;
+                properties.push(word);
+                cursor = range.end();
+                if peek_token(source, cursor, "unexpected EOL in struct properties")?.value
+                    == TokenValue::Comma
+                {
+                    cursor = already_peeked_token(source)?.range.end();
+                }
+                if peek_token(source, cursor, "unexpected EOL in struct properties")?.value
+                    == TokenValue::OpenBracket
+                {
+                    break;
+                }
+            }
+            properties
+        } else {
+            Vec::new()
+        },
+        cursor,
     ))
 }
 
@@ -670,13 +707,16 @@ fn interface_or_struct_body<'a>(
 fn union_declaration<'a>(
     source: &mut TokenIter,
     context: &'a Arena<AstNode<'a>>,
-    cursor: SourceMarker,
+    mut cursor: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
     let (name, mut provenance) = word(source, cursor, "expected name after 'union'")?;
-    let mut cursor = assert_next_lexeme_eq(
+    cursor = provenance.end();
+    let (properties, mut cursor) = property_list(source, cursor)?;
+
+    cursor = assert_next_lexeme_eq(
         source,
         TokenValue::OpenBracket,
-        provenance.end(),
+        cursor,
         "expected open bracket to start variants",
     )?
     .range
@@ -723,7 +763,11 @@ fn union_declaration<'a>(
     provenance.set_end(cursor);
 
     Ok(AstNode::new(
-        AstNodeValue::UnionDeclaration(UnionDeclarationValue { name, variants }),
+        AstNodeValue::UnionDeclaration(UnionDeclarationValue {
+            name,
+            variants,
+            properties,
+        }),
         provenance,
     ))
 }

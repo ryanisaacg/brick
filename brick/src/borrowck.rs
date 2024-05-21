@@ -412,24 +412,8 @@ fn invalidate_borrowers(
     }
 }
 
-// MASSIVE TODO: what determines if a type is copy or not?
-#[allow(clippy::only_used_in_recursion)]
 fn is_copy(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &ExpressionType) -> bool {
-    match ty {
-        ExpressionType::Nullable(inner) => is_copy(declarations, inner.as_ref()),
-        ExpressionType::Void
-        | ExpressionType::Unreachable
-        | ExpressionType::Null
-        // Only if references truly aren't allowed in re-assignments
-        | ExpressionType::Pointer(_, _)
-        | ExpressionType::Primitive(_) => true,
-        ExpressionType::InstanceOf(_)
-        | ExpressionType::ReferenceTo(_)
-        | ExpressionType::TypeParameterReference(_)
-        | ExpressionType::Collection(_)
-        | ExpressionType::Generator { .. }
-        | ExpressionType::FunctionReference { .. } => false,
-    }
+    !ty.is_affine(declarations)
 }
 
 fn find_id_for_lvalue(lvalue: &HirNode) -> &AnyID {
