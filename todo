@@ -138,6 +138,7 @@ tooling:
 
 allocator:
 - support dealloc
+- intrinsic-based bump deallocator
 
 error reporting:
 - typecheck errors
