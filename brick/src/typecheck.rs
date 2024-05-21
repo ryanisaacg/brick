@@ -273,8 +273,6 @@ pub enum PrimitiveType {
     Int64,
     Float64,
     Bool,
-
-    // TODO?
     PointerSize,
 }
 
@@ -283,24 +281,22 @@ pub enum TypecheckError {
     #[error("{}", print_multi_errors(&.0[..]))]
     MultiError(Vec<TypecheckError>),
     #[error("arithmetic")]
-    ArithmeticMismatch(SourceRange), // TODO
+    ArithmeticMismatch(SourceRange),
     #[error("mismatched types: received {received:?}, expected {expected:?}")]
     TypeMismatch {
-        // TODO: provenance
         expected: ExpressionType,
         received: ExpressionType,
     },
     #[error("declaration for {0:?} not found")]
-    NameNotFound(SourceRange), // TODO
+    NameNotFound(SourceRange),
     #[error("can't call")]
-    CantCall(SourceRange), // TODO
+    CantCall(SourceRange),
     #[error("wrong args count")]
     WrongArgsCount(SourceRange),
     #[error("missing field")]
     MissingField(SourceRange),
     #[error("insufficient type info: null variables must have a type annotation")]
     NoNullDeclarations(SourceRange),
-    // TODO: "unknown type" for type errors?
     #[error("expected nullable left-hand-side to ?? operator")]
     ExpectedNullableLHS(SourceRange),
     #[error("cannot yield outside of a generator: {0}")]
@@ -335,6 +331,8 @@ pub enum TypecheckError {
     UnknownProperty(String, SourceRange),
     #[error("unknown property {0}: {1}")]
     FieldNotPresent(String, SourceRange),
+    #[error("non-struct declaration in struct literal: {0}")]
+    NonStructDeclStructLiteral(SourceRange),
 }
 
 impl MultiError for TypecheckError {
@@ -372,7 +370,6 @@ impl<'a> Declarations<'a> {
 
 pub struct TypecheckedFile<'a> {
     pub functions: Vec<TypecheckedFunction<'a>>,
-    // TODO: convert this into a Sequence?
     pub top_level_statements: Vec<&'a AstNode<'a>>,
 }
 
@@ -389,8 +386,6 @@ pub fn typecheck<'a>(
     current_module_name: &str,
     declarations: &HashMap<String, StaticDeclaration>,
 ) -> Result<TypecheckedFile<'a>, TypecheckError> {
-    // TODO: verify validity of type and function declarations
-
     let mut name_to_context_entry = HashMap::new();
     let mut name_to_type_id = HashMap::new();
     let mut id_to_decl = HashMap::new();
@@ -421,8 +416,6 @@ pub fn typecheck<'a>(
         name_to_type_id,
         id_to_decl,
     };
-
-    // TODO: handle free-floating statements
 
     let mut functions = Vec::new();
     let mut top_level_statements = Vec::new();
@@ -520,7 +513,6 @@ fn typecheck_function<'a>(
         .params
         .iter()
         .zip(function_type.params.iter())
-        // TODO
         .map(|((id, name), param)| (name.name.clone(), ((*id).into(), param.clone())))
         .collect();
 
@@ -560,8 +552,6 @@ fn typecheck_function<'a>(
     Ok(())
 }
 
-// TODO: allow ; to turn expressions into void
-// TODO: if-else need to unify
 fn typecheck_expression<'a>(
     node: &'a AstNode<'a>,
     outer_scopes: &[&HashMap<String, (AnyID, ExpressionType)>],
@@ -599,7 +589,6 @@ fn typecheck_expression<'a>(
             ExpressionType::Void
         }
         AstNodeValue::Declaration(name, type_hint, value, variable_id) => {
-            // TODO: do I want shadowing? currently this shadows
             let value_ty = typecheck_expression(
                 value,
                 outer_scopes,
@@ -678,7 +667,6 @@ fn typecheck_expression<'a>(
 
             ExpressionType::Void
         }
-        // TODO: You can only from within a function
         AstNodeValue::Return(returned) => {
             if let Some(returned) = returned {
                 typecheck_expression(
@@ -755,8 +743,9 @@ fn typecheck_expression<'a>(
                     .field_access(name, &right.provenance)?,
                 ExpressionType::ReferenceTo(id) => match context.decl(id).unwrap() {
                     StaticDeclaration::Union(union_ty) => {
-                        // TODO: fallible
-                        let variant_ty = union_ty.variants.get(name).unwrap();
+                        let variant_ty = union_ty.variants.get(name).ok_or_else(|| {
+                            TypecheckError::FieldNotPresent(name.clone(), node.provenance.clone())
+                        })?;
 
                         if let Some(variant_ty) = variant_ty {
                             ExpressionType::FunctionReference {
@@ -1172,10 +1161,9 @@ fn typecheck_expression<'a>(
                 Some(else_branch) => {
                     if is_assignable_to(&context.id_to_decl, None, if_branch, else_branch) {
                         if_branch.clone()
-                    } else if is_assignable_to(&context.id_to_decl, None, else_branch, if_branch) {
-                        else_branch.clone()
                     } else {
-                        panic!("if and else don't match");
+                        assert_assignable_to(&context.id_to_decl, else_branch, if_branch)?;
+                        else_branch.clone()
                     }
                 }
                 None => ExpressionType::Void,
@@ -1201,7 +1189,6 @@ fn typecheck_expression<'a>(
             let mut results = Ok(());
             let mut variants_matched_against = HashSet::new();
             for case in cases.iter() {
-                // TODO: multiple bindings in a single union
                 let mut binding = BindingState::Uninit;
                 for variant in case.variants.iter() {
                     variants_matched_against.insert(&variant.name);
@@ -1470,11 +1457,14 @@ fn typecheck_expression<'a>(
 
                     ExpressionType::InstanceOf(*ty_id)
                 }
-                // TODO: don't panic
-                StaticDeclaration::Union(_) => todo!(),
-                StaticDeclaration::Func(_) => todo!(),
-                StaticDeclaration::Interface(_) => todo!(),
-                StaticDeclaration::Module(_) => todo!(),
+                StaticDeclaration::Union(_)
+                | StaticDeclaration::Func(_)
+                | StaticDeclaration::Interface(_)
+                | StaticDeclaration::Module(_) => {
+                    return Err(TypecheckError::NonStructDeclStructLiteral(
+                        node.provenance.clone(),
+                    ));
+                }
             }
         }
         AstNodeValue::DictLiteral(entries) => {
@@ -1512,7 +1502,6 @@ fn typecheck_expression<'a>(
                 Box::new(result_value_ty.unwrap().clone()),
             ))
         }
-        // TODO: assert that this is an lvalue
         AstNodeValue::TakeUnique(inner) => ExpressionType::Pointer(
             PointerKind::Unique,
             Box::new(
@@ -1599,13 +1588,11 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            // TODO: array index type
-            if length != &ExpressionType::Primitive(PrimitiveType::Int32) {
-                return Err(TypecheckError::TypeMismatch {
-                    expected: ExpressionType::Primitive(PrimitiveType::Int32),
-                    received: length.clone(),
-                });
-            }
+            assert_assignable_to(
+                &context.id_to_decl,
+                &ExpressionType::Primitive(PrimitiveType::PointerSize),
+                length,
+            )?;
             ExpressionType::Collection(CollectionType::Array(Box::new(inner.clone())))
         }
         AstNodeValue::UnaryExpr(op, child) => match op {
@@ -1638,7 +1625,6 @@ enum BindingState<'a> {
     Binding(&'a String, &'a ExpressionType),
 }
 
-// TODO: fallible, report errors
 pub fn traverse_dots(node: &AstNode, mut callback: impl FnMut(&str, &SourceRange)) {
     traverse_dots_recursive(node, &mut callback);
 }
@@ -1652,7 +1638,7 @@ fn traverse_dots_recursive(node: &AstNode, callback: &mut impl FnMut(&str, &Sour
         AstNodeValue::Name { value, .. } => {
             callback(value, &node.provenance);
         }
-        _ => todo!(),
+        _ => {}
     }
 }
 
@@ -1892,11 +1878,9 @@ pub fn is_assignable_to(
                 }
                 (Func(_), _) => false,
 
-                // TODO: support structural struct conversions?
                 (Struct(_), Struct(_)) => left == right,
                 (Struct(_), _) => false,
 
-                // TODO: support structural union conversions?
                 (Union(_), Union(_)) => left == right,
                 (Union(_), _) => false,
 
@@ -1927,12 +1911,10 @@ pub fn is_assignable_to(
                         .all(|(lhs, rhs)| lhs == rhs)
                         && lhs.returns == rhs.returns
                 }),
-                // TODO: support structural interface conversions?
                 (Interface(_), Interface(_)) => left == right,
                 (Interface(_), Func(_)) => todo!(),
                 (Interface(_), Union(_)) => todo!(),
 
-                // TODO: support module -> interface conversion
                 (_, Module(_)) => false,
                 // You can never assign to a module
                 (Module(_), _) => false,
@@ -1947,13 +1929,9 @@ pub fn is_assignable_to(
                 yield_ty: right_yield_ty,
                 param_ty: right_param_ty,
             },
-        ) => {
-            // TODO: allow covariant types?
-            left_yield_ty == right_yield_ty && left_param_ty == right_param_ty
-        }
+        ) => left_yield_ty == right_yield_ty && left_param_ty == right_param_ty,
         (Generator { .. }, _) | (_, Generator { .. }) => false,
 
-        // TODO: could these ever be valid?
         (InstanceOf(_), Primitive(_))
         | (InstanceOf(_), Collection(_))
         | (Collection(_), Primitive(_))
@@ -1974,7 +1952,6 @@ pub fn is_assignable_to(
             todo!("function references only exist within the compiler")
         }
 
-        // TODO: type references can't ever be in assignments right
         (ReferenceTo(_), _) | (_, ReferenceTo(_)) => todo!("{:?} = {:?}", left, right),
     }
 }

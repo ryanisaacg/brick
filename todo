@@ -16,6 +16,7 @@ unions:
 misc:
 - automatically discard unused expression values
 - short-circuiting boolean evaluation
+- disallow top-level return
 
 collections:
 - tuples
@@ -202,5 +203,6 @@ syntax:
 - keyword arguments
 - maybe separate syntax for i64 / f64 literals
 - there's an ambiguity between dereference / multiplication in if { body } * a += 1;
-
+- there's an ambiguity in 
+- decide on whether variables can shadow
 
