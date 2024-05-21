@@ -397,8 +397,7 @@ pub fn resolve_type_expr(
         | AstNodeValue::DictLiteral(_)
         | AstNodeValue::Match(_)
         | AstNodeValue::BorrowDeclaration(..) => {
-            // TODO: report error
-            panic!("Illegal in type name");
+            panic!("ICE: Illegal node in type name: {:?}", node.value);
         }
     })
 }

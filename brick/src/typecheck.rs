@@ -163,8 +163,11 @@ impl StaticDeclaration {
         }
     }
 
-    // TODO: Result<T, E> with error reporting if the field isn't found
-    pub fn field_access(&self, field: &str) -> ExpressionType {
+    pub fn field_access(
+        &self,
+        field: &str,
+        provenance: &SourceRange,
+    ) -> Result<ExpressionType, TypecheckError> {
         match self {
             StaticDeclaration::Struct(StructType {
                 fields,
@@ -178,28 +181,36 @@ impl StaticDeclaration {
                         .get(field)
                         .map(|decl| ExpressionType::InstanceOf(decl.id()))
                 })
-                .expect("TODO: field is present"),
+                .ok_or_else(|| {
+                    TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
+                }),
             StaticDeclaration::Interface(InterfaceType {
                 associated_functions,
                 ..
             }) => associated_functions
                 .get(field)
                 .map(|decl| ExpressionType::InstanceOf(decl.id()))
-                .expect("TODO: field is present"),
-            StaticDeclaration::Union(lhs_type) => ExpressionType::Nullable(Box::new(
+                .ok_or_else(|| {
+                    TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
+                }),
+            StaticDeclaration::Union(lhs_type) => Ok(ExpressionType::Nullable(Box::new(
                 lhs_type
                     .variants
                     .get(field)
-                    .expect("TODO: variant is present")
+                    .ok_or_else(|| {
+                        TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
+                    })?
                     .clone()
-                    .expect("TODO: variant yields value"),
-            )),
+                    .unwrap_or(ExpressionType::Void),
+            ))),
             StaticDeclaration::Module(lhs_type) => lhs_type
                 .exports
                 .get(field)
-                .expect("TODO: export is present")
-                .ref_to(),
-            _ => todo!("illegal lhs type"),
+                .map(|decl| decl.ref_to())
+                .ok_or_else(|| {
+                    TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
+                }),
+            StaticDeclaration::Func(_) => Err(TypecheckError::IllegalDotLHS(provenance.clone())),
         }
     }
 }
@@ -322,6 +333,8 @@ pub enum TypecheckError {
     IllegalReferenceInsideDataType(SourceRange),
     #[error("unknown property {0}: {1}")]
     UnknownProperty(String, SourceRange),
+    #[error("unknown property {0}: {1}")]
+    FieldNotPresent(String, SourceRange),
 }
 
 impl MultiError for TypecheckError {
@@ -736,11 +749,10 @@ fn typecheck_expression<'a>(
                 return Err(TypecheckError::IllegalDotRHS(right.provenance.clone()));
             };
             match fully_dereference(left_ty) {
-                ExpressionType::InstanceOf(id) => {
-                    // TODO: fallible
-                    let ty = context.decl(id).unwrap().field_access(name);
-                    ty
-                }
+                ExpressionType::InstanceOf(id) => context
+                    .decl(id)
+                    .unwrap()
+                    .field_access(name, &right.provenance)?,
                 ExpressionType::ReferenceTo(id) => match context.decl(id).unwrap() {
                     StaticDeclaration::Union(union_ty) => {
                         // TODO: fallible
@@ -837,15 +849,17 @@ fn typecheck_expression<'a>(
             let ExpressionType::Nullable(ty) = fully_dereference(left) else {
                 panic!("TODO: left side of nullable dot operator");
             };
-            let mut ty = *ty.clone();
-            // TODO: fallible
-            traverse_dots(right, |name| {
+            let mut field_ty = Ok(*ty.clone());
+            traverse_dots(right, |name, provenance| {
+                let Ok(ty) = &field_ty else {
+                    return;
+                };
                 let ExpressionType::InstanceOf(id) = ty else {
                     unreachable!()
                 };
-                ty = context.decl(&id).unwrap().field_access(name);
+                field_ty = context.decl(id).unwrap().field_access(name, provenance);
             });
-            ExpressionType::Nullable(Box::new(ty))
+            ExpressionType::Nullable(Box::new(field_ty?))
         }
         AstNodeValue::BinExpr(BinOp::Index, collection, index) => {
             let collection_ty = typecheck_expression(
@@ -1625,18 +1639,18 @@ enum BindingState<'a> {
 }
 
 // TODO: fallible, report errors
-pub fn traverse_dots(node: &AstNode, mut callback: impl FnMut(&str)) {
+pub fn traverse_dots(node: &AstNode, mut callback: impl FnMut(&str, &SourceRange)) {
     traverse_dots_recursive(node, &mut callback);
 }
 
-fn traverse_dots_recursive(node: &AstNode, callback: &mut impl FnMut(&str)) {
+fn traverse_dots_recursive(node: &AstNode, callback: &mut impl FnMut(&str, &SourceRange)) {
     match &node.value {
         AstNodeValue::BinExpr(BinOp::Dot, lhs, rhs) => {
             traverse_dots_recursive(lhs, callback);
             traverse_dots_recursive(rhs, callback);
         }
         AstNodeValue::Name { value, .. } => {
-            callback(value);
+            callback(value, &node.provenance);
         }
         _ => todo!(),
     }

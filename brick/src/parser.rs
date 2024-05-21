@@ -1196,7 +1196,7 @@ fn expression<'a>(
     source: &mut TokenIter,
     context: &'a Arena<AstNode<'a>>,
     provenance: SourceMarker,
-    can_be_struct: bool, // TODO: refactor grammar?
+    can_be_struct: bool,
 ) -> Result<AstNode<'a>, ParseError> {
     expression_pratt(source, context, provenance, 0, can_be_struct)
 }
@@ -1860,7 +1860,6 @@ fn match_case_statement<'a>(
         .end();
         expr
     };
-    // TODO: variable number of variables
 
     Ok(MatchCaseDeclaration {
         variants,

@@ -1,0 +1,5 @@
+// NoCompile
+
+struct Data{}
+let x = Data{};
+x.bad_field

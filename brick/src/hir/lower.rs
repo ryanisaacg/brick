@@ -288,7 +288,7 @@ fn lower_node(decls: &HashMap<TypeID, &StaticDeclaration>, node: &AstNode<'_>) -
             } else {
                 let left = lower_node_alloc(decls, left);
                 let mut name_list = Vec::new();
-                traverse_dots(right, |name| {
+                traverse_dots(right, |name, _| {
                     name_list.push(name.to_string());
                 });
                 HirNodeValue::NullableTraverse(left, name_list)
