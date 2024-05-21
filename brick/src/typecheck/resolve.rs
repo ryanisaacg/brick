@@ -32,7 +32,63 @@ pub fn resolve_module(
         }
     }
 
-    resolve_top_level_declarations(&names_to_declarations)
+    let mut top_level_decls = resolve_top_level_declarations(&names_to_declarations)?;
+
+    let mut id_decls = HashMap::new();
+    for decl in top_level_decls.values() {
+        decl.visit(&mut |decl: &StaticDeclaration| {
+            id_decls.insert(decl.id(), decl);
+        });
+    }
+
+    let mut affinity = HashMap::new();
+    for decl in top_level_decls.values() {
+        is_decl_affine(&id_decls, decl, &mut affinity);
+    }
+    for decl in top_level_decls.values_mut() {
+        match decl {
+            StaticDeclaration::Struct(decl) => decl.is_affine = affinity[&decl.id],
+            StaticDeclaration::Union(decl) => decl.is_affine = affinity[&decl.id],
+            StaticDeclaration::Func(_)
+            | StaticDeclaration::Interface(_)
+            | StaticDeclaration::Module(_) => {}
+        }
+    }
+
+    Ok(top_level_decls)
+}
+
+fn is_decl_affine(
+    id_to_decl: &HashMap<TypeID, &StaticDeclaration>,
+    decl: &StaticDeclaration,
+    affine_types: &mut HashMap<TypeID, bool>,
+) -> bool {
+    let id = decl.id();
+    if let Some(affinity) = affine_types.get(&id) {
+        return *affinity;
+    }
+    if decl.is_affine() {
+        affine_types.insert(id, true);
+        return true;
+    }
+    let is_children_affine = match decl {
+        StaticDeclaration::Struct(decl) => decl
+            .fields
+            .values()
+            .filter_map(|expr| expr.id())
+            .any(|id| is_decl_affine(id_to_decl, id_to_decl[id], affine_types)),
+        StaticDeclaration::Union(decl) => decl
+            .variants
+            .values()
+            .filter_map(|expr| expr.as_ref()?.id())
+            .any(|id| is_decl_affine(id_to_decl, id_to_decl[id], affine_types)),
+        StaticDeclaration::Func(_)
+        | StaticDeclaration::Interface(_)
+        | StaticDeclaration::Module(_) => false,
+    };
+
+    affine_types.insert(id, is_children_affine);
+    is_children_affine
 }
 
 pub fn resolve_top_level_declarations(

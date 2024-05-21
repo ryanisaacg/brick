@@ -1,0 +1,11 @@
+// NoCompile
+struct Affine: Move {}
+struct ViralAffinity {
+    inner: Affine,
+}
+
+let x = ViralAffinity {
+    inner: Affine{},
+};
+let y = x;
+x

@@ -2,10 +2,10 @@ borrow checker and lifetimes:
 - check borrows for function calls
 - allow disjoint borrows of struct fields
 - correctly mark references through collection indices
-- mark custom types as copy
-- copy vs clone vs affine vs linear?
+- clone support
 - drop (hard-coded)
 - drop (custom)
+- linearity support
 
 unions:
 - auto-cast non-i32 members when reading / writing in wasm
