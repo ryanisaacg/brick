@@ -618,6 +618,18 @@ impl HirNode {
             }
         }
     }
+
+    pub fn is_valid_lvalue(self: &HirNode) -> bool {
+        match &self.value {
+            HirNodeValue::VariableReference(_) => true,
+            HirNodeValue::Access(lhs, _) => lhs.is_valid_lvalue(),
+            HirNodeValue::Dereference(lhs) => lhs.is_valid_lvalue(),
+            HirNodeValue::ArrayIndex(arr, _) => arr.is_valid_lvalue(),
+            HirNodeValue::DictIndex(dict, _) => dict.is_valid_lvalue(),
+            HirNodeValue::UnionVariant(union, _) => union.is_valid_lvalue(),
+            _ => false,
+        }
+    }
 }
 
 // TODO: should struct fields also be referred to via opaque IDs?

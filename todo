@@ -1,6 +1,7 @@
 borrow checker and lifetimes:
 - allow disjoint borrows of struct fields
 - correctly mark references through collection indices
+- prevent references being stored in collections
 - clone support
 - drop (hard-coded)
 - drop (custom)
@@ -9,7 +10,6 @@ borrow checker and lifetimes:
 unions:
 - auto-cast non-i32 members when reading / writing in wasm
 - optional non-exhaustive cases?
-- allow case statements to take non-lvalues
 - faulthrough / default branch
 
 misc:

@@ -1,6 +1,10 @@
-// Compile
-struct Data {}
-
-let x = Data{};
-let y = x;
-x
+// Int | 2
+union ThreeWay {
+    one(i32),
+    two(i32),
+    three(i32),
+}
+case ThreeWay.two(2) {
+    one(val) | two(val) => val,
+    three(val) => 1000,
+}
