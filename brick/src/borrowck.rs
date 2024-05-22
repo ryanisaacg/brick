@@ -133,7 +133,7 @@ impl BlockLiveness {
 #[derive(Clone, Debug)]
 struct VariableState {
     state: VariableLifeState,
-    borrows: Vec<VariableID>,
+    borrows: Vec<(PointerKind, VariableID)>,
 }
 
 #[derive(Clone, Debug)]
@@ -309,6 +309,7 @@ fn borrow_check_node(
                     existing_state,
                     borrow_state,
                     BorrowLifeState::ValueMoved(node.id, node.provenance.clone()),
+                    InvalidateType::AllBorrows,
                 );
             }
         }
@@ -353,6 +354,7 @@ fn borrow_check_node(
                         existing_state,
                         borrow_state,
                         BorrowLifeState::ValueReassigned(node.id, node.provenance.clone()),
+                        InvalidateType::AllBorrows,
                     );
                 } else if let ExpressionType::Pointer(ref_ty, _) = &lhs.ty {
                     let lender_id = find_id_for_lvalue(rhs).as_var();
@@ -360,16 +362,18 @@ fn borrow_check_node(
                     borrow_state.get_mut(var_id).unwrap().state =
                         BorrowLifeState::Assigned(lender_id, node.id, node.provenance.clone());
 
-                    if *ref_ty == PointerKind::Unique {
-                        invalidate_borrowers(
-                            var_state,
-                            borrow_state,
-                            BorrowLifeState::MutableRefTaken(node.id, node.provenance.clone()),
-                        );
-                    }
-                    // TODO: invalidate mutable references
+                    invalidate_borrowers(
+                        var_state,
+                        borrow_state,
+                        BorrowLifeState::MutableRefTaken(node.id, node.provenance.clone()),
+                        if *ref_ty == PointerKind::Unique {
+                            InvalidateType::AllBorrows
+                        } else {
+                            InvalidateType::MutableBorrows
+                        },
+                    );
 
-                    var_state.borrows.push(*var_id);
+                    var_state.borrows.push((*ref_ty, *var_id));
                 }
                 // If assignment is to a reference but not to its reference value directly,
                 // it's just updating a path within its owner
@@ -419,6 +423,7 @@ fn borrow_check_node(
                             &variable_state[&id.as_var()],
                             borrow_state,
                             BorrowLifeState::MutableRefTaken(node.id, node.provenance.clone()),
+                            InvalidateType::AllBorrows,
                         );
                     }
                     HirNodeValue::TakeShared(inner) => {
@@ -433,7 +438,12 @@ fn borrow_check_node(
                                 }),
                             );
                         }
-                        // TODO: invalidate mutable borrows
+                        invalidate_borrowers(
+                            &variable_state[&id.as_var()],
+                            borrow_state,
+                            BorrowLifeState::MutableRefTaken(node.id, node.provenance.clone()),
+                            InvalidateType::MutableBorrows,
+                        );
                     }
                     HirNodeValue::VariableReference(AnyID::Variable(var_id)) => {
                         if let Some(BorrowState {
@@ -488,12 +498,22 @@ fn borrow_check_node(
     results
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum InvalidateType {
+    AllBorrows,
+    MutableBorrows,
+}
+
 fn invalidate_borrowers(
     variable_state: &VariableState,
     borrow_state: &mut HashMap<VariableID, BorrowState>,
     new_state: BorrowLifeState,
+    invalidate_type: InvalidateType,
 ) {
-    for borrow_id in variable_state.borrows.iter() {
+    for (ref_ty, borrow_id) in variable_state.borrows.iter() {
+        if invalidate_type == InvalidateType::MutableBorrows && *ref_ty == PointerKind::Shared {
+            continue;
+        }
         let existing_borrow_state = borrow_state.get_mut(borrow_id).unwrap();
         existing_borrow_state.state = new_state.clone();
     }
