@@ -1,0 +1,11 @@
+// NoCompile
+
+struct Data: Move {}
+fn drop(a: unique Data) {}
+
+
+let x = Data{};
+borrow x1 = ref x;
+drop(unique x);
+*x1
+

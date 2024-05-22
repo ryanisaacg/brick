@@ -1,5 +1,4 @@
 borrow checker and lifetimes:
-- check borrows for function calls
 - allow disjoint borrows of struct fields
 - correctly mark references through collection indices
 - clone support

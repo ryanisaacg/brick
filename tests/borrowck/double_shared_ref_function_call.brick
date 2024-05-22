@@ -1,0 +1,9 @@
+// Compile
+
+struct Data: Move {}
+fn take_two_data(a: ref Data, b: ref Data) {}
+
+
+let x = Data{};
+take_two_data(ref x, ref x);
+

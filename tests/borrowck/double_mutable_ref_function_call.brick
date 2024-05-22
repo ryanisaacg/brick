@@ -1,0 +1,9 @@
+// NoCompile
+
+struct Data: Move {}
+fn take_two_data(a: unique Data, b: unique Data) {}
+
+
+let x = Data{};
+take_two_data(unique x, unique x);
+
