@@ -73,6 +73,23 @@ impl ExpressionType {
             | ExpressionType::FunctionReference { .. } => true,
         }
     }
+
+    fn is_reference(&self) -> bool {
+        match self {
+            ExpressionType::Collection(_)
+            | ExpressionType::Null
+            | ExpressionType::Void
+            | ExpressionType::Unreachable
+            | ExpressionType::Primitive(_)
+            | ExpressionType::InstanceOf(_)
+            | ExpressionType::Generator { .. }
+            | ExpressionType::FunctionReference { .. }
+            | ExpressionType::ReferenceTo(_)
+            | ExpressionType::TypeParameterReference(_) => false,
+            ExpressionType::Pointer(_, _) => true,
+            ExpressionType::Nullable(inner) => inner.is_reference(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1285,14 +1302,26 @@ fn typecheck_expression<'a>(
                 );
             }
 
+            let return_type = return_type.unwrap_or(ExpressionType::Void);
+            if return_type.is_reference() {
+                merge_results(
+                    &mut results,
+                    Err(TypecheckError::IllegalFirstClassReference(
+                        node.provenance.clone(),
+                    )),
+                );
+            }
+
             results?;
 
-            return_type.unwrap_or(ExpressionType::Void)
+            return_type
         }
         AstNodeValue::Block(children) => {
             let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);
             scopes.push(current_scope);
             scopes.extend_from_slice(outer_scopes);
+
+            let mut result = Ok(());
 
             let mut child_scope = HashMap::new();
             let mut expr_ty = ExpressionType::Void;
@@ -1308,13 +1337,25 @@ fn typecheck_expression<'a>(
                 if expr_ty != ExpressionType::Unreachable {
                     expr_ty = new_ty.clone();
                 }
-                if index != children.len() - 1
-                    && !(expr_ty == ExpressionType::Void || expr_ty == ExpressionType::Unreachable)
+
+                if index == children.len() - 1 {
+                    if expr_ty.is_reference() {
+                        merge_results(
+                            &mut result,
+                            Err(TypecheckError::IllegalFirstClassReference(
+                                node.provenance.clone(),
+                            )),
+                        );
+                    }
+                } else if expr_ty != ExpressionType::Void && expr_ty != ExpressionType::Unreachable
                 {
-                    return Err(TypecheckError::TypeMismatch {
-                        expected: ExpressionType::Void,
-                        received: expr_ty,
-                    });
+                    merge_results(
+                        &mut result,
+                        Err(TypecheckError::TypeMismatch {
+                            expected: ExpressionType::Void,
+                            received: expr_ty.clone(),
+                        }),
+                    );
                 }
             }
             expr_ty
