@@ -529,16 +529,12 @@ impl<'a> VM<'a> {
                     *self
                         .temporaries
                         .get(tmp)
-                        .expect("temp to be defined before use"),
+                        .expect("tmp to be defined before use"),
                 ));
             }
             LinearNodeValue::KillRegister(tmp) => {
                 self.temporaries.remove(tmp);
             }
-            LinearNodeValue::Discard => {
-                self.op_stack.pop().unwrap();
-            }
-            LinearNodeValue::TopOfStack => {}
             LinearNodeValue::Abort => {
                 return Err(Unwind::Aborted);
             }
@@ -664,6 +660,19 @@ impl<'a> VM<'a> {
                     unreachable!()
                 };
                 self.evaluate_node(params, &cases[idx])?;
+            }
+            LinearNodeValue::WriteRegistersSplitting(value, registers) => {
+                self.evaluate_node(params, value)?;
+                for register in registers {
+                    if let Some(register) = register {
+                        let Value::Size(val) = self.op_stack.pop().unwrap() else {
+                            unreachable!()
+                        };
+                        self.temporaries.insert(*register, val);
+                    } else {
+                        self.op_stack.pop().unwrap();
+                    }
+                }
             }
         }
 

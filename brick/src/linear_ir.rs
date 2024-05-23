@@ -138,6 +138,13 @@ impl LinearNode {
         }
     }
 
+    fn write_multi_register(value: LinearNode, ids: Vec<Option<RegisterID>>) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::WriteRegistersSplitting(Box::new(value), ids),
+            provenance: None,
+        }
+    }
+
     fn read_register(id: RegisterID) -> LinearNode {
         LinearNode {
             value: LinearNodeValue::ReadRegister(id),
@@ -227,10 +234,6 @@ pub enum LinearNodeValue {
     },
     ConstantDataAddress(usize),
 
-    // TODO: just full stack machine? OR split tuple instruction
-    TopOfStack,
-    Discard,
-
     // Control flow
     Call(Box<LinearNode>, Vec<LinearNode>),
     RuntimeCall(LinearRuntimeFunction, Vec<LinearNode>),
@@ -250,6 +253,7 @@ pub enum LinearNodeValue {
 
     Sequence(Vec<LinearNode>),
     WriteRegister(RegisterID, Box<LinearNode>),
+    WriteRegistersSplitting(Box<LinearNode>, Vec<Option<RegisterID>>),
     ReadRegister(RegisterID),
     // TODO: automatically?
     KillRegister(RegisterID),
@@ -305,6 +309,7 @@ impl LinearNode {
     fn children_mut(&mut self, mut callback: impl FnMut(&mut LinearNode)) {
         match &mut self.value {
             LinearNodeValue::HeapAlloc(child)
+            | LinearNodeValue::WriteRegistersSplitting(child, _)
             | LinearNodeValue::Debug(child)
             | LinearNodeValue::ReadMemory {
                 location: child, ..
@@ -359,8 +364,6 @@ impl LinearNode {
             | LinearNodeValue::VariableInit(_, _)
             | LinearNodeValue::VariableDestroy(_)
             | LinearNodeValue::VariableLocation(_)
-            | LinearNodeValue::TopOfStack
-            | LinearNodeValue::Discard
             | LinearNodeValue::Break
             | LinearNodeValue::GotoLabel(_)
             | LinearNodeValue::Abort
@@ -1053,19 +1056,16 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                         0,
                         key_ty,
                         entry_size,
+                        entry_register,
                     ),
                     vec![
-                        // pointer to existing entry
-                        LinearNode::write_register(
-                            entry_register,
-                            LinearNode::new(LinearNodeValue::TopOfStack),
-                        ),
                         LinearNode::write_memory(
                             LinearNode::read_register(entry_register),
                             key_size,
                             value_ty.clone(),
                             value.clone(),
                         ),
+                        LinearNode::kill_register(entry_register),
                     ],
                     Some(vec![
                         // Pointer to newly allocated entry
@@ -1119,14 +1119,12 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let dict = lower_expression(ctx, *dict);
             let key = lower_expression(ctx, key);
 
-            LinearNodeValue::If(
-                Box::new(dict_get_entry_for_key(dict, key, 0, key_ty, entry_size)),
-                vec![
-                    LinearNode::new(LinearNodeValue::Discard),
-                    LinearNode::new(LinearNodeValue::Byte(1)),
-                ],
-                Some(vec![LinearNode::new(LinearNodeValue::Byte(0))]),
-            )
+            let entry_pointer_output = RegisterID::new();
+
+            LinearNodeValue::Sequence(vec![
+                dict_get_entry_for_key(dict, key, 0, key_ty, entry_size, entry_pointer_output),
+                LinearNode::kill_register(entry_pointer_output),
+            ])
         }
         HirNodeValue::GeneratorSuspend(generator, label) => {
             let location = lower_expression(ctx, *generator);
@@ -1302,10 +1300,9 @@ fn array_index_location(
     (
         LinearNode::new(LinearNodeValue::Sequence(vec![
             LinearNode::write_register(idx_register, idx),
-            LinearNode::write_register(arr_ptr_register, arr),
-            LinearNode::write_register(
-                length_register,
-                LinearNode::new(LinearNodeValue::TopOfStack),
+            LinearNode::write_multi_register(
+                arr,
+                vec![Some(arr_ptr_register), Some(length_register), None],
             ),
             LinearNode::if_node(
                 LinearNode::ptr_comparison(
@@ -1317,7 +1314,7 @@ fn array_index_location(
                 None,
                 None,
             ),
-            LinearNode::new(LinearNodeValue::Discard),
+            LinearNode::kill_register(length_register),
             LinearNode::ptr_arithmetic(
                 ArithmeticOp::Add,
                 LinearNode::ptr_arithmetic(
@@ -1329,7 +1326,6 @@ fn array_index_location(
             ),
             LinearNode::kill_register(idx_register),
             LinearNode::kill_register(arr_ptr_register),
-            LinearNode::kill_register(length_register),
         ])),
         0,
     )
@@ -1357,6 +1353,7 @@ fn dict_index_location_or_abort(
     let idx = lower_expression(ctx, idx);
 
     let temp_key_id = VariableID::new();
+    let entry_pointer_output = RegisterID::new();
 
     (
         LinearNode::new(LinearNodeValue::Sequence(vec![
@@ -1374,10 +1371,12 @@ fn dict_index_location_or_abort(
                     0,
                     idx_ty,
                     entry_size,
+                    entry_pointer_output,
                 ),
                 vec![
                     LinearNode::new(LinearNodeValue::VariableDestroy(temp_key_id)),
-                    LinearNode::new(LinearNodeValue::TopOfStack),
+                    LinearNode::read_register(entry_pointer_output),
+                    LinearNode::kill_register(entry_pointer_output),
                 ],
                 Some(vec![LinearNode::new(LinearNodeValue::Abort)]),
                 None,
@@ -1521,17 +1520,18 @@ fn dict_get_entry_for_key(
     key_offset: usize,
     key_ty: PhysicalPrimitive,
     entry_size: usize,
+    entry_pointer_output: RegisterID,
 ) -> LinearNode {
     let key_ptr = RegisterID::new();
-    let dict_ptr = RegisterID::new();
     let dict_length = RegisterID::new();
     let index = RegisterID::new();
 
     LinearNode::new(LinearNodeValue::Sequence(vec![
         LinearNode::write_register(key_ptr, key_location),
-        LinearNode::write_register(dict_ptr, dict_pointer),
-        LinearNode::write_register(dict_length, LinearNode::new(LinearNodeValue::TopOfStack)),
-        LinearNode::new(LinearNodeValue::Discard),
+        LinearNode::write_multi_register(
+            dict_pointer,
+            vec![Some(entry_pointer_output), Some(dict_length), None],
+        ),
         LinearNode::write_register(index, LinearNode::size(0)),
         LinearNode::new(LinearNodeValue::Loop(vec![
             // Check if we've found the key
@@ -1540,7 +1540,7 @@ fn dict_get_entry_for_key(
                     ComparisonOp::EqualTo,
                     key_ty,
                     Box::new(LinearNode::read_memory(
-                        LinearNode::read_register(dict_ptr),
+                        LinearNode::read_register(entry_pointer_output),
                         0,
                         PhysicalType::Primitive(key_ty),
                     )),
@@ -1551,7 +1551,6 @@ fn dict_get_entry_for_key(
                     )),
                 )),
                 vec![
-                    LinearNode::read_register(dict_ptr),
                     LinearNode::new(LinearNodeValue::Byte(1)),
                     LinearNode::new(LinearNodeValue::Break),
                 ],
@@ -1568,10 +1567,10 @@ fn dict_get_entry_for_key(
                 ),
             ),
             LinearNode::write_register(
-                dict_ptr,
+                entry_pointer_output,
                 LinearNode::ptr_arithmetic(
                     ArithmeticOp::Add,
-                    LinearNode::read_register(dict_ptr),
+                    LinearNode::read_register(entry_pointer_output),
                     LinearNode::size(entry_size),
                 ),
             ),
@@ -1590,7 +1589,6 @@ fn dict_get_entry_for_key(
             ),
         ])),
         LinearNode::kill_register(key_ptr),
-        LinearNode::kill_register(dict_ptr),
         LinearNode::kill_register(dict_length),
         LinearNode::kill_register(index),
     ]))

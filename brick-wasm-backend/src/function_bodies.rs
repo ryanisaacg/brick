@@ -203,10 +203,6 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                 write_memory(ctx, ty, location_var, *offset as u64);
             }
         }
-        LinearNodeValue::TopOfStack => {}
-        LinearNodeValue::Discard => {
-            ctx.instructions.push(Instruction::Drop);
-        }
         LinearNodeValue::Call(lhs, args) => {
             for arg in args.iter() {
                 encode_node(ctx, arg);
@@ -285,12 +281,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
         }
         LinearNodeValue::WriteRegister(reg_id, value) => {
             encode_node(ctx, value);
-            if !ctx.register_to_local.contains_key(reg_id) {
-                let local = ctx.alloc_local(ValType::I32);
-                ctx.register_to_local.insert(*reg_id, local);
-            }
-            let local_idx = ctx.register_to_local[reg_id];
-            ctx.instructions.push(Instruction::LocalSet(local_idx));
+            write_register(ctx, reg_id);
         }
         LinearNodeValue::ReadRegister(reg_id) => {
             let local_idx = ctx.register_to_local[reg_id];
@@ -627,7 +618,26 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode) {
                 ctx.instructions.push(Instruction::End);
             }
         }
+        LinearNodeValue::WriteRegistersSplitting(value, registers) => {
+            encode_node(ctx, value);
+            for register in registers {
+                if let Some(register) = register {
+                    write_register(ctx, register);
+                } else {
+                    ctx.instructions.push(Instruction::Drop);
+                }
+            }
+        }
     }
+}
+
+fn write_register(ctx: &mut Context<'_>, reg_id: &RegisterID) {
+    if !ctx.register_to_local.contains_key(reg_id) {
+        let local = ctx.alloc_local(ValType::I32);
+        ctx.register_to_local.insert(*reg_id, local);
+    }
+    let local_idx = ctx.register_to_local[reg_id];
+    ctx.instructions.push(Instruction::LocalSet(local_idx));
 }
 
 fn read_memory(ctx: &mut Context<'_>, ty: &PhysicalType, location_var: u32, offset: u64) {
