@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use brick::{id::FunctionID, lower_code, CompileError, LinearFunction, LowerResults};
+use brick::{
+    expr_ty_to_physical, id::FunctionID, lower_code, CompileError, ExpressionType, LinearFunction,
+    LowerResults, StaticDeclaration,
+};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, DataSegment, DataSegmentMode, ExportKind, ExportSection,
     FunctionSection, GlobalSection, GlobalType, ImportSection, MemorySection, MemoryType, Module,
@@ -34,7 +37,7 @@ pub fn compile(
         statements,
         statements_ty,
         mut functions,
-        declarations: _,
+        declarations,
         ty_declarations,
         constant_data,
     } = lower_code(
@@ -44,6 +47,26 @@ pub fn compile(
         WASM_BOOL_SIZE,
         WASM_USIZE,
     )?;
+
+    let mut function_return_types = HashMap::new();
+    for decl in declarations.values() {
+        decl.visit(&mut |decl| {
+            let StaticDeclaration::Func(func) = decl else {
+                return;
+            };
+            function_return_types.insert(
+                func.func_id,
+                if func.returns == ExpressionType::Void
+                    || func.returns == ExpressionType::Unreachable
+                {
+                    None
+                } else {
+                    Some(expr_ty_to_physical(&func.returns))
+                },
+            );
+        })
+    }
+
     let main = LinearFunction {
         id: FunctionID::new(),
         body: statements,
@@ -113,6 +136,7 @@ pub fn compile(
         codes.function(&function_bodies::encode(
             &function_id_to_idx,
             &ty_declarations,
+            &function_return_types,
             stack_pointer,
             alloc_pointer,
             &linear_function_to_id,

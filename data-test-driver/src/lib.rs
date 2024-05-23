@@ -155,18 +155,20 @@ pub fn test_folder(
         .filter(|test| matches!(test, TestSuccessOrFailure::Succeeded(_)))
         .count()
         - should_fail.len();
+    let failed_count = results.len() - (success_count + should_fail.len());
 
+    println!("Failed tests:");
+    for result in results.iter() {
+        if !matches!(result, TestSuccessOrFailure::Succeeded(_)) {
+            println!("  {result}");
+        }
+    }
     println!("{success_count} tests passed");
     if !should_fail.is_empty() {
         println!("{} tests failed as expected", should_fail.len());
     }
-    if success_count + should_fail.len() < results.len() {
-        println!("Failed tests:");
-        for result in results.iter() {
-            if !matches!(result, TestSuccessOrFailure::Succeeded(_)) {
-                println!("  {result}");
-            }
-        }
+    println!("{failed_count} tests failed");
+    if failed_count > 0 {
         panic!();
     }
 }

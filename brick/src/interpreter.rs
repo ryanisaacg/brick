@@ -269,7 +269,7 @@ impl<'a> VM<'a> {
                 };
                 self.op_stack.push(Value::Size(allocation));
             }
-            LinearNodeValue::Parameter(idx) => {
+            LinearNodeValue::Parameter(_, idx) => {
                 let mut temp = Value::Byte(0);
                 std::mem::swap(&mut temp, &mut params[*idx]);
                 self.op_stack.push(temp);

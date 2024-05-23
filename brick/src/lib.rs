@@ -10,14 +10,14 @@ use std::{
 use borrowck::LifetimeError;
 use hir::HirModule;
 use interpreter::{Function, VM};
-use linear_ir::{expr_ty_to_physical, layout_types, linearize_function, LinearContext};
 pub use linear_ir::{
-    DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, LinearRuntimeFunction,
-    PhysicalCollection, PhysicalPrimitive, PhysicalType, TypeLayoutValue,
+    expr_ty_to_physical, DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue,
+    LinearRuntimeFunction, PhysicalCollection, PhysicalPrimitive, PhysicalType, TypeLayoutValue,
 };
+use linear_ir::{layout_types, linearize_function, LinearContext};
 use thiserror::Error;
-pub use typecheck::StaticDeclaration;
-use typecheck::{resolve::resolve_module, typecheck, ExpressionType};
+use typecheck::{resolve::resolve_module, typecheck};
+pub use typecheck::{ExpressionType, StaticDeclaration};
 
 mod borrowck;
 mod hir;

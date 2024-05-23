@@ -76,8 +76,6 @@ fn data() {
             "nullability/null_traverse_union.brick",
             "unions/basic_construction.brick",
             "unions/incorrect_access.brick",
-            // non-i32 union branches
-            "unions/float_variant.brick",
         ]
         .into_iter()
         .collect(),

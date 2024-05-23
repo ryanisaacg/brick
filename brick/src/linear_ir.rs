@@ -208,6 +208,69 @@ impl LinearNode {
             provenance: None,
         }
     }
+
+    pub fn ty(
+        &self,
+        function_returns: &HashMap<FunctionID, Option<PhysicalType>>,
+    ) -> Option<PhysicalType> {
+        match &self.value {
+            LinearNodeValue::ConstantDataAddress(_)
+            | LinearNodeValue::VariableLocation(_)
+            | LinearNodeValue::ReadRegister(_)
+            | LinearNodeValue::Size(_)
+            | LinearNodeValue::HeapAlloc(_) => {
+                Some(PhysicalType::Primitive(PhysicalPrimitive::PointerSize))
+            }
+            LinearNodeValue::WriteMemory { .. }
+            | LinearNodeValue::VariableInit(_, _)
+            | LinearNodeValue::VariableDestroy(_)
+            | LinearNodeValue::Break
+            | LinearNodeValue::Loop(_)
+            | LinearNodeValue::Abort
+            | LinearNodeValue::Goto(_)
+            | LinearNodeValue::GotoLabel(_)
+            | LinearNodeValue::Switch { .. }
+            | LinearNodeValue::WriteRegister(_, _)
+            | LinearNodeValue::WriteRegistersSplitting(_, _)
+            | LinearNodeValue::Sequence(_)
+            | LinearNodeValue::If(_, _, _)
+            | LinearNodeValue::KillRegister(_) => None,
+            LinearNodeValue::Parameter(ty, _) | LinearNodeValue::ReadMemory { ty, .. } => {
+                Some(ty.clone())
+            }
+            LinearNodeValue::Call(lhs, _) => match &lhs.value {
+                // TODO: fail if not found
+                LinearNodeValue::FunctionID(func) => {
+                    function_returns.get(func).and_then(|x| x.clone())
+                }
+                // TODO: other non-function ID calls
+                _ => None,
+            },
+            LinearNodeValue::RuntimeCall(func, _) => match func {
+                LinearRuntimeFunction::StringConcat => {
+                    Some(PhysicalType::Collection(PhysicalCollection::String))
+                }
+                LinearRuntimeFunction::Memcpy => None,
+            },
+            LinearNodeValue::Return(child) => {
+                child.as_ref().and_then(|child| child.ty(function_returns))
+            }
+            LinearNodeValue::Cast { to: prim, .. } | LinearNodeValue::Arithmetic(_, prim, _, _) => {
+                Some(PhysicalType::Primitive(*prim))
+            }
+            LinearNodeValue::Comparison(_, _, _, _)
+            | LinearNodeValue::BinaryLogical(_, _, _)
+            | LinearNodeValue::Byte(_)
+            | LinearNodeValue::CharLiteral(_)
+            | LinearNodeValue::UnaryLogical(_, _) => {
+                Some(PhysicalType::Primitive(PhysicalPrimitive::Byte))
+            }
+            LinearNodeValue::Int(_) => Some(PhysicalType::Primitive(PhysicalPrimitive::Int32)),
+            LinearNodeValue::Float(_) => Some(PhysicalType::Primitive(PhysicalPrimitive::Float32)),
+            LinearNodeValue::FunctionID(_) => Some(PhysicalType::FunctionPointer),
+            LinearNodeValue::Debug(child) => child.ty(function_returns),
+        }
+    }
 }
 
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
@@ -216,7 +279,7 @@ pub enum LinearNodeValue {
     /// Returns the heap pointer
     HeapAlloc(Box<LinearNode>),
     /// Each parameter may only appear once in a given method body
-    Parameter(usize),
+    Parameter(PhysicalType, usize),
     // TODO: do the variables obsolete the registers?
     VariableInit(VariableID, PhysicalType),
     VariableDestroy(VariableID),
@@ -360,7 +423,7 @@ impl LinearNode {
             | LinearNodeValue::CharLiteral(_)
             | LinearNodeValue::Byte(_)
             | LinearNodeValue::FunctionID(_)
-            | LinearNodeValue::Parameter(_)
+            | LinearNodeValue::Parameter(_, _)
             | LinearNodeValue::VariableInit(_, _)
             | LinearNodeValue::VariableDestroy(_)
             | LinearNodeValue::VariableLocation(_)
@@ -649,8 +712,8 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 LinearNode::write_memory(
                     LinearNode::new(LinearNodeValue::VariableLocation(id)),
                     0,
-                    ty,
-                    LinearNode::new(LinearNodeValue::Parameter(idx)),
+                    ty.clone(),
+                    LinearNode::new(LinearNodeValue::Parameter(ty, idx)),
                 ),
             ])
         }

@@ -8,7 +8,6 @@ borrow checker and lifetimes:
 - linearity support
 
 unions:
-- auto-cast non-i32 members when reading / writing in wasm
 - optional non-exhaustive cases?
 - faulthrough / default branch
 

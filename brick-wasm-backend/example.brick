@@ -1,18 +1,11 @@
 // Int | 20
-union Number {
-    int(i32),
-    float(f32),
+struct Value {
+    val: i32
 }
 
-fn doubled(num: Number): Number {
-    case num {
-        int(val) => Number.int(val * 2),
-        float(val) => Number.float(val * 2),
-    }
-}
+fn drop(val: Value) {}
 
-let x = doubled(Number.int(10));
-case x {
-    int(val) => val,
-    float(_) => 1000,
-}
+let x = Value { val: 12 };
+drop(x);
+x = Value { val: 35 };
+x
