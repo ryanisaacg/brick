@@ -7,10 +7,6 @@ borrow checker and lifetimes:
 - drop (custom)
 - linearity support
 
-unions:
-- optional non-exhaustive cases?
-- faulthrough / default branch
-
 misc:
 - automatically discard unused expression values
 - short-circuiting boolean evaluation
@@ -137,6 +133,10 @@ tooling:
 allocator:
 - support dealloc
 - intrinsic-based bump deallocator
+
+unions:
+- optional non-exhaustive cases?
+- faulthrough / default branch
 
 error reporting:
 - typecheck errors
