@@ -67,7 +67,8 @@ pub enum Unwind {
     Aborted,
 }
 
-const CONSTANT_DATA_START: usize = 1024;
+const CONSTANT_DATA_START: usize = 1024 * 1024 * 2;
+const HEAP_SEGMENT_LENGTH: usize = 1024 * 1024;
 
 pub struct VM<'a> {
     pub memory: Vec<u8>,
@@ -92,15 +93,17 @@ impl<'a> VM<'a> {
     ) -> VM {
         let mut memory = vec![0; CONSTANT_DATA_START];
         memory.extend(constant_data_region);
-        let len = memory.len();
+        unsafe {
+            brick_runtime::brick_runtime_init(memory.as_mut_ptr(), HEAP_SEGMENT_LENGTH);
+        }
         VM {
             memory,
             temporaries: HashMap::new(),
             layouts,
             op_stack: Vec::new(),
-            base_ptr: len,
-            stack_ptr: len,
-            heap_ptr: std::mem::size_of::<usize>(),
+            base_ptr: CONSTANT_DATA_START,
+            stack_ptr: CONSTANT_DATA_START,
+            heap_ptr: 0,
             in_progress_goto: None,
             variable_locations: vec![HashMap::new()],
             fns: functions,
@@ -259,11 +262,7 @@ impl<'a> VM<'a> {
                     unreachable!()
                 };
                 let allocation = unsafe {
-                    let new_ptr = brick_runtime_alloc(
-                        self.memory.as_mut_ptr(),
-                        &mut self.heap_ptr as *mut usize,
-                        amount,
-                    );
+                    let new_ptr = brick_runtime_alloc(self.allocator(), amount);
 
                     new_ptr.offset_from(self.memory.as_mut_ptr()) as usize
                 };
@@ -621,8 +620,7 @@ impl<'a> VM<'a> {
                 };
                 let location = unsafe {
                     let ptr = brick_string_concat(
-                        self.memory.as_mut_ptr(),
-                        &mut self.heap_ptr as *mut usize,
+                        self.allocator(),
                         self.memory[a_ptr..(a_ptr + a_len)].as_ptr(),
                         a_len,
                         self.memory[b_ptr..(b_ptr + b_len)].as_ptr(),
@@ -677,6 +675,10 @@ impl<'a> VM<'a> {
         }
 
         Ok(())
+    }
+
+    unsafe fn allocator(&mut self) -> *mut u8 {
+        self.memory.as_mut_ptr().add(self.heap_ptr)
     }
 }
 

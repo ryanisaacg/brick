@@ -1510,7 +1510,11 @@ fn array_alloc_space_to_push(
                 // allocate new buffer
                 LinearNode::write_register(
                     buffer_register,
-                    LinearNode::heap_alloc_var(LinearNode::read_register(new_capacity_register)),
+                    LinearNode::heap_alloc_var(LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Multiply,
+                        LinearNode::read_register(new_capacity_register),
+                        LinearNode::size(elem_size),
+                    )),
                 ),
                 // copy old buffer to new buffer
                 LinearNode::new(LinearNodeValue::RuntimeCall(

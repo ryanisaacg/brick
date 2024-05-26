@@ -1,20 +1,32 @@
 #![allow(clippy::missing_safety_doc)]
 #![no_std]
 
+use core::alloc::{GlobalAlloc, Layout};
+
+use linked_list_allocator::LockedHeap as Heap;
+
 #[no_mangle]
-pub unsafe extern "C" fn brick_runtime_alloc(
-    region: *mut u8,
-    allocator: *mut usize,
-    alloc_size: usize,
-) -> *mut u8 {
-    let block_start = *allocator;
-    *allocator += alloc_size;
-    region.add(block_start)
+pub unsafe fn brick_runtime_init(heap_start: *mut u8, size: usize) -> *mut Heap {
+    let heap = Heap::empty();
+    heap.lock().init(heap_start, size);
+
+    let memory_region = heap.alloc(
+        Layout::from_size_align(core::mem::size_of::<Heap>(), core::mem::align_of::<Heap>())
+            .unwrap(),
+    ) as *mut Heap;
+    *memory_region = heap;
+    memory_region
+}
+
+// TODO: take alignment as a parameter?
+#[no_mangle]
+pub unsafe extern "C" fn brick_runtime_alloc(allocator: *mut u8, alloc_size: usize) -> *mut u8 {
+    let heap = (allocator as *mut Heap).as_ref().unwrap();
+    heap.alloc(Layout::from_size_align(alloc_size, 1).unwrap())
 }
 
 pub unsafe extern "C" fn brick_string_concat(
-    region: *mut u8,
-    allocator: *mut usize,
+    allocator: *mut u8,
     a_ptr: *const u8,
     a_len: usize,
     b_ptr: *const u8,
@@ -23,7 +35,7 @@ pub unsafe extern "C" fn brick_string_concat(
     let a_slice = core::slice::from_raw_parts(a_ptr, a_len);
     let b_slice = core::slice::from_raw_parts(b_ptr, b_len);
 
-    let memory_region = brick_runtime_alloc(region, allocator, a_len + b_len);
+    let memory_region = brick_runtime_alloc(allocator, a_len + b_len);
     let target = core::slice::from_raw_parts_mut(memory_region, a_len);
     target.copy_from_slice(a_slice);
     let target = core::slice::from_raw_parts_mut(memory_region.add(a_len), b_len);
