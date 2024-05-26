@@ -289,11 +289,14 @@ impl HirNode {
                 callback(None, lhs);
             }
             HirNodeValue::IntrinsicCall(runtime_fn, args) => {
-                let StaticDeclaration::Func(func) = &info_for_function(runtime_fn).decl else {
-                    unreachable!()
-                };
+                let func = info_for_function(runtime_fn).map(|info| {
+                    let StaticDeclaration::Func(func) = &info.decl else {
+                        unreachable!()
+                    };
+                    func
+                });
                 for (i, arg) in args.iter().enumerate() {
-                    callback(Some(&func.params[i]), arg);
+                    callback(func.map(|func| &func.params[i]), arg);
                 }
             }
             HirNodeValue::Assignment(lhs, rhs) => {
@@ -496,11 +499,14 @@ impl HirNode {
                 callback(None, lhs);
             }
             HirNodeValue::IntrinsicCall(runtime_fn, args) => {
-                let StaticDeclaration::Func(func) = &info_for_function(runtime_fn).decl else {
-                    unreachable!()
-                };
+                let func = info_for_function(runtime_fn).map(|info| {
+                    let StaticDeclaration::Func(func) = &info.decl else {
+                        unreachable!()
+                    };
+                    func
+                });
                 for (i, arg) in args.iter_mut().enumerate() {
-                    callback(Some(&func.params[i]), arg);
+                    callback(func.map(|func| &func.params[i]), arg);
                 }
             }
             HirNodeValue::Assignment(lhs, rhs) => {

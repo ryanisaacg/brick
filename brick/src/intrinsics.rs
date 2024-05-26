@@ -14,6 +14,7 @@ use crate::{
 pub enum IntrinsicFunction {
     ArrayLength,
     ArrayPush,
+    ArrayFree,
     DictionaryInsert,
     DictionaryContains,
 }
@@ -161,7 +162,7 @@ pub fn dictionary_intrinsics() -> &'static HashMap<String, IntrinsicOnType> {
         .expect("add_runtime_functions must be called first")
 }
 
-pub fn info_for_function(fn_id: &IntrinsicFunction) -> &'static IntrinsicOnType {
+pub fn info_for_function(fn_id: &IntrinsicFunction) -> Option<&'static IntrinsicOnType> {
     let all_functions = ALL_FUNCTIONS.get_or_init(|| {
         let array_functions = array_intrinsics();
         let dict_functions = dictionary_intrinsics();
@@ -172,5 +173,5 @@ pub fn info_for_function(fn_id: &IntrinsicFunction) -> &'static IntrinsicOnType 
             .collect();
         RwLock::new(combination)
     });
-    all_functions.read().unwrap().get(fn_id).unwrap()
+    all_functions.read().unwrap().get(fn_id).copied()
 }

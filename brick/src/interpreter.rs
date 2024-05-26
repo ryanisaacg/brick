@@ -1,6 +1,8 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use brick_runtime::{brick_memcpy, brick_runtime_alloc, brick_string_concat};
+use brick_runtime::{
+    brick_memcpy, brick_runtime_alloc, brick_runtime_dealloc, brick_string_concat,
+};
 
 use crate::{
     hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
@@ -651,6 +653,15 @@ impl<'a> VM<'a> {
                     new_ptr.offset_from(self.memory.as_mut_ptr()) as usize
                 };
                 self.op_stack.push(Value::Size(allocation));
+            }
+            LinearNodeValue::RuntimeCall(RuntimeFunction::Dealloc, args) => {
+                self.evaluate_node(params, &args[0])?;
+                let Some(Value::Size(pointer)) = self.op_stack.pop() else {
+                    unreachable!()
+                };
+                unsafe {
+                    brick_runtime_dealloc(self.allocator(), self.memory.as_mut_ptr().add(pointer));
+                };
             }
             LinearNodeValue::Switch { value, cases } => {
                 self.evaluate_node(params, value)?;

@@ -27,7 +27,7 @@ const MAXIMUM_MEMORY: u64 = 16_384;
 
 const WASM_BOOL_SIZE: usize = 4;
 const WASM_USIZE: usize = 4;
-const HEAP_SIZE: i32 = 1024 * 10;
+const HEAP_SIZE: i32 = 1024 * 1024 * 2;
 const STACK_SIZE: i32 = 1024;
 
 pub fn compile(

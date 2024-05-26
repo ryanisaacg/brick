@@ -134,6 +134,13 @@ impl LinearNode {
         }
     }
 
+    fn call_runtime(func: RuntimeFunction, args: Vec<LinearNode>) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::RuntimeCall(func, args),
+            provenance: None,
+        }
+    }
+
     fn write_register(id: RegisterID, value: LinearNode) -> LinearNode {
         LinearNode {
             value: LinearNodeValue::WriteRegister(id, Box::new(value)),
@@ -252,7 +259,7 @@ impl LinearNode {
                 RuntimeFunction::StringConcat => {
                     Some(PhysicalType::Collection(PhysicalCollection::String))
                 }
-                RuntimeFunction::Memcpy => None,
+                RuntimeFunction::Memcpy | RuntimeFunction::Dealloc => None,
                 RuntimeFunction::Alloc => {
                     Some(PhysicalType::Primitive(PhysicalPrimitive::PointerSize))
                 }
@@ -359,6 +366,8 @@ pub enum LinearNodeValue {
 pub enum RuntimeFunction {
     // (alloc_size) -> ptr
     Alloc,
+    // (ptr) -> void
+    Dealloc,
     // (str, str) -> str
     StringConcat,
     // (dest, src, size) -> void
@@ -1070,6 +1079,21 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 ty: array_inner_ty,
                 value: Box::new(inserted),
             }
+        }
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::ArrayFree, mut args) => {
+            let arr = args.pop().unwrap();
+            let array = lower_expression(ctx, arr);
+
+            let array_reg = RegisterID::new();
+
+            LinearNodeValue::Sequence(vec![
+                LinearNode::write_multi_register(array, vec![Some(array_reg), None, None]),
+                LinearNode::call_runtime(
+                    RuntimeFunction::Dealloc,
+                    vec![LinearNode::read_register(array_reg)],
+                ),
+                LinearNode::kill_register(array_reg),
+            ])
         }
         HirNodeValue::IntrinsicCall(IntrinsicFunction::DictionaryInsert, mut args) => {
             let value = args.pop().unwrap();

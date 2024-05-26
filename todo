@@ -1,10 +1,9 @@
 borrow checker and lifetimes:
-- allow disjoint borrows of struct fields
-- correctly mark references through collection indices
+- allow disjoint borrows of struct fields, collection indices
 - clone support
-- drop (hard-coded)
-- drop (custom)
-- linearity support
+- detect drops when a value is partially moved
+- generalize drop support to all types
+- must-use-type support
 
 misc:
 - automatically discard unused expression values

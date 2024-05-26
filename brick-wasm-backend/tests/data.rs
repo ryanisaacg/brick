@@ -50,6 +50,19 @@ fn data() {
             )?;
             linker.func_wrap(
                 "brick-runtime",
+                "brick_runtime_dealloc",
+                |mut caller: Caller<'_, ()>, allocator: i32, region: i32| {
+                    let mem = mem_ptr(&mut caller);
+                    unsafe {
+                        brick_runtime::brick_runtime_dealloc(
+                            mem.add(allocator as usize),
+                            mem.add(region as usize),
+                        );
+                    }
+                },
+            )?;
+            linker.func_wrap(
+                "brick-runtime",
                 "brick_string_concat",
                 |mut caller: Caller<'_, ()>,
                  allocator: i32,

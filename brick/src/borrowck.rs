@@ -19,6 +19,7 @@ use crate::{
 use self::control_flow_graph::{CfgEdge, CfgNode, ControlFlowGraph, FunctionCFG};
 
 mod control_flow_graph;
+mod drop_points;
 
 #[derive(Debug, Error)]
 pub enum LifetimeError {
@@ -96,7 +97,7 @@ fn borrow_check_body(
     let FunctionCFG {
         mut cfg,
         start,
-        end: _,
+        end,
     } = control_flow_graph::build_control_flow_graph(node);
     let mut block_queue = VecDeque::new();
     block_queue.push_front(start);
@@ -114,6 +115,9 @@ fn borrow_check_body(
             borrow_check_block(&mut context, &mut cfg, block_idx),
         );
     }
+
+    let drop_points = drop_points::calculate_drop_points(&cfg, end);
+    drop_points::insert_drops(node, drop_points);
 
     result
 }
@@ -134,6 +138,7 @@ impl BlockLiveness {
 struct VariableState {
     state: VariableLifeState,
     borrows: Vec<(PointerKind, VariableID)>,
+    ty: ExpressionType,
 }
 
 #[derive(Clone, Debug)]
@@ -172,6 +177,7 @@ fn borrow_check_block<'a>(
 ) -> Result<(), LifetimeError> {
     // Merge parent states into a new state
     let mut var_state = HashMap::new();
+    let first_node_in_child = cfg.node_weight(block_idx).unwrap().first_node();
     for incoming_edge in cfg.edges_directed(block_idx, Direction::Incoming) {
         let parent = cfg
             .node_weight(incoming_edge.source())
@@ -180,7 +186,9 @@ fn borrow_check_block<'a>(
         for (var_id, parent_state) in parent.var_state.iter() {
             var_state
                 .entry(*var_id)
-                .and_modify(|child_state| merge_var_states(parent_state, child_state))
+                .and_modify(|child_state| {
+                    merge_var_states(parent_state, child_state, first_node_in_child)
+                })
                 .or_insert(parent_state.clone());
         }
     }
@@ -223,16 +231,24 @@ fn borrow_check_block<'a>(
     result
 }
 
-fn merge_var_states(parent: &VariableState, child: &mut VariableState) {
+fn merge_var_states(
+    parent: &VariableState,
+    child: &mut VariableState,
+    first_node: Option<&HirNode>,
+) {
     match (&parent.state, &mut child.state) {
-        (VariableLifeState::Used(_, _), _) => {
-            // which 'used' the child keeps track of doesn't seem super important
+        (_, VariableLifeState::Moved(_, _)) => {
+            // If already moved in child, then ignore all parent beliefs
+        }
+        (VariableLifeState::Used(_, _), VariableLifeState::Used(node_id, provenance)) => {
+            // if more than one parent has used a node, then mark it used at this merge point
+            if let Some(first_node) = first_node {
+                *node_id = first_node.id;
+                *provenance = first_node.provenance.clone();
+            }
         }
         (VariableLifeState::Moved(_, _), VariableLifeState::Used(_, _)) => {
             *child = parent.clone();
-        }
-        (VariableLifeState::Moved(_, _), VariableLifeState::Moved(_, _)) => {
-            // not sure but I think we can safely leave this alone
         }
     }
 }
@@ -319,6 +335,7 @@ fn borrow_check_node(
                 VariableState {
                     state: VariableLifeState::Used(node.id, node.provenance.clone()),
                     borrows: Vec::new(),
+                    ty: node.ty.clone(),
                 },
             );
         }
@@ -336,6 +353,7 @@ fn borrow_check_node(
                     VariableState {
                         state: VariableLifeState::Used(node.id, node.provenance.clone()),
                         borrows: Vec::new(),
+                        ty: node.ty.clone(),
                     },
                 );
             }
@@ -345,7 +363,7 @@ fn borrow_check_node(
                 &mut results,
                 borrow_check_node(ctx, variable_state, borrow_state, rhs),
             );
-            let id = find_id_for_lvalue(lhs);
+            let id = find_variable_for_lvalue(lhs);
             if let AnyID::Variable(var_id) = id {
                 if let Some(existing_state) = variable_state.get_mut(var_id) {
                     existing_state.state =
@@ -357,7 +375,7 @@ fn borrow_check_node(
                         InvalidateType::AllBorrows,
                     );
                 } else if let ExpressionType::Pointer(ref_ty, _) = &lhs.ty {
-                    let lender_id = find_id_for_lvalue(rhs).as_var();
+                    let lender_id = find_variable_for_lvalue(rhs).as_var();
                     let var_state = variable_state.get_mut(&lender_id).unwrap();
                     borrow_state.get_mut(var_id).unwrap().state =
                         BorrowLifeState::Assigned(lender_id, node.id, node.provenance.clone());
@@ -379,13 +397,33 @@ fn borrow_check_node(
                 // it's just updating a path within its owner
             }
         }
-        // TODO: path search for moves
-        HirNodeValue::Access(_, _) => {}
-        HirNodeValue::NullableTraverse(_, _) => {}
-        HirNodeValue::ArrayIndex(_, _) => {}
-        HirNodeValue::DictIndex(_, _) => {}
-        HirNodeValue::UnionVariant(_, _) => {}
 
+        HirNodeValue::ArrayIndex(lhs, rhs) | HirNodeValue::DictIndex(lhs, rhs) => {
+            merge_results(
+                &mut results,
+                borrow_check_node(ctx, variable_state, borrow_state, rhs),
+            );
+            if node.ty.is_affine(ctx.declarations) {
+                merge_results(
+                    &mut results,
+                    borrow_check_node(ctx, variable_state, borrow_state, lhs),
+                );
+            } else {
+                // TODO: mark used
+            }
+        }
+        HirNodeValue::UnionVariant(lhs, _)
+        | HirNodeValue::Access(lhs, _)
+        | HirNodeValue::NullableTraverse(lhs, _) => {
+            if node.ty.is_affine(ctx.declarations) {
+                merge_results(
+                    &mut results,
+                    borrow_check_node(ctx, variable_state, borrow_state, lhs),
+                );
+            } else {
+                // TODO: mark used
+            }
+        }
         HirNodeValue::Call(_, params)
         | HirNodeValue::VtableCall(_, _, params)
         | HirNodeValue::IntrinsicCall(_, params) => {
@@ -398,7 +436,7 @@ fn borrow_check_node(
                 );
                 match &param.value {
                     HirNodeValue::TakeUnique(inner) => {
-                        let id = *find_id_for_lvalue(inner);
+                        let id = *find_variable_for_lvalue(inner);
                         let previous_mut_borrow =
                             unique_params.insert(id, param.provenance.clone());
                         if let Some(previous_mut_borrow) = previous_mut_borrow {
@@ -427,7 +465,7 @@ fn borrow_check_node(
                         );
                     }
                     HirNodeValue::TakeShared(inner) => {
-                        let id = *find_id_for_lvalue(inner);
+                        let id = *find_variable_for_lvalue(inner);
                         shared_params.insert(id, param.provenance.clone());
                         if let Some(previous_mut_borrow) = unique_params.get(&id) {
                             merge_results(
@@ -478,7 +516,8 @@ fn borrow_check_node(
             }
         }
 
-        // TODO: children are borrowed, not moved
+        // Ignore children - they're marked as borrowed in function call or
+        // in borrow assignment
         HirNodeValue::TakeUnique(_) => {}
         HirNodeValue::TakeShared(_) => {}
 
@@ -523,7 +562,7 @@ fn is_copy(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &ExpressionTy
     !ty.is_affine(declarations)
 }
 
-fn find_id_for_lvalue(lvalue: &HirNode) -> &AnyID {
+fn find_variable_for_lvalue(lvalue: &HirNode) -> &AnyID {
     match &lvalue.value {
         HirNodeValue::VariableReference(id) => id,
         HirNodeValue::NullableTraverse(child, _)
@@ -532,7 +571,7 @@ fn find_id_for_lvalue(lvalue: &HirNode) -> &AnyID {
         | HirNodeValue::DictIndex(child, _)
         | HirNodeValue::Dereference(child)
         | HirNodeValue::TakeUnique(child)
-        | HirNodeValue::TakeShared(child) => find_id_for_lvalue(child),
+        | HirNodeValue::TakeShared(child) => find_variable_for_lvalue(child),
         other => panic!("ICE: illegal lvalue: {other:?}"),
     }
 }

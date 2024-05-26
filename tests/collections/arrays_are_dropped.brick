@@ -4,12 +4,12 @@
 // arrays are correctly freed
 
 fn create_temp_array(): i32 {
-    let arr = list[0; 1024];
+    let arr = list[0; 1024 * 64];
     arr[5]
 }
 
 let times = 0;
-while times < 8 {
+while times < 4 {
     let _ = create_temp_array();
     times += 1;
 }

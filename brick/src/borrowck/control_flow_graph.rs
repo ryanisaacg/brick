@@ -80,8 +80,12 @@ pub fn build_control_flow_graph(body: &HirNode) -> FunctionCFG {
             );
         }
     }
+    let HirNodeValue::Sequence(children) = &body.value else {
+        unreachable!("expected body passed to CFG to be a sequence")
+    };
     let cfg_end = cfg.add_node(CfgNode::Exit {
         life_state: BlockLiveness::new(),
+        last_node: children.last(),
     });
     // Create blocks
     for (node_idx, leader_idx) in leaders.iter() {
@@ -140,19 +144,27 @@ pub enum CfgNode<'a> {
     },
     Exit {
         life_state: BlockLiveness,
+        last_node: Option<&'a HirNode>,
     },
 }
 
 impl CfgNode<'_> {
     pub fn life_state(&self) -> &BlockLiveness {
         match self {
-            CfgNode::Exit { life_state } | CfgNode::Block { life_state, .. } => life_state,
+            CfgNode::Exit { life_state, .. } | CfgNode::Block { life_state, .. } => life_state,
         }
     }
 
     pub fn life_state_mut(&mut self) -> &mut BlockLiveness {
         match self {
-            CfgNode::Exit { life_state } | CfgNode::Block { life_state, .. } => life_state,
+            CfgNode::Exit { life_state, .. } | CfgNode::Block { life_state, .. } => life_state,
+        }
+    }
+
+    pub fn first_node(&self) -> Option<&HirNode> {
+        match self {
+            CfgNode::Exit { last_node, .. } => last_node.as_ref().copied(),
+            CfgNode::Block { expressions, .. } => expressions.first().copied(),
         }
     }
 }
