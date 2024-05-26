@@ -1,7 +1,9 @@
 use std::{
+    any::Any,
     collections::HashSet,
     fmt::Display,
     fs,
+    panic::{self, RefUnwindSafe, UnwindSafe},
     path::{Path, PathBuf},
 };
 
@@ -31,6 +33,7 @@ enum TestSuccessOrFailure {
     Succeeded(PathBuf),
     FailsToCompile(PathBuf, Error),
     ErroredWhenRun(PathBuf, Error),
+    PanickedWhenRun(PathBuf, Box<dyn Any + Send>),
     CompiledButShouldnt(PathBuf),
     RanButShouldnt(PathBuf),
     MismatchedResult {
@@ -75,6 +78,14 @@ impl Display for TestSuccessOrFailure {
                 "{}: Test succeeded, but it was marked as should fail",
                 path_display(path)
             ),
+            TestSuccessOrFailure::PanickedWhenRun(path, panic) => write!(
+                f,
+                "{}: Test panicked\n{}\n",
+                path_display(path),
+                panic
+                    .downcast_ref::<&str>()
+                    .unwrap_or(&"<No panic message provided>"),
+            ),
         }
     }
 }
@@ -91,7 +102,11 @@ fn path_display(path: &Path) -> String {
 pub fn test_folder(
     mut path: PathBuf,
     check_does_compile: impl Fn(&str) -> anyhow::Result<()> + Send + Sync,
-    execute: impl Fn(&str, &TestValue) -> anyhow::Result<TestValue> + Send + Sync,
+    execute: impl (Fn(&str, &TestValue) -> anyhow::Result<TestValue>)
+        + Send
+        + Sync
+        + UnwindSafe
+        + RefUnwindSafe,
     should_fail: HashSet<&str>,
 ) {
     use rayon::prelude::*;
@@ -124,15 +139,22 @@ pub fn test_folder(
                         TestSuccessOrFailure::RanButShouldnt(path)
                     }
                 }
-                TestExpectation::ProducesValue(expected) => match execute(&contents, &expected) {
-                    Ok(received) if expected == received => TestSuccessOrFailure::Succeeded(path),
-                    Ok(received) => TestSuccessOrFailure::MismatchedResult {
-                        path,
-                        expected,
-                        received,
-                    },
-                    Err(error) => TestSuccessOrFailure::ErroredWhenRun(path, error),
-                },
+                TestExpectation::ProducesValue(expected) => {
+                    match panic::catch_unwind(|| execute(&contents, &expected)) {
+                        Ok(executed) => match executed {
+                            Ok(received) if expected == received => {
+                                TestSuccessOrFailure::Succeeded(path)
+                            }
+                            Ok(received) => TestSuccessOrFailure::MismatchedResult {
+                                path,
+                                expected,
+                                received,
+                            },
+                            Err(error) => TestSuccessOrFailure::ErroredWhenRun(path, error),
+                        },
+                        Err(panic) => TestSuccessOrFailure::PanickedWhenRun(path, panic),
+                    }
+                }
             };
             (cloned_path, result)
         })
