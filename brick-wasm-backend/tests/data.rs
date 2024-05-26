@@ -50,6 +50,28 @@ fn data() {
             )?;
             linker.func_wrap(
                 "brick-runtime",
+                "brick_string_concat",
+                |mut caller: Caller<'_, ()>,
+                 allocator: i32,
+                 a_ptr: i32,
+                 a_len: i32,
+                 b_ptr: i32,
+                 b_len: i32| {
+                    let mem = mem_ptr(&mut caller);
+                    unsafe {
+                        let new_str = brick_runtime::brick_string_concat(
+                            mem.add(allocator as usize),
+                            mem.add(a_ptr as usize),
+                            a_len as usize,
+                            mem.add(b_ptr as usize),
+                            b_len as usize,
+                        );
+                        (new_str.offset_from(mem) as i32, a_len + b_len)
+                    }
+                },
+            )?;
+            linker.func_wrap(
+                "brick-runtime",
                 "brick_memcpy",
                 |mut caller: Caller<'_, ()>, dest: i32, source: i32, len: i32| {
                     let mem = mem_ptr(&mut caller);
@@ -91,8 +113,6 @@ fn data() {
             "coroutine/yield_twice.brick",
             "functions/can_assign_structs.brick",
             "interfaces/can_assign_structs.brick",
-            // concat allocation
-            "strings/concat.brick",
             // nulls not implemented
             "nullability/basic_null.brick",
             "nullability/null_coalesce.brick",
@@ -183,8 +203,8 @@ fn look_for_value(
         TestValue::String(_) => {
             let mut results = [Val::I32(-1), Val::I32(-1)];
             func.call(&mut store, &[], &mut results)?;
-            let len = results[0].unwrap_i32() as usize;
-            let ptr = results[1].unwrap_i32() as usize;
+            let ptr = results[0].unwrap_i32() as usize;
+            let len = results[1].unwrap_i32() as usize;
             let slice = &memory.data(&store)[ptr..(ptr + len)];
             let string = std::str::from_utf8(slice)?;
             Ok(TestValue::String(string.to_string()))

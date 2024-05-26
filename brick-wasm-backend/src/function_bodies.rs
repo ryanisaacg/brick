@@ -319,16 +319,16 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
                 }
             }
         }
-        LinearNodeValue::RuntimeCall(RuntimeFunction::Alloc, args) => {
+        LinearNodeValue::RuntimeCall(
+            func @ (RuntimeFunction::Alloc | RuntimeFunction::StringConcat),
+            args,
+        ) => {
             ctx.instructions
                 .push(Instruction::GlobalGet(ctx.allocptr_global_idx));
             for arg in args.iter() {
                 encode_node(ctx, arg, None);
             }
-            let fn_id = ctx
-                .linear_function_to_id
-                .get(&RuntimeFunction::Alloc)
-                .unwrap();
+            let fn_id = ctx.linear_function_to_id.get(func).unwrap();
             ctx.instructions.push(Instruction::Call(*fn_id));
         }
         LinearNodeValue::RuntimeCall(func, args) => {

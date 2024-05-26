@@ -593,17 +593,17 @@ impl<'a> VM<'a> {
             }
             LinearNodeValue::RuntimeCall(RuntimeFunction::StringConcat, args) => {
                 self.evaluate_node(params, &args[0])?;
-                let Value::Size(a_ptr) = self.op_stack.pop().unwrap() else {
-                    unreachable!()
-                };
                 let Value::Size(a_len) = self.op_stack.pop().unwrap() else {
                     unreachable!()
                 };
-                self.evaluate_node(params, &args[1])?;
-                let Value::Size(b_ptr) = self.op_stack.pop().unwrap() else {
+                let Value::Size(a_ptr) = self.op_stack.pop().unwrap() else {
                     unreachable!()
                 };
+                self.evaluate_node(params, &args[1])?;
                 let Value::Size(b_len) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                let Value::Size(b_ptr) = self.op_stack.pop().unwrap() else {
                     unreachable!()
                 };
                 let location = unsafe {
@@ -616,8 +616,8 @@ impl<'a> VM<'a> {
                     );
                     ptr.offset_from(self.memory.as_ptr()) as usize
                 };
-                self.op_stack.push(Value::Size(a_len + b_len));
                 self.op_stack.push(Value::Size(location));
+                self.op_stack.push(Value::Size(a_len + b_len));
             }
             LinearNodeValue::RuntimeCall(RuntimeFunction::Memcpy, args) => {
                 self.evaluate_node(params, &args[0])?;

@@ -33,7 +33,6 @@ wasm backend:
 - compatibility with extern functions (https://github.com/WebAssembly/tool-conventions)
 - handle nullability
 - handle coroutines
-- handle string concat
 - figure out and fix issue with dictionaries
 - vtables / dynamic functions
 - trailing return statements in functions cause miscompilations

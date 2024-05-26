@@ -494,8 +494,8 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let offset = ctx.constant_data_region.len();
             ctx.constant_data_region.extend(bytes);
             LinearNodeValue::Sequence(vec![
-                LinearNode::size(bytes.len()),
                 LinearNode::new(LinearNodeValue::ConstantDataAddress(offset)),
+                LinearNode::size(bytes.len()),
             ])
         }
 

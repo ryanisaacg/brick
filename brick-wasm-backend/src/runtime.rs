@@ -26,6 +26,18 @@ pub fn add_runtime_imports(
             vec![ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
+        (
+            RuntimeFunction::StringConcat,
+            "brick_string_concat",
+            vec![
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            vec![ValType::I32, ValType::I32],
+        ),
     ];
     for (linear_id, name, params, returns) in functions {
         ty_section.function(params.iter().cloned(), returns.iter().cloned());

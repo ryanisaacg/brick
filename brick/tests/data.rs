@@ -67,13 +67,13 @@ fn look_for_value(
         }
         TestValue::String(_) => {
             if results.len() == 2 {
-                let pointer = results.pop().unwrap();
-                let Value::Size(pointer) = pointer else {
-                    bail!("non-pointer type returned: {:?}", pointer);
-                };
                 let length = results.pop().unwrap();
                 let Value::Size(length) = length else {
                     bail!("non-length type returned: {:?}", length);
+                };
+                let pointer = results.pop().unwrap();
+                let Value::Size(pointer) = pointer else {
+                    bail!("non-pointer type returned: {:?}", pointer);
                 };
                 let bytes = &memory[pointer..(pointer + length)];
                 let string = std::str::from_utf8(bytes)?;
