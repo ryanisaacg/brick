@@ -160,21 +160,6 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
         }
     }
     match &node.value {
-        LinearNodeValue::HeapAlloc(alloc_size) => {
-            ctx.instructions
-                .push(Instruction::GlobalGet(ctx.allocptr_global_idx));
-            let original_pointer = ctx.alloc_local(ValType::I32);
-            ctx.instructions
-                .push(Instruction::LocalSet(original_pointer));
-            encode_node(ctx, alloc_size, None);
-            ctx.instructions
-                .push(Instruction::GlobalGet(ctx.allocptr_global_idx));
-            ctx.instructions.push(Instruction::I32Add);
-            ctx.instructions
-                .push(Instruction::GlobalSet(ctx.allocptr_global_idx));
-            ctx.instructions
-                .push(Instruction::LocalGet(original_pointer));
-        }
         LinearNodeValue::Parameter(_, idx) => {
             let mut start = ctx.parameter_starts[*idx];
             let ty = ctx.func.params[*idx].clone();
@@ -333,6 +318,18 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
                     }
                 }
             }
+        }
+        LinearNodeValue::RuntimeCall(RuntimeFunction::Alloc, args) => {
+            ctx.instructions
+                .push(Instruction::GlobalGet(ctx.allocptr_global_idx));
+            for arg in args.iter() {
+                encode_node(ctx, arg, None);
+            }
+            let fn_id = ctx
+                .linear_function_to_id
+                .get(&RuntimeFunction::Alloc)
+                .unwrap();
+            ctx.instructions.push(Instruction::Call(*fn_id));
         }
         LinearNodeValue::RuntimeCall(func, args) => {
             for arg in args.iter() {

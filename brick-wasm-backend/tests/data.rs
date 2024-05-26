@@ -22,16 +22,40 @@ fn data() {
             let mut linker = Linker::new(&engine);
             linker.func_wrap(
                 "brick-runtime",
+                "brick_runtime_init",
+                |mut caller: Caller<'_, ()>, heap_start: i32, size: i32| {
+                    let mem = mem_ptr(&mut caller);
+                    unsafe {
+                        let allocator = brick_runtime::brick_runtime_init(
+                            mem.add(heap_start as usize),
+                            size as usize,
+                        );
+                        (allocator as *mut u8).offset_from(mem) as i32
+                    }
+                },
+            )?;
+            linker.func_wrap(
+                "brick-runtime",
+                "brick_runtime_alloc",
+                |mut caller: Caller<'_, ()>, allocator: i32, size: i32| {
+                    let mem = mem_ptr(&mut caller);
+                    unsafe {
+                        let allocated_block = brick_runtime::brick_runtime_alloc(
+                            mem.add(allocator as usize),
+                            size as usize,
+                        );
+                        (allocated_block as *mut u8).offset_from(mem) as i32
+                    }
+                },
+            )?;
+            linker.func_wrap(
+                "brick-runtime",
                 "brick_memcpy",
                 |mut caller: Caller<'_, ()>, dest: i32, source: i32, len: i32| {
-                    let Extern::Memory(mem) = caller.get_export("memory").unwrap() else {
-                        unreachable!();
-                    };
-                    let store = caller.as_context_mut();
-                    let mem_ptr = mem.data_ptr(store);
+                    let mem = mem_ptr(&mut caller);
                     unsafe {
-                        let dest = mem_ptr.add(dest as usize);
-                        let source = mem_ptr.add(source as usize);
+                        let dest = mem.add(dest as usize);
+                        let source = mem.add(source as usize);
                         brick_runtime::brick_memcpy(dest, source, len as usize);
                     }
                 },
@@ -80,6 +104,14 @@ fn data() {
         .into_iter()
         .collect(),
     );
+}
+
+fn mem_ptr(caller: &mut Caller<'_, ()>) -> *mut u8 {
+    let Extern::Memory(mem) = caller.get_export("memory").unwrap() else {
+        unreachable!();
+    };
+    let store = caller.as_context_mut();
+    mem.data_ptr(store)
 }
 
 fn look_for_value(

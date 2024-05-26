@@ -256,18 +256,6 @@ impl<'a> VM<'a> {
                         .0,
                 ));
             }
-            LinearNodeValue::HeapAlloc(amount) => {
-                self.evaluate_node(params, amount)?;
-                let Some(Value::Size(amount)) = self.op_stack.pop() else {
-                    unreachable!()
-                };
-                let allocation = unsafe {
-                    let new_ptr = brick_runtime_alloc(self.allocator(), amount);
-
-                    new_ptr.offset_from(self.memory.as_mut_ptr()) as usize
-                };
-                self.op_stack.push(Value::Size(allocation));
-            }
             LinearNodeValue::Parameter(_, idx) => {
                 let mut temp = Value::Byte(0);
                 std::mem::swap(&mut temp, &mut params[*idx]);
@@ -651,6 +639,18 @@ impl<'a> VM<'a> {
                         len,
                     );
                 }
+            }
+            LinearNodeValue::RuntimeCall(RuntimeFunction::Alloc, args) => {
+                self.evaluate_node(params, &args[0])?;
+                let Some(Value::Size(amount)) = self.op_stack.pop() else {
+                    unreachable!()
+                };
+                let allocation = unsafe {
+                    let new_ptr = brick_runtime_alloc(self.allocator(), amount);
+
+                    new_ptr.offset_from(self.memory.as_mut_ptr()) as usize
+                };
+                self.op_stack.push(Value::Size(allocation));
             }
             LinearNodeValue::Switch { value, cases } => {
                 self.evaluate_node(params, value)?;

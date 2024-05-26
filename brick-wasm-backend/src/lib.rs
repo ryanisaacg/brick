@@ -4,6 +4,7 @@ use brick::{
     expr_ty_to_physical, id::FunctionID, lower_code, CompileError, ExpressionType, LinearFunction,
     LowerResults, StaticDeclaration,
 };
+use function_bodies::walk_vals_write_order;
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, DataSegment, DataSegmentMode, ExportKind, ExportSection,
     FunctionSection, GlobalSection, GlobalType, ImportSection, MemorySection, MemoryType, Module,
@@ -26,6 +27,8 @@ const MAXIMUM_MEMORY: u64 = 16_384;
 
 const WASM_BOOL_SIZE: usize = 4;
 const WASM_USIZE: usize = 4;
+const HEAP_SIZE: i32 = 1024 * 10;
+const STACK_SIZE: i32 = 1024;
 
 pub fn compile(
     module_name: &str,
@@ -67,6 +70,12 @@ pub fn compile(
         })
     }
 
+    let mut start_results = Vec::new();
+    if let Some(return_ty) = &statements_ty {
+        walk_vals_write_order(&ty_declarations, return_ty, 0, &mut |p, _| {
+            start_results.push(p)
+        });
+    }
     let main = LinearFunction {
         id: FunctionID::new(),
         body: statements,
@@ -104,7 +113,7 @@ pub fn compile(
             shared: false,
         },
         // TODO
-        &ConstExpr::i32_const(2048),
+        &ConstExpr::i32_const(HEAP_SIZE + STACK_SIZE),
     );
     let alloc_pointer = 1;
     globals.global(
@@ -120,6 +129,8 @@ pub fn compile(
     let mut type_index = 0;
     let linear_function_to_id =
         runtime::add_runtime_imports(&mut import_section, &mut ty_section, &mut type_index);
+    let runtime_init_idx =
+        runtime::add_init_import(&mut import_section, &mut ty_section, &mut type_index);
     let main_index = type_index;
     for function in functions.iter() {
         function_headers::encode(
@@ -144,6 +155,17 @@ pub fn compile(
             function,
         ));
     }
+    let start_index = runtime::add_start(
+        &mut ty_section,
+        &mut fn_section,
+        &mut codes,
+        &mut type_index,
+        runtime_init_idx,
+        main_index,
+        start_results,
+        alloc_pointer,
+        HEAP_SIZE,
+    );
 
     memories.memory(MemoryType {
         minimum: MEMORY_MINIMUM_PAGES,
@@ -153,7 +175,7 @@ pub fn compile(
         page_size_log2: None,
     });
     exports.export("memory", ExportKind::Memory, MAIN_MEMORY);
-    exports.export("main", ExportKind::Func, main_index);
+    exports.export("main", ExportKind::Func, start_index);
 
     module.section(&ty_section);
     module.section(&import_section);
@@ -162,7 +184,9 @@ pub fn compile(
     module.section(&globals);
     module.section(&exports);
     if is_start_function {
-        module.section(&StartSection { function_index: 0 });
+        module.section(&StartSection {
+            function_index: start_index,
+        });
     }
     module.section(&codes);
     module.section(&data_section);

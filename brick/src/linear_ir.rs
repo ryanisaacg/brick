@@ -119,14 +119,17 @@ impl LinearNode {
 
     fn heap_alloc_const(size: usize) -> LinearNode {
         LinearNode {
-            value: LinearNodeValue::HeapAlloc(Box::new(LinearNode::size(size))),
+            value: LinearNodeValue::RuntimeCall(
+                RuntimeFunction::Alloc,
+                vec![LinearNode::size(size)],
+            ),
             provenance: None,
         }
     }
 
     fn heap_alloc_var(size: LinearNode) -> LinearNode {
         LinearNode {
-            value: LinearNodeValue::HeapAlloc(Box::new(size)),
+            value: LinearNodeValue::RuntimeCall(RuntimeFunction::Alloc, vec![size]),
             provenance: None,
         }
     }
@@ -217,8 +220,7 @@ impl LinearNode {
             LinearNodeValue::ConstantDataAddress(_)
             | LinearNodeValue::VariableLocation(_)
             | LinearNodeValue::ReadRegister(_)
-            | LinearNodeValue::Size(_)
-            | LinearNodeValue::HeapAlloc(_) => {
+            | LinearNodeValue::Size(_) => {
                 Some(PhysicalType::Primitive(PhysicalPrimitive::PointerSize))
             }
             LinearNodeValue::WriteMemory { .. }
@@ -251,6 +253,9 @@ impl LinearNode {
                     Some(PhysicalType::Collection(PhysicalCollection::String))
                 }
                 RuntimeFunction::Memcpy => None,
+                RuntimeFunction::Alloc => {
+                    Some(PhysicalType::Primitive(PhysicalPrimitive::PointerSize))
+                }
             },
             LinearNodeValue::Return(child) => {
                 child.as_ref().and_then(|child| child.ty(function_returns))
@@ -276,8 +281,6 @@ impl LinearNode {
 // TODO: split up between 'statement' and 'expression' to reduce need for boxing?
 #[derive(Clone, Debug)]
 pub enum LinearNodeValue {
-    /// Returns the heap pointer
-    HeapAlloc(Box<LinearNode>),
     /// Each parameter may only appear once in a given method body
     Parameter(PhysicalType, usize),
     // TODO: do the variables obsolete the registers?
@@ -354,7 +357,11 @@ pub enum LinearNodeValue {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum RuntimeFunction {
+    // (alloc_size) -> ptr
+    Alloc,
+    // (str, str) -> str
     StringConcat,
+    // (dest, src, size) -> void
     Memcpy,
 }
 
@@ -370,8 +377,7 @@ impl LinearNode {
 
     fn children_mut(&mut self, mut callback: impl FnMut(&mut LinearNode)) {
         match &mut self.value {
-            LinearNodeValue::HeapAlloc(child)
-            | LinearNodeValue::WriteRegistersSplitting(child, _)
+            LinearNodeValue::WriteRegistersSplitting(child, _)
             | LinearNodeValue::Debug(child)
             | LinearNodeValue::ReadMemory {
                 location: child, ..
