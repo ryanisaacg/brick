@@ -4,13 +4,13 @@ use thiserror::Error;
 
 use crate::{
     id::{AnyID, FunctionID, TypeID},
+    intrinsics::{add_intrinsics, array_intrinsics, dictionary_intrinsics},
     multi_error::{merge_results, print_multi_errors, MultiError},
     parser::{
         AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
         InterfaceDeclarationValue, MatchDeclaration, StructDeclarationValue, UnaryOp,
     },
     provenance::SourceRange,
-    runtime::{add_runtime_functions, array_runtime_functions, dictionary_runtime_functions},
 };
 
 use self::resolve::resolve_type_expr;
@@ -406,7 +406,7 @@ pub fn typecheck<'a>(
     let mut name_to_context_entry = HashMap::new();
     let mut name_to_type_id = HashMap::new();
     let mut id_to_decl = HashMap::new();
-    add_runtime_functions(&mut id_to_decl);
+    add_intrinsics(&mut id_to_decl);
 
     for (name, value) in declarations {
         match value {
@@ -783,7 +783,7 @@ fn typecheck_expression<'a>(
                     }
                 },
                 ExpressionType::Collection(CollectionType::Array(_item_ty)) => {
-                    let runtime = array_runtime_functions();
+                    let runtime = array_intrinsics();
                     if let Some(ty) = runtime.get(name) {
                         ExpressionType::ReferenceTo(ty.decl.id())
                     } else {
@@ -791,7 +791,7 @@ fn typecheck_expression<'a>(
                     }
                 }
                 ExpressionType::Collection(CollectionType::Dict(_key_ty, _value_ty)) => {
-                    let runtime = dictionary_runtime_functions();
+                    let runtime = dictionary_intrinsics();
                     if let Some(ty) = runtime.get(name) {
                         ExpressionType::ReferenceTo(ty.decl.id())
                     } else {

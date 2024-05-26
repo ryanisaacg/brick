@@ -1,7 +1,6 @@
 borrow checker and lifetimes:
 - allow disjoint borrows of struct fields
 - correctly mark references through collection indices
-- prevent references being stored in collections
 - clone support
 - drop (hard-coded)
 - drop (custom)
@@ -13,6 +12,7 @@ misc:
 - disallow top-level return
 
 collections:
+- prevent references being stored in collections
 - tuples
 - arrays:
     - allow empty arrays to typecheck (requires generic type syntax)
@@ -31,7 +31,6 @@ collections:
 
 wasm backend:
 - compatibility with extern functions (https://github.com/WebAssembly/tool-conventions)
-- see unions - cast to i32
 - handle nullability
 - handle coroutines
 - handle string concat

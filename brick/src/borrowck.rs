@@ -78,12 +78,12 @@ pub fn borrow_check(
 ) -> Result<(), LifetimeError> {
     let mut result = Ok(());
 
-    for func in module.functions.iter() {
-        let func_result = borrow_check_body(declarations, &func.body);
+    for func in module.functions.iter_mut() {
+        let func_result = borrow_check_body(declarations, &mut func.body);
         merge_results(&mut result, func_result);
     }
 
-    let top_level_result = borrow_check_body(declarations, &module.top_level_statements);
+    let top_level_result = borrow_check_body(declarations, &mut module.top_level_statements);
     merge_results(&mut result, top_level_result);
 
     result
@@ -91,7 +91,7 @@ pub fn borrow_check(
 
 fn borrow_check_body(
     declarations: &HashMap<TypeID, &StaticDeclaration>,
-    node: &HirNode,
+    node: &mut HirNode,
 ) -> Result<(), LifetimeError> {
     let FunctionCFG {
         mut cfg,
@@ -388,7 +388,7 @@ fn borrow_check_node(
 
         HirNodeValue::Call(_, params)
         | HirNodeValue::VtableCall(_, _, params)
-        | HirNodeValue::RuntimeCall(_, params) => {
+        | HirNodeValue::IntrinsicCall(_, params) => {
             let mut unique_params = HashMap::new();
             let mut shared_params: HashMap<AnyID, Option<SourceRange>> = HashMap::new();
             for param in params.iter() {

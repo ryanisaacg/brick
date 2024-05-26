@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 
-use brick::LinearRuntimeFunction;
+use brick::RuntimeFunction;
 use wasm_encoder::{EntityType, ImportSection, TypeSection, ValType};
 
 pub fn add_runtime_imports(
     imports: &mut ImportSection,
     ty_section: &mut TypeSection,
     type_index: &mut u32,
-) -> HashMap<LinearRuntimeFunction, u32> {
+) -> HashMap<RuntimeFunction, u32> {
     let mut indices = HashMap::new();
 
     let functions = [(
-        LinearRuntimeFunction::Memcpy,
+        RuntimeFunction::Memcpy,
         "brick_memcpy",
         [ValType::I32, ValType::I32, ValType::I32],
         [],

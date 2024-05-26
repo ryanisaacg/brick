@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     id::TypeID,
-    runtime::{array_runtime_functions, dictionary_runtime_functions},
+    intrinsics::{array_intrinsics, dictionary_intrinsics},
     typecheck::{
         fully_dereference, CollectionType, ExpressionType, InterfaceType, PointerKind,
         PrimitiveType, StaticDeclaration, StructType,
@@ -85,8 +85,8 @@ pub fn rewrite(declarations: &HashMap<TypeID, &StaticDeclaration>, root: &mut Hi
             let ty = ty.clone();
 
             let runtime_fns = match col_ty {
-                CollectionType::Array(_) => array_runtime_functions(),
-                CollectionType::Dict(_, _) => dictionary_runtime_functions(),
+                CollectionType::Array(_) => array_intrinsics(),
+                CollectionType::Dict(_, _) => dictionary_intrinsics(),
                 CollectionType::String => todo!(),
             };
 
@@ -115,7 +115,7 @@ pub fn rewrite(declarations: &HashMap<TypeID, &StaticDeclaration>, root: &mut Hi
                 root,
                 &mut HirNode::generated_with_id(
                     root.id,
-                    HirNodeValue::RuntimeCall(runtime_fn.func, runtime_args),
+                    HirNodeValue::IntrinsicCall(runtime_fn.func, runtime_args),
                     fn_ty.returns.clone(),
                 ),
             );

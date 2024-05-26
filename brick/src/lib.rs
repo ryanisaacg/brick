@@ -12,7 +12,7 @@ use hir::HirModule;
 use interpreter::{Function, VM};
 pub use linear_ir::{
     expr_ty_to_physical, DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue,
-    LinearRuntimeFunction, PhysicalCollection, PhysicalPrimitive, PhysicalType, TypeLayoutValue,
+    PhysicalCollection, PhysicalPrimitive, PhysicalType, RuntimeFunction, TypeLayoutValue,
 };
 use linear_ir::{layout_types, linearize_function, LinearContext};
 use thiserror::Error;
@@ -22,11 +22,11 @@ pub use typecheck::{ExpressionType, StaticDeclaration};
 mod borrowck;
 mod hir;
 mod interpreter;
+mod intrinsics;
 mod linear_ir;
 mod multi_error;
 mod parser;
 mod provenance;
-mod runtime;
 mod tokenizer;
 mod typecheck;
 

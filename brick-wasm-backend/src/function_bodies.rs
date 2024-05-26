@@ -3,7 +3,7 @@ use std::{collections::HashMap, rc::Rc, sync::RwLock};
 use brick::{
     id::{FunctionID, RegisterID, TypeID, VariableID},
     ArithmeticOp, BinaryLogicalOp, ComparisonOp, DeclaredTypeLayout, LinearFunction, LinearNode,
-    LinearNodeValue, LinearRuntimeFunction, PhysicalCollection, PhysicalPrimitive, PhysicalType,
+    LinearNodeValue, PhysicalCollection, PhysicalPrimitive, PhysicalType, RuntimeFunction,
     TypeLayoutValue, UnaryLogicalOp,
 };
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
@@ -17,7 +17,7 @@ pub fn encode(
     function_return_types: &HashMap<FunctionID, Option<PhysicalType>>,
     stackptr_global_idx: u32,
     allocptr_global_idx: u32,
-    linear_function_to_id: &HashMap<LinearRuntimeFunction, u32>,
+    linear_function_to_id: &HashMap<RuntimeFunction, u32>,
     constant_data_start: i32,
     func: &LinearFunction,
 ) -> Function {
@@ -84,7 +84,7 @@ struct Context<'a> {
     allocptr_global_idx: u32,
     declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
     function_return_types: &'a HashMap<FunctionID, Option<PhysicalType>>,
-    linear_function_to_id: &'a HashMap<LinearRuntimeFunction, u32>,
+    linear_function_to_id: &'a HashMap<RuntimeFunction, u32>,
     parameter_starts: Vec<u32>,
     constant_data_start: i32,
     // Result

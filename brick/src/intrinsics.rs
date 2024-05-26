@@ -11,31 +11,31 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RuntimeFunction {
+pub enum IntrinsicFunction {
     ArrayLength,
     ArrayPush,
     DictionaryInsert,
     DictionaryContains,
 }
 
-pub struct RuntimeFunctionOnType {
-    pub func: RuntimeFunction,
+pub struct IntrinsicOnType {
+    pub func: IntrinsicFunction,
     pub decl: StaticDeclaration,
     pub ptr_ty: PointerKind,
 }
 
-static ARRAY_FUNCTIONS: OnceLock<HashMap<String, RuntimeFunctionOnType>> = OnceLock::new();
-static DICT_FUNCTIONS: OnceLock<HashMap<String, RuntimeFunctionOnType>> = OnceLock::new();
-static ALL_FUNCTIONS: OnceLock<RwLock<HashMap<RuntimeFunction, &RuntimeFunctionOnType>>> =
+static ARRAY_FUNCTIONS: OnceLock<HashMap<String, IntrinsicOnType>> = OnceLock::new();
+static DICT_FUNCTIONS: OnceLock<HashMap<String, IntrinsicOnType>> = OnceLock::new();
+static ALL_FUNCTIONS: OnceLock<RwLock<HashMap<IntrinsicFunction, &IntrinsicOnType>>> =
     OnceLock::new();
 
-pub fn add_runtime_functions(declarations: &mut HashMap<TypeID, &StaticDeclaration>) {
+pub fn add_intrinsics(declarations: &mut HashMap<TypeID, &StaticDeclaration>) {
     let array_functions = ARRAY_FUNCTIONS.get_or_init(|| {
         let mut map = HashMap::new();
         map.insert(
             "len".to_string(),
-            RuntimeFunctionOnType {
-                func: RuntimeFunction::ArrayLength,
+            IntrinsicOnType {
+                func: IntrinsicFunction::ArrayLength,
                 decl: StaticDeclaration::Func(FuncType {
                     id: TypeID::new(),
                     func_id: FunctionID::new(),
@@ -54,8 +54,8 @@ pub fn add_runtime_functions(declarations: &mut HashMap<TypeID, &StaticDeclarati
         );
         map.insert(
             "push".to_string(),
-            RuntimeFunctionOnType {
-                func: RuntimeFunction::ArrayPush,
+            IntrinsicOnType {
+                func: IntrinsicFunction::ArrayPush,
                 decl: StaticDeclaration::Func(FuncType {
                     id: TypeID::new(),
                     func_id: FunctionID::new(),
@@ -84,8 +84,8 @@ pub fn add_runtime_functions(declarations: &mut HashMap<TypeID, &StaticDeclarati
         let mut map = HashMap::new();
         map.insert(
             "contains_key".to_string(),
-            RuntimeFunctionOnType {
-                func: RuntimeFunction::DictionaryContains,
+            IntrinsicOnType {
+                func: IntrinsicFunction::DictionaryContains,
                 decl: StaticDeclaration::Func(FuncType {
                     id: TypeID::new(),
                     func_id: FunctionID::new(),
@@ -113,8 +113,8 @@ pub fn add_runtime_functions(declarations: &mut HashMap<TypeID, &StaticDeclarati
         );
         map.insert(
             "insert".to_string(),
-            RuntimeFunctionOnType {
-                func: RuntimeFunction::DictionaryInsert,
+            IntrinsicOnType {
+                func: IntrinsicFunction::DictionaryInsert,
                 decl: StaticDeclaration::Func(FuncType {
                     id: TypeID::new(),
                     func_id: FunctionID::new(),
@@ -149,22 +149,22 @@ pub fn add_runtime_functions(declarations: &mut HashMap<TypeID, &StaticDeclarati
     }
 }
 
-pub fn array_runtime_functions() -> &'static HashMap<String, RuntimeFunctionOnType> {
+pub fn array_intrinsics() -> &'static HashMap<String, IntrinsicOnType> {
     ARRAY_FUNCTIONS
         .get()
         .expect("add_runtime_functions must be called first")
 }
 
-pub fn dictionary_runtime_functions() -> &'static HashMap<String, RuntimeFunctionOnType> {
+pub fn dictionary_intrinsics() -> &'static HashMap<String, IntrinsicOnType> {
     DICT_FUNCTIONS
         .get()
         .expect("add_runtime_functions must be called first")
 }
 
-pub fn info_for_function(fn_id: &RuntimeFunction) -> &'static RuntimeFunctionOnType {
+pub fn info_for_function(fn_id: &IntrinsicFunction) -> &'static IntrinsicOnType {
     let all_functions = ALL_FUNCTIONS.get_or_init(|| {
-        let array_functions = array_runtime_functions();
-        let dict_functions = dictionary_runtime_functions();
+        let array_functions = array_intrinsics();
+        let dict_functions = dictionary_intrinsics();
         let combination: HashMap<_, _> = array_functions
             .iter()
             .chain(dict_functions.iter())

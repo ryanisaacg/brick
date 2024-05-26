@@ -6,8 +6,8 @@ use crate::{
     hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
     id::{FunctionID, RegisterID, TypeID, VariableID},
     linear_ir::{
-        DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, LinearRuntimeFunction,
-        PhysicalCollection, PhysicalPrimitive, PhysicalType, TypeLayoutValue, NULL_TAG_SIZE,
+        DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
+        PhysicalPrimitive, PhysicalType, RuntimeFunction, TypeLayoutValue, NULL_TAG_SIZE,
     },
 };
 
@@ -604,7 +604,7 @@ impl<'a> VM<'a> {
                 self.op_stack
                     .push(Value::Size(CONSTANT_DATA_START + offset));
             }
-            LinearNodeValue::RuntimeCall(LinearRuntimeFunction::StringConcat, args) => {
+            LinearNodeValue::RuntimeCall(RuntimeFunction::StringConcat, args) => {
                 self.evaluate_node(params, &args[0])?;
                 let Value::Size(a_ptr) = self.op_stack.pop().unwrap() else {
                     unreachable!()
@@ -633,7 +633,7 @@ impl<'a> VM<'a> {
                 self.op_stack.push(Value::Size(a_len + b_len));
                 self.op_stack.push(Value::Size(location));
             }
-            LinearNodeValue::RuntimeCall(LinearRuntimeFunction::Memcpy, args) => {
+            LinearNodeValue::RuntimeCall(RuntimeFunction::Memcpy, args) => {
                 self.evaluate_node(params, &args[0])?;
                 let Value::Size(dest) = self.op_stack.pop().unwrap() else {
                     unreachable!()

@@ -6,8 +6,8 @@ use crate::{
         HirNodeValue, UnaryLogicalOp,
     },
     id::{FunctionID, RegisterID, TypeID, VariableID},
+    intrinsics::IntrinsicFunction,
     provenance::SourceRange,
-    runtime::RuntimeFunction,
     typecheck::{
         shallow_dereference, CollectionType, ExpressionType, PrimitiveType, StaticDeclaration,
     },
@@ -247,10 +247,10 @@ impl LinearNode {
                 _ => None,
             },
             LinearNodeValue::RuntimeCall(func, _) => match func {
-                LinearRuntimeFunction::StringConcat => {
+                RuntimeFunction::StringConcat => {
                     Some(PhysicalType::Collection(PhysicalCollection::String))
                 }
-                LinearRuntimeFunction::Memcpy => None,
+                RuntimeFunction::Memcpy => None,
             },
             LinearNodeValue::Return(child) => {
                 child.as_ref().and_then(|child| child.ty(function_returns))
@@ -299,7 +299,7 @@ pub enum LinearNodeValue {
 
     // Control flow
     Call(Box<LinearNode>, Vec<LinearNode>),
-    RuntimeCall(LinearRuntimeFunction, Vec<LinearNode>),
+    RuntimeCall(RuntimeFunction, Vec<LinearNode>),
     Return(Option<Box<LinearNode>>),
     If(Box<LinearNode>, Vec<LinearNode>, Option<Vec<LinearNode>>),
     // TODO: labelled breaks?
@@ -352,9 +352,8 @@ pub enum LinearNodeValue {
     Debug(Box<LinearNode>),
 }
 
-// TODO: distinguish from src/runtime
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub enum LinearRuntimeFunction {
+pub enum RuntimeFunction {
     StringConcat,
     Memcpy,
 }
@@ -1029,7 +1028,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             lower_expression(ctx, *value),
             LinearNode::bool_value(true),
         ]),
-        HirNodeValue::RuntimeCall(RuntimeFunction::ArrayLength, mut args) => {
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::ArrayLength, mut args) => {
             let HirNodeValue::TakeShared(arr) = args.remove(0).value else {
                 unreachable!()
             };
@@ -1040,7 +1039,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             }
         }
-        HirNodeValue::RuntimeCall(RuntimeFunction::ArrayPush, mut args) => {
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::ArrayPush, mut args) => {
             let inserted = args.pop().unwrap();
             let HirNodeValue::TakeUnique(arr) = args.pop().unwrap().value else {
                 unreachable!()
@@ -1066,7 +1065,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 value: Box::new(inserted),
             }
         }
-        HirNodeValue::RuntimeCall(RuntimeFunction::DictionaryInsert, mut args) => {
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::DictionaryInsert, mut args) => {
             let value = args.pop().unwrap();
             let key = args.pop().unwrap();
             let HirNodeValue::TakeUnique(dict) = args.pop().unwrap().value else {
@@ -1162,7 +1161,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 LinearNode::kill_register(ptr),
             ])
         }
-        HirNodeValue::RuntimeCall(RuntimeFunction::DictionaryContains, mut args) => {
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::DictionaryContains, mut args) => {
             let key = args.pop().unwrap();
             let HirNodeValue::TakeShared(dict) = args.pop().unwrap().value else {
                 unreachable!()
@@ -1217,7 +1216,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         HirNodeValue::StringConcat(left, right) => {
             let left = lower_expression(ctx, *left);
             let right = lower_expression(ctx, *right);
-            LinearNodeValue::RuntimeCall(LinearRuntimeFunction::StringConcat, vec![left, right])
+            LinearNodeValue::RuntimeCall(RuntimeFunction::StringConcat, vec![left, right])
         }
         HirNodeValue::Switch { value, cases } => LinearNodeValue::Switch {
             value: Box::new(lower_expression(ctx, *value)),
@@ -1310,7 +1309,7 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
         HirNodeValue::MakeNullable(_) => todo!(),
         HirNodeValue::NullableTraverse(_, _) => todo!(),
         HirNodeValue::Yield(_) => todo!(),
-        HirNodeValue::RuntimeCall(_, _) => todo!(),
+        HirNodeValue::IntrinsicCall(_, _) => todo!(),
         HirNodeValue::GeneratorSuspend(_, _) => todo!(),
         HirNodeValue::GotoLabel(_) => todo!(),
         HirNodeValue::GeneratorResume(_) => todo!(),
@@ -1515,7 +1514,7 @@ fn array_alloc_space_to_push(
                 ),
                 // copy old buffer to new buffer
                 LinearNode::new(LinearNodeValue::RuntimeCall(
-                    LinearRuntimeFunction::Memcpy,
+                    RuntimeFunction::Memcpy,
                     vec![
                         LinearNode::read_register(buffer_register),
                         LinearNode::read_memory(
