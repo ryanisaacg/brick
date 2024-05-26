@@ -321,6 +321,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
         }
         LinearNodeValue::RuntimeCall(
             func @ (RuntimeFunction::Alloc
+            | RuntimeFunction::Realloc
             | RuntimeFunction::Dealloc
             | RuntimeFunction::StringConcat),
             args,

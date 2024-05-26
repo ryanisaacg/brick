@@ -1,7 +1,8 @@
 use std::{collections::HashMap, fmt::Debug};
 
 use brick_runtime::{
-    brick_memcpy, brick_runtime_alloc, brick_runtime_dealloc, brick_string_concat,
+    brick_memcpy, brick_runtime_alloc, brick_runtime_dealloc, brick_runtime_realloc,
+    brick_string_concat,
 };
 
 use crate::{
@@ -649,6 +650,26 @@ impl<'a> VM<'a> {
                 };
                 let allocation = unsafe {
                     let new_ptr = brick_runtime_alloc(self.allocator(), amount);
+
+                    new_ptr.offset_from(self.memory.as_mut_ptr()) as usize
+                };
+                self.op_stack.push(Value::Size(allocation));
+            }
+            LinearNodeValue::RuntimeCall(RuntimeFunction::Realloc, args) => {
+                self.evaluate_node(params, &args[0])?;
+                let Some(Value::Size(ptr)) = self.op_stack.pop() else {
+                    unreachable!()
+                };
+                self.evaluate_node(params, &args[1])?;
+                let Some(Value::Size(new_size)) = self.op_stack.pop() else {
+                    unreachable!()
+                };
+                let allocation = unsafe {
+                    let new_ptr = brick_runtime_realloc(
+                        self.allocator(),
+                        self.memory.as_mut_ptr().add(ptr),
+                        new_size,
+                    );
 
                     new_ptr.offset_from(self.memory.as_mut_ptr()) as usize
                 };

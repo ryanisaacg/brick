@@ -27,6 +27,12 @@ pub fn add_runtime_imports(
             vec![ValType::I32],
         ),
         (
+            RuntimeFunction::Realloc,
+            "brick_runtime_realloc",
+            vec![ValType::I32, ValType::I32, ValType::I32],
+            vec![ValType::I32],
+        ),
+        (
             RuntimeFunction::Dealloc,
             "brick_runtime_dealloc",
             vec![ValType::I32, ValType::I32],

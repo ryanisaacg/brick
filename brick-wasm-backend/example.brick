@@ -1,18 +1,2 @@
-// Int | 123456
-
-// Intentionally create an out-of-memory error, unless
-// arrays are correctly freed
-
-fn create_temp_array(): i32 {
-    let arr = list[0; 1024];
-    arr[5]
-}
-
-let times = 0;
-while times < 8 {
-    let _ = create_temp_array();
-    times += 1;
-}
-
-
-123456
+let array = list[0];
+array.len()

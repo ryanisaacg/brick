@@ -50,6 +50,21 @@ fn data() {
             )?;
             linker.func_wrap(
                 "brick-runtime",
+                "brick_runtime_realloc",
+                |mut caller: Caller<'_, ()>, allocator: i32, ptr: i32, size: i32| {
+                    let mem = mem_ptr(&mut caller);
+                    unsafe {
+                        let allocated_block = brick_runtime::brick_runtime_realloc(
+                            mem.add(allocator as usize),
+                            mem.add(ptr as usize),
+                            size as usize,
+                        );
+                        (allocated_block as *mut u8).offset_from(mem) as i32
+                    }
+                },
+            )?;
+            linker.func_wrap(
+                "brick-runtime",
                 "brick_runtime_dealloc",
                 |mut caller: Caller<'_, ()>, allocator: i32, region: i32| {
                     let mem = mem_ptr(&mut caller);

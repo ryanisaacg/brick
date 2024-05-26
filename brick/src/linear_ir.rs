@@ -260,7 +260,7 @@ impl LinearNode {
                     Some(PhysicalType::Collection(PhysicalCollection::String))
                 }
                 RuntimeFunction::Memcpy | RuntimeFunction::Dealloc => None,
-                RuntimeFunction::Alloc => {
+                RuntimeFunction::Realloc | RuntimeFunction::Alloc => {
                     Some(PhysicalType::Primitive(PhysicalPrimitive::PointerSize))
                 }
             },
@@ -366,6 +366,8 @@ pub enum LinearNodeValue {
 pub enum RuntimeFunction {
     // (alloc_size) -> ptr
     Alloc,
+    // (ptr, alloc_size) -> ptr
+    Realloc,
     // (ptr) -> void
     Dealloc,
     // (str, str) -> str
@@ -1496,6 +1498,14 @@ fn array_alloc_space_to_push(
     LinearNodeValue::Sequence(vec![
         LinearNode::write_register(arr_ptr, array_location),
         LinearNode::write_register(
+            buffer_register,
+            LinearNode::read_memory(
+                LinearNode::read_register(arr_ptr),
+                0,
+                PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+            ),
+        ),
+        LinearNode::write_register(
             length_register,
             LinearNode::read_memory(
                 LinearNode::read_register(arr_ptr),
@@ -1540,29 +1550,24 @@ fn array_alloc_space_to_push(
                 // allocate new buffer
                 LinearNode::write_register(
                     buffer_register,
-                    LinearNode::heap_alloc_var(LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Multiply,
-                        LinearNode::read_register(new_capacity_register),
-                        LinearNode::size(elem_size),
-                    )),
+                    LinearNode::call_runtime(
+                        RuntimeFunction::Realloc,
+                        vec![
+                            LinearNode::read_register(buffer_register),
+                            LinearNode::ptr_arithmetic(
+                                ArithmeticOp::Multiply,
+                                LinearNode::read_register(new_capacity_register),
+                                LinearNode::size(elem_size),
+                            ),
+                        ],
+                    ),
                 ),
-                // copy old buffer to new buffer
-                LinearNode::new(LinearNodeValue::RuntimeCall(
-                    RuntimeFunction::Memcpy,
-                    vec![
-                        LinearNode::read_register(buffer_register),
-                        LinearNode::read_memory(
-                            LinearNode::read_register(arr_ptr),
-                            array_offset,
-                            PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-                        ),
-                        LinearNode::ptr_arithmetic(
-                            ArithmeticOp::Multiply,
-                            LinearNode::read_register(length_register),
-                            LinearNode::size(elem_size),
-                        ),
-                    ],
-                )),
+                LinearNode::write_memory(
+                    LinearNode::read_register(arr_ptr),
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                    LinearNode::read_register(buffer_register),
+                ),
                 // write new capacity
                 LinearNode::write_memory(
                     LinearNode::read_register(arr_ptr),
@@ -1588,11 +1593,7 @@ fn array_alloc_space_to_push(
         // Return pointer to now-writable location
         LinearNode::ptr_arithmetic(
             ArithmeticOp::Add,
-            LinearNode::read_memory(
-                LinearNode::read_register(arr_ptr),
-                array_offset,
-                PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-            ),
+            LinearNode::read_register(buffer_register),
             LinearNode::ptr_arithmetic(
                 ArithmeticOp::Multiply,
                 LinearNode::read_register(length_register),

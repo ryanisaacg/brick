@@ -32,10 +32,39 @@ pub unsafe extern "C" fn brick_runtime_alloc(allocator: *mut u8, alloc_size: usi
         panic!("out of memory");
     }
 
-    let layout_ptr = allocation as *mut Layout;
-    *layout_ptr.as_mut().unwrap() = layout;
+    save_layout_to_region(allocation, layout);
 
     allocation.add(LAYOUT_SIZE)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn brick_runtime_realloc(
+    allocator: *mut u8,
+    region: *mut u8,
+    new_size: usize,
+) -> *mut u8 {
+    let heap = (allocator as *mut Heap).as_ref().unwrap();
+    let region = region.offset(-(LAYOUT_SIZE as isize));
+    let layout_ptr = region as *mut Layout;
+    let layout = *layout_ptr.as_ref().unwrap();
+    let new_size = new_size + LAYOUT_SIZE;
+
+    let allocation = heap.realloc(region, layout, new_size);
+    if allocation as usize == 0 {
+        panic!("out of memory");
+    }
+
+    save_layout_to_region(
+        allocation,
+        Layout::from_size_align(new_size, layout.align()).unwrap(),
+    );
+
+    allocation.add(LAYOUT_SIZE)
+}
+
+unsafe fn save_layout_to_region(region: *mut u8, layout: Layout) {
+    let layout_ptr = region as *mut Layout;
+    *layout_ptr.as_mut().unwrap() = layout;
 }
 
 #[no_mangle]
