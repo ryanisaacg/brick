@@ -5,7 +5,7 @@ use crate::{
         ArithmeticOp, BinaryLogicalOp, ComparisonOp, GeneratorProperties, HirFunction, HirNode,
         HirNodeValue, UnaryLogicalOp,
     },
-    id::{FunctionID, RegisterID, TypeID, VariableID},
+    id::{AnyID, FunctionID, RegisterID, TypeID, VariableID},
     intrinsics::IntrinsicFunction,
     provenance::SourceRange,
     typecheck::{
@@ -247,14 +247,9 @@ impl LinearNode {
             LinearNodeValue::Parameter(ty, _) | LinearNodeValue::ReadMemory { ty, .. } => {
                 Some(ty.clone())
             }
-            LinearNodeValue::Call(lhs, _) => match &lhs.value {
-                // TODO: fail if not found
-                LinearNodeValue::FunctionID(func) => {
-                    function_returns.get(func).and_then(|x| x.clone())
-                }
-                // TODO: other non-function ID calls
-                _ => None,
-            },
+            LinearNodeValue::Call(func, _) => function_returns.get(func).and_then(|x| x.clone()),
+            // TODO: other non-function ID calls
+            LinearNodeValue::IndirectCall(_, _) => None,
             LinearNodeValue::RuntimeCall(func, _) => match func {
                 RuntimeFunction::StringConcat => {
                     Some(PhysicalType::Collection(PhysicalCollection::String))
@@ -308,7 +303,8 @@ pub enum LinearNodeValue {
     ConstantDataAddress(usize),
 
     // Control flow
-    Call(Box<LinearNode>, Vec<LinearNode>),
+    Call(FunctionID, Vec<LinearNode>),
+    IndirectCall(Box<LinearNode>, Vec<LinearNode>),
     RuntimeCall(RuntimeFunction, Vec<LinearNode>),
     Return(Option<Box<LinearNode>>),
     If(Box<LinearNode>, Vec<LinearNode>, Option<Vec<LinearNode>>),
@@ -409,7 +405,7 @@ impl LinearNode {
                 callback(a);
                 callback(b);
             }
-            LinearNodeValue::Call(func, args) => {
+            LinearNodeValue::IndirectCall(func, args) => {
                 callback(func);
                 args.iter_mut().for_each(callback);
             }
@@ -422,7 +418,8 @@ impl LinearNode {
                     else_block.iter_mut().for_each(callback);
                 }
             }
-            LinearNodeValue::RuntimeCall(_, children)
+            LinearNodeValue::Call(_, children)
+            | LinearNodeValue::RuntimeCall(_, children)
             | LinearNodeValue::Loop(children)
             | LinearNodeValue::Sequence(children) => {
                 children.iter_mut().for_each(callback);
@@ -557,12 +554,15 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 .into_iter()
                 .map(|param| lower_expression(ctx, param))
                 .collect();
-            let lhs = if let HirNodeValue::VariableReference(fn_id) = lhs.value {
-                LinearNode::new(LinearNodeValue::FunctionID(fn_id.as_fn()))
-            } else {
-                lower_expression(ctx, *lhs)
-            };
-            LinearNodeValue::Call(Box::new(lhs), params)
+            match &lhs.value {
+                HirNodeValue::VariableReference(AnyID::Function(fn_id)) => {
+                    LinearNodeValue::Call(*fn_id, params)
+                }
+                _ => {
+                    let lhs = lower_expression(ctx, *lhs);
+                    LinearNodeValue::IndirectCall(Box::new(lhs), params)
+                }
+            }
         }
         HirNodeValue::Access(lhs, rhs) => {
             if let Some(variants) = lhs
@@ -923,7 +923,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 .map(|param| lower_expression(ctx, param))
                 .collect();
 
-            LinearNodeValue::Call(
+            LinearNodeValue::IndirectCall(
                 Box::new(LinearNode::new(LinearNodeValue::ReadMemory {
                     location: Box::new(table),
                     offset,

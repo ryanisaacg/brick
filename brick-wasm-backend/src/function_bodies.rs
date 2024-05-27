@@ -282,42 +282,18 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
                         }),
                     )),
                 );
-                //write_memory(ctx, ty, location_var, *offset as u64);
             }
         }
-        LinearNodeValue::Call(lhs, args) => {
+        LinearNodeValue::Call(fn_id, args) => {
             for arg in args.iter() {
                 encode_node(ctx, arg, None);
             }
-            match &lhs.value {
-                LinearNodeValue::FunctionID(fn_id) => {
-                    let fn_idx = ctx.function_id_to_idx[fn_id];
-                    ctx.instructions.push(Instruction::Call(fn_idx));
-                }
-                LinearNodeValue::VariableLocation(_var) => {
-                    // TODO: dynamic function call
-                }
-                LinearNodeValue::ReadMemory { .. } => {
-                    // TODO: handle generator functions a different way
-                }
-                other => unreachable!("{:?}", other),
-            }
-            if let Some(callback) = callbacks {
-                if let Some(ty) = &node_ty {
-                    // Reverse results of function call and handle callback
-                    let mut locals = Vec::new();
-                    walk_vals_write_order(ctx.declarations, ty, 0, &mut |val, _| {
-                        let local = ctx.alloc_local(val);
-                        ctx.instructions.push(Instruction::LocalSet(local));
-                        locals.push((val, local));
-                    });
-                    for (val, local) in locals.iter().rev().copied() {
-                        callback.call_before(ctx, val);
-                        ctx.instructions.push(Instruction::LocalGet(local));
-                        callback.call_after(ctx, val);
-                    }
-                }
-            }
+            let fn_idx = ctx.function_id_to_idx[fn_id];
+            ctx.instructions.push(Instruction::Call(fn_idx));
+            handle_function_call_results(ctx, callbacks, node_ty.as_ref());
+        }
+        LinearNodeValue::IndirectCall(_lhs, _args) => {
+            // not yet implemented
         }
         LinearNodeValue::RuntimeCall(
             func @ (RuntimeFunction::Alloc
@@ -333,6 +309,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
             }
             let fn_id = ctx.linear_function_to_id.get(func).unwrap();
             ctx.instructions.push(Instruction::Call(*fn_id));
+            handle_function_call_results(ctx, callbacks, node_ty.as_ref());
         }
         LinearNodeValue::RuntimeCall(func, args) => {
             for arg in args.iter() {
@@ -342,6 +319,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
             if let Some(fn_id) = fn_id {
                 ctx.instructions.push(Instruction::Call(*fn_id));
             }
+            handle_function_call_results(ctx, callbacks, node_ty.as_ref());
         }
         LinearNodeValue::Return(value) => {
             if let Some(value) = value {
@@ -854,6 +832,29 @@ fn read_primitive(ctx: &mut Context<'_>, ty: ValType, offset: u64) {
         ValType::F64 => Instruction::F64Load(mem),
         ValType::V128 | ValType::Ref(_) => unreachable!(),
     });
+}
+
+/// Reverse results of function call and handle callback
+fn handle_function_call_results(
+    ctx: &mut Context<'_>,
+    callbacks: Option<&Callbacks<'_>>,
+    ty: Option<&PhysicalType>,
+) {
+    if let Some(callback) = callbacks {
+        if let Some(ty) = ty {
+            let mut locals = Vec::new();
+            walk_vals_write_order(ctx.declarations, ty, 0, &mut |val, _| {
+                let local = ctx.alloc_local(val);
+                ctx.instructions.push(Instruction::LocalSet(local));
+                locals.push((val, local));
+            });
+            for (val, local) in locals.iter().rev().copied() {
+                callback.call_before(ctx, val);
+                ctx.instructions.push(Instruction::LocalGet(local));
+                callback.call_after(ctx, val);
+            }
+        }
+    }
 }
 
 pub fn walk_vals_write_order(

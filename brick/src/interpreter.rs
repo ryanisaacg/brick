@@ -302,9 +302,8 @@ impl<'a> VM<'a> {
                     ty,
                 );
             }
-            LinearNodeValue::Call(lhs, parameters) => {
+            LinearNodeValue::IndirectCall(lhs, parameters) => {
                 self.evaluate_node(params, lhs)?;
-                // TODO: should I figure out
                 let Some(Value::FunctionID(fn_id)) = self.op_stack.pop() else {
                     unreachable!()
                 };
@@ -316,6 +315,16 @@ impl<'a> VM<'a> {
                     .collect();
 
                 self.evaluate_function(&mut parameters[..], fn_id)?;
+            }
+            LinearNodeValue::Call(fn_id, parameters) => {
+                for param in parameters.iter().rev() {
+                    self.evaluate_node(params, param)?;
+                }
+                let mut parameters: Vec<_> = (0..parameters.len())
+                    .map(|_| self.op_stack.pop().unwrap())
+                    .collect();
+
+                self.evaluate_function(&mut parameters[..], *fn_id)?;
             }
             LinearNodeValue::Return(expr) => {
                 if let Some(expr) = expr {
