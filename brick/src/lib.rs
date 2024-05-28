@@ -1,7 +1,7 @@
 #![allow(clippy::result_large_err)]
 
-use multi_error::merge_result_list;
-use rayon::prelude::*;
+pub use declaration_context::{DeclarationContext, TypeID};
+use multi_error::merge_results;
 use std::{
     collections::{HashMap, HashSet},
     fs, io,
@@ -16,13 +16,13 @@ pub use linear_ir::{
 };
 use linear_ir::{layout_types, linearize_function, LinearContext};
 use thiserror::Error;
-use typecheck::{resolve::resolve_module, typecheck};
-pub use typecheck::{ExpressionType, StaticDeclaration};
+use typecheck::typecheck;
+pub use typecheck::{ExpressionType, TypeDeclaration};
 
 mod borrowck;
+mod declaration_context;
 mod hir;
 mod interpreter;
-mod intrinsics;
 mod linear_ir;
 mod multi_error;
 mod parser;
@@ -33,11 +33,7 @@ mod typecheck;
 use parser::{AstNode, AstNodeValue, ParseError};
 use typed_arena::Arena;
 
-use crate::{
-    hir::lower_module,
-    id::TypeID,
-    typecheck::{ModuleType, TypecheckError},
-};
+use crate::{hir::lower_module, typecheck::TypecheckError};
 
 pub mod id;
 pub use hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirNodeValue, UnaryLogicalOp};
@@ -93,7 +89,7 @@ pub fn interpret_code(
         statements_ty: _,
         functions,
         declarations,
-        ty_declarations,
+        type_layouts: ty_declarations,
         constant_data,
     } = lower_code(
         "main",
@@ -107,20 +103,11 @@ pub fn interpret_code(
         .map(|func| (func.id, Function::Ir(func)))
         .collect();
 
-    let module = StaticDeclaration::Module(ModuleType {
-        id: TypeID::new(),
-        exports: declarations,
-    });
-    module.visit(&mut |decl| {
-        if let StaticDeclaration::Module(ModuleType { exports, .. }) = decl {
-            for (name, decl) in exports.iter() {
-                if let Some(implementation) = bindings.remove(name) {
-                    let id = decl.unwrap_fn_id();
-                    functions.insert(id, Function::Extern(implementation));
-                }
-            }
+    for (name, fn_id) in declarations.extern_functions.iter() {
+        if let Some(implementation) = bindings.remove(name) {
+            functions.insert(*fn_id, Function::Extern(implementation));
         }
-    });
+    }
 
     let vm = VM::new(ty_declarations, &functions, constant_data);
     match vm.evaluate_top_level_statements(&statements[..]) {
@@ -133,8 +120,8 @@ pub struct LowerResults {
     pub statements: Vec<LinearNode>,
     pub statements_ty: Option<PhysicalType>,
     pub functions: Vec<LinearFunction>,
-    pub declarations: HashMap<String, StaticDeclaration>,
-    pub ty_declarations: HashMap<TypeID, DeclaredTypeLayout>,
+    pub declarations: DeclarationContext,
+    pub type_layouts: HashMap<TypeID, DeclaredTypeLayout>,
     pub constant_data: Vec<u8>,
 }
 
@@ -150,8 +137,13 @@ pub fn lower_code(
         declarations,
     } = typecheck_module(module_name, source_name, contents)?;
 
-    let mut ty_declarations = HashMap::new();
-    layout_types(&declarations, &mut ty_declarations, byte_size, pointer_size);
+    let mut type_layouts = HashMap::new();
+    layout_types(
+        &declarations.id_to_decl,
+        &mut type_layouts,
+        byte_size,
+        pointer_size,
+    );
 
     let mut statements = Vec::new();
     let mut functions = Vec::new();
@@ -165,7 +157,7 @@ pub fn lower_code(
         for function in module.functions {
             functions.push(linearize_function(
                 &mut constant_data,
-                &ty_declarations,
+                &type_layouts,
                 function,
                 byte_size,
                 pointer_size,
@@ -177,27 +169,22 @@ pub fn lower_code(
         ExpressionType::Void | ExpressionType::Unreachable => None,
         return_ty => Some(expr_ty_to_physical(return_ty)),
     });
-    let statements = LinearContext::new(
-        &ty_declarations,
-        &mut constant_data,
-        byte_size,
-        pointer_size,
-    )
-    .linearize_nodes(statements);
+    let statements = LinearContext::new(&type_layouts, &mut constant_data, byte_size, pointer_size)
+        .linearize_nodes(statements);
 
     Ok(LowerResults {
         statements,
         statements_ty,
         functions,
         declarations,
-        ty_declarations,
+        type_layouts,
         constant_data,
     })
 }
 
 pub struct CompilationResults {
     pub modules: HashMap<String, HirModule>,
-    pub declarations: HashMap<String, StaticDeclaration>,
+    pub declarations: DeclarationContext,
 }
 
 pub fn check_types(source: &str) -> Result<CompilationResults, CompileError> {
@@ -212,22 +199,16 @@ pub fn typecheck_module(
     use rayon::prelude::*;
 
     let parse_arena = Arena::new();
-    let modules = collect_modules(&parse_arena, module_name.to_string(), source_name, contents)?;
+    let modules = parse_files(&parse_arena, module_name.to_string(), source_name, contents)?;
 
     let declarations = collect_declarations(&modules)?;
-    let mut id_decls = HashMap::new();
-    for decl in declarations.values() {
-        decl.visit(&mut |decl: &StaticDeclaration| {
-            id_decls.insert(decl.id(), decl);
-        });
-    }
 
     let module_results = modules
         .par_iter()
         .map(
             |(name, contents)| -> Result<(String, HirModule), TypecheckError> {
                 let types = typecheck(contents.iter(), name, &declarations)?;
-                let ir = lower_module(types, &id_decls);
+                let ir = lower_module(types, &declarations);
                 Ok((name.clone(), ir))
             },
         )
@@ -247,7 +228,7 @@ pub fn typecheck_module(
     for module in modules.values_mut() {
         multi_error::merge_results(
             &mut lifetime_errors,
-            borrowck::borrow_check(module, &id_decls),
+            borrowck::borrow_check(module, &declarations.id_to_decl),
         );
     }
     lifetime_errors?;
@@ -262,41 +243,31 @@ pub fn typecheck_file(
     module_name: &str,
     source_name: &'static str,
     contents: String,
-) -> Result<(HirModule, HashMap<String, StaticDeclaration>), CompileError> {
+) -> Result<(HirModule, DeclarationContext), CompileError> {
     let parse_arena = Arena::new();
-    let modules = collect_modules(&parse_arena, module_name.to_string(), source_name, contents)?;
+    let modules = parse_files(&parse_arena, module_name.to_string(), source_name, contents)?;
 
     let declarations = collect_declarations(&modules)?;
 
-    let mut id_decls = HashMap::new();
-    for decl in declarations.values() {
-        decl.visit(&mut |decl: &StaticDeclaration| {
-            id_decls.insert(decl.id(), decl);
-        });
-    }
-
     let parsed_module = &modules[module_name];
     let types = typecheck(parsed_module.iter(), module_name, &declarations)?;
-    let ir = lower_module(types, &id_decls);
+    let ir = lower_module(types, &declarations);
 
     Ok((ir, declarations))
 }
 
 fn collect_declarations(
     modules: &HashMap<String, Vec<AstNode>>,
-) -> Result<HashMap<String, StaticDeclaration>, TypecheckError> {
-    let results: Vec<_> = modules
-        .par_iter()
-        .map(|(name, module)| {
-            let name = name.clone();
-            let module = StaticDeclaration::Module(ModuleType {
-                id: TypeID::new(),
-                exports: resolve_module(&module[..])?,
-            });
-            Ok((name, module))
-        })
-        .collect();
-    merge_result_list(results.into_iter())
+) -> Result<DeclarationContext, TypecheckError> {
+    let mut ctx = DeclarationContext::new();
+    let mut result = Ok(());
+    for (name, source) in modules.iter() {
+        let name = name.clone();
+        merge_results(&mut result, ctx.insert_file(name.leak(), source));
+    }
+    result?;
+    ctx.propagate_viral_types();
+    Ok(ctx)
 }
 
 struct ParseQueueEntry {
@@ -305,7 +276,7 @@ struct ParseQueueEntry {
     contents: String,
 }
 
-fn collect_modules<'a>(
+fn parse_files<'a>(
     arena: &'a Arena<AstNode<'a>>,
     module_name: String,
     source_name: &'static str,

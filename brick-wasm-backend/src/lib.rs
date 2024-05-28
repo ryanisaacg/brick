@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use brick::{
-    expr_ty_to_physical, id::FunctionID, lower_code, CompileError, ExpressionType, LinearFunction,
-    LowerResults, StaticDeclaration,
+    expr_ty_to_physical, lower_code, CompileError, ExpressionType, LinearFunction, LowerResults,
 };
 use function_bodies::walk_vals_write_order;
 use wasm_encoder::{
@@ -41,7 +40,7 @@ pub fn compile(
         statements_ty,
         mut functions,
         declarations,
-        ty_declarations,
+        type_layouts,
         constant_data,
     } = lower_code(
         module_name,
@@ -52,32 +51,25 @@ pub fn compile(
     )?;
 
     let mut function_return_types = HashMap::new();
-    for decl in declarations.values() {
-        decl.visit(&mut |decl| {
-            let StaticDeclaration::Func(func) = decl else {
-                return;
-            };
-            function_return_types.insert(
-                func.func_id,
-                if func.returns == ExpressionType::Void
-                    || func.returns == ExpressionType::Unreachable
-                {
-                    None
-                } else {
-                    Some(expr_ty_to_physical(&func.returns))
-                },
-            );
-        })
+    for func in declarations.id_to_func.values() {
+        function_return_types.insert(
+            func.id,
+            if func.returns == ExpressionType::Void || func.returns == ExpressionType::Unreachable {
+                None
+            } else {
+                Some(expr_ty_to_physical(&func.returns))
+            },
+        );
     }
 
     let mut start_results = Vec::new();
     if let Some(return_ty) = &statements_ty {
-        walk_vals_write_order(&ty_declarations, return_ty, 0, &mut |p, _| {
+        walk_vals_write_order(&type_layouts, return_ty, 0, &mut |p, _| {
             start_results.push(p)
         });
     }
     let main = LinearFunction {
-        id: FunctionID::new(),
+        id: declarations.intrinsic_module.new_func_id(),
         body: statements,
         params: Vec::new(),
         returns: statements_ty,
@@ -134,7 +126,7 @@ pub fn compile(
     let main_index = type_index;
     for function in functions.iter() {
         function_headers::encode(
-            &ty_declarations,
+            &type_layouts,
             type_index,
             function,
             &mut ty_section,
@@ -146,7 +138,7 @@ pub fn compile(
     for function in functions.iter() {
         codes.function(&function_bodies::encode(
             &function_id_to_idx,
-            &ty_declarations,
+            &type_layouts,
             &function_return_types,
             stack_pointer,
             alloc_pointer,

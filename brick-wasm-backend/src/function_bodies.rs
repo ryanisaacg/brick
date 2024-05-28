@@ -1,9 +1,9 @@
 use std::{collections::HashMap, rc::Rc, sync::RwLock};
 
 use brick::{
-    id::{FunctionID, RegisterID, TypeID, VariableID},
+    id::{FunctionID, RegisterID, VariableID},
     ArithmeticOp, BinaryLogicalOp, ComparisonOp, DeclaredTypeLayout, LinearFunction, LinearNode,
-    LinearNodeValue, PhysicalCollection, PhysicalPrimitive, PhysicalType, RuntimeFunction,
+    LinearNodeValue, PhysicalCollection, PhysicalPrimitive, PhysicalType, RuntimeFunction, TypeID,
     TypeLayoutValue, UnaryLogicalOp,
 };
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};

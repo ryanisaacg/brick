@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
 use crate::{
-    id::{AnyID, FunctionID, NodeID, TypeID, VariableID},
-    intrinsics::{info_for_function, IntrinsicFunction},
+    declaration_context::{IntrinsicFunction, TypeID},
+    id::{AnyID, FunctionID, NodeID, VariableID},
     parser::AstNode,
     provenance::SourceRange,
     typecheck::{
-        find_func, is_assignable_to, CollectionType, ExpressionType, PrimitiveType,
-        StaticDeclaration, TypecheckedFile,
+        is_assignable_to, CollectionType, ExpressionType, PrimitiveType, TypeDeclaration,
+        TypecheckedFile,
     },
+    DeclarationContext,
 };
 
 mod auto_deref_dot;
@@ -22,10 +23,7 @@ mod simplify_sequence_expressions;
 mod unions;
 mod widen_null;
 
-pub fn lower_module<'ast>(
-    module: TypecheckedFile<'ast>,
-    declarations: &HashMap<TypeID, &'ast StaticDeclaration>,
-) -> HirModule {
+pub fn lower_module(module: TypecheckedFile<'_>, declarations: &DeclarationContext) -> HirModule {
     let mut module = lower::lower_module(module, declarations);
 
     // Important that this comes before ANY pass that uses the declarations
@@ -182,7 +180,7 @@ impl HirNode {
     // TODO: could use a better name
     pub fn walk_expected_types_for_children(
         &self,
-        declarations: &HashMap<TypeID, &StaticDeclaration>,
+        declarations: &DeclarationContext,
         mut callback: impl FnMut(&ExpressionType, &HirNode),
     ) {
         self.children_impl(Some(declarations), |ty, node| {
@@ -194,7 +192,7 @@ impl HirNode {
 
     pub fn walk_expected_types_for_children_mut(
         &mut self,
-        declarations: &HashMap<TypeID, &StaticDeclaration>,
+        declarations: &DeclarationContext,
         mut callback: impl FnMut(&ExpressionType, &mut HirNode),
     ) {
         self.children_mut_impl(Some(declarations), |ty, node| {
@@ -206,7 +204,7 @@ impl HirNode {
 
     fn children_impl<'a>(
         &'a self,
-        declarations: Option<&HashMap<TypeID, &StaticDeclaration>>,
+        declarations: Option<&DeclarationContext>,
         mut callback: impl FnMut(Option<&ExpressionType>, &'a HirNode),
     ) {
         let callback = &mut callback;
@@ -224,7 +222,7 @@ impl HirNode {
             }
             HirNodeValue::UnionLiteral(ty, variant, child) => {
                 let variant_ty = declarations.and_then(|declarations| {
-                    let StaticDeclaration::Union(ty) = declarations[ty as &TypeID] else {
+                    let TypeDeclaration::Union(ty) = &declarations.id_to_decl[ty] else {
                         unreachable!()
                     };
                     ty.variants[variant as &String].as_ref()
@@ -264,7 +262,7 @@ impl HirNode {
             HirNodeValue::VtableCall(vtable, fn_id, args) => {
                 callback(None, vtable);
                 let params = declarations.map(|declarations| {
-                    let func = find_func(declarations, *fn_id).unwrap();
+                    let func = &declarations.id_to_func[fn_id];
                     &func.params
                 });
                 for (i, arg) in args.iter().enumerate() {
@@ -273,14 +271,10 @@ impl HirNode {
             }
             HirNodeValue::Call(lhs, args) => {
                 let params = declarations.map(|declarations| {
-                    let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id)) =
-                        &lhs.ty
-                    else {
+                    let ExpressionType::ReferenceToFunction(id) = &lhs.ty else {
                         unreachable!()
                     };
-                    let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
-                        unreachable!()
-                    };
+                    let func = &declarations.id_to_func[id];
                     &func.params
                 });
                 for (i, arg) in args.iter().enumerate() {
@@ -289,12 +283,8 @@ impl HirNode {
                 callback(None, lhs);
             }
             HirNodeValue::IntrinsicCall(runtime_fn, args) => {
-                let func = info_for_function(runtime_fn).map(|info| {
-                    let StaticDeclaration::Func(func) = &info.decl else {
-                        unreachable!()
-                    };
-                    func
-                });
+                let func =
+                    declarations.map(|decls| &decls.id_to_func[&decls.intrinsic_to_id[runtime_fn]]);
                 for (i, arg) in args.iter().enumerate() {
                     callback(func.map(|func| &func.params[i]), arg);
                 }
@@ -330,7 +320,7 @@ impl HirNode {
             }
             HirNodeValue::StructLiteral(ty_id, fields) => {
                 let ty = declarations.map(|declarations| {
-                    let Some(StaticDeclaration::Struct(ty)) = declarations.get(ty_id) else {
+                    let TypeDeclaration::Struct(ty) = &declarations.id_to_decl[ty_id] else {
                         unreachable!();
                     };
                     ty
@@ -417,7 +407,7 @@ impl HirNode {
 
     fn children_mut_impl<'a>(
         &'a mut self,
-        declarations: Option<&HashMap<TypeID, &StaticDeclaration>>,
+        declarations: Option<&DeclarationContext>,
         mut callback: impl FnMut(Option<&ExpressionType>, &'a mut HirNode),
     ) {
         let callback = &mut callback;
@@ -435,7 +425,7 @@ impl HirNode {
             }
             HirNodeValue::UnionLiteral(ty, variant, child) => {
                 let variant_ty = declarations.and_then(|declarations| {
-                    let StaticDeclaration::Union(ty) = declarations[ty as &TypeID] else {
+                    let TypeDeclaration::Union(ty) = &declarations.id_to_decl[ty as &TypeID] else {
                         unreachable!()
                     };
                     ty.variants[variant as &String].as_ref()
@@ -475,7 +465,7 @@ impl HirNode {
             HirNodeValue::VtableCall(vtable, fn_id, args) => {
                 callback(None, vtable);
                 let params = declarations.map(|declarations| {
-                    let func = find_func(declarations, *fn_id).unwrap();
+                    let func = &declarations.id_to_func[fn_id as &FunctionID];
                     &func.params
                 });
                 for (i, arg) in args.iter_mut().enumerate() {
@@ -484,10 +474,8 @@ impl HirNode {
             }
             HirNodeValue::Call(lhs, args) => {
                 let params = declarations.map(|declarations| match &lhs.ty {
-                    ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id) => {
-                        let Some(StaticDeclaration::Func(func)) = declarations.get(id) else {
-                            unreachable!()
-                        };
+                    ExpressionType::ReferenceToFunction(id) => {
+                        let func = &declarations.id_to_func[id];
                         &func.params
                     }
                     ExpressionType::FunctionReference { parameters, .. } => parameters,
@@ -499,11 +487,8 @@ impl HirNode {
                 callback(None, lhs);
             }
             HirNodeValue::IntrinsicCall(runtime_fn, args) => {
-                let func = info_for_function(runtime_fn).map(|info| {
-                    let StaticDeclaration::Func(func) = &info.decl else {
-                        unreachable!()
-                    };
-                    func
+                let func = declarations.map(|decls| {
+                    &decls.id_to_func[&decls.intrinsic_to_id[runtime_fn as &IntrinsicFunction]]
                 });
                 for (i, arg) in args.iter_mut().enumerate() {
                     callback(func.map(|func| &func.params[i]), arg);
@@ -540,7 +525,8 @@ impl HirNode {
             }
             HirNodeValue::StructLiteral(ty_id, fields) => {
                 let ty = declarations.map(|declarations| {
-                    let Some(StaticDeclaration::Struct(ty)) = declarations.get(ty_id) else {
+                    let TypeDeclaration::Struct(ty) = &declarations.id_to_decl[ty_id as &TypeID]
+                    else {
                         unreachable!();
                     };
                     ty

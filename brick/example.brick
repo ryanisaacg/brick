@@ -1,18 +1,11 @@
-// Int | 2
-union Number {
-    left(i32),
-    right(i32),
+let value = 0;
+let d = dict{ [1]: 30 };
+let key = 1;
+if d.contains_key(ref key) {
+    value += 5;
 }
-
-fn doubled(num: Number): Number {
-    case num {
-        left(val) => Number.left(val * 2),
-        right(val) => Number.right(val * 2),
-    }
+key = 2;
+if d.contains_key(ref key) {
+    value += 50;
 }
-
-let x = doubled(Number.left(10));
-case x {
-    left(val) => val,
-    right(_) => 1000,
-}
+value

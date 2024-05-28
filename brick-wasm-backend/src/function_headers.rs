@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use brick::{id::TypeID, DeclaredTypeLayout, LinearFunction};
+use brick::{DeclaredTypeLayout, LinearFunction, TypeID};
 use wasm_encoder::{FunctionSection, TypeSection};
 
 use crate::function_bodies::{walk_vals_read_order, walk_vals_write_order};

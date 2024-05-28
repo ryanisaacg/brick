@@ -4,7 +4,7 @@ use thiserror::Error;
 use typed_arena::Arena;
 
 use crate::{
-    id::{AnyID, FunctionID, VariableID},
+    id::{AnyID, VariableID},
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
     typecheck::ExpressionType,
@@ -182,7 +182,6 @@ impl<'a> AstNode<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct FunctionDeclarationValue<'a> {
-    pub id: FunctionID,
     pub name: String,
     pub params: Vec<(VariableID, NameAndType<'a>)>,
     pub returns: Option<&'a mut AstNode<'a>>,
@@ -197,7 +196,6 @@ pub struct FunctionDeclarationValue<'a> {
 
 #[derive(Debug, PartialEq)]
 pub struct FunctionHeaderValue<'a> {
-    pub id: FunctionID,
     pub name: String,
     pub params: Vec<NameAndType<'a>>,
     pub returns: Option<&'a mut AstNode<'a>>,
@@ -639,7 +637,6 @@ fn interface_or_struct_body<'a>(
                 }
                 associated_functions.push(AstNode::new(
                     AstNodeValue::RequiredFunction(FunctionHeaderValue {
-                        id: FunctionID::new(),
                         name,
                         params,
                         returns,
@@ -658,7 +655,6 @@ fn interface_or_struct_body<'a>(
                 cursor = body.provenance.end();
                 associated_functions.push(AstNode::new(
                     AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-                        id: FunctionID::new(),
                         name,
                         params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
                         returns,
@@ -796,7 +792,6 @@ fn extern_function_declaration<'a>(
     let (value, end) = match &next.value {
         TokenValue::Semicolon => (
             AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
-                id: FunctionID::new(),
                 name,
                 params,
                 returns,
@@ -808,7 +803,6 @@ fn extern_function_declaration<'a>(
             let end = body.provenance.end();
             (
                 AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-                    id: FunctionID::new(),
                     name,
                     params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
                     returns,
@@ -855,7 +849,6 @@ fn function_declaration<'a>(
 
     Ok(AstNode::new(
         AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-            id: FunctionID::new(),
             name,
             params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
             returns,

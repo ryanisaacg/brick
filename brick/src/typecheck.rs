@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::{
-    id::{AnyID, FunctionID, TypeID},
-    intrinsics::{add_intrinsics, array_intrinsics, dictionary_intrinsics},
+    declaration_context::{resolve_type_expr, DeclarationContext, Module, TypeID},
+    id::{AnyID, FunctionID},
     multi_error::{merge_results, print_multi_errors, MultiError},
     parser::{
         AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
@@ -13,17 +13,14 @@ use crate::{
     provenance::SourceRange,
 };
 
-use self::resolve::resolve_type_expr;
-
-pub mod resolve;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpressionType {
     Void,
     Unreachable,
     Primitive(PrimitiveType),
     InstanceOf(TypeID),
-    ReferenceTo(TypeID),
+    ReferenceToType(TypeID),
+    ReferenceToFunction(FunctionID),
     Pointer(PointerKind, Box<ExpressionType>),
     Collection(CollectionType),
     Null,
@@ -40,10 +37,11 @@ pub enum ExpressionType {
 }
 
 impl ExpressionType {
-    pub fn id(&self) -> Option<&TypeID> {
+    pub fn type_id(&self) -> Option<&TypeID> {
         match self {
-            ExpressionType::InstanceOf(id) | ExpressionType::ReferenceTo(id) => Some(id),
+            ExpressionType::InstanceOf(id) | ExpressionType::ReferenceToType(id) => Some(id),
             ExpressionType::Void
+            | ExpressionType::ReferenceToFunction(_)
             | ExpressionType::Unreachable
             | ExpressionType::Primitive(_)
             | ExpressionType::Pointer(_, _)
@@ -56,7 +54,7 @@ impl ExpressionType {
         }
     }
 
-    pub fn is_affine(&self, declarations: &HashMap<TypeID, &StaticDeclaration>) -> bool {
+    pub fn is_affine(&self, declarations: &HashMap<TypeID, TypeDeclaration>) -> bool {
         match self {
             ExpressionType::Nullable(inner) => inner.is_affine(declarations),
             ExpressionType::Void
@@ -66,10 +64,11 @@ impl ExpressionType {
                 | ExpressionType::Pointer(_, _)
                 | ExpressionType::Primitive(_) => false,
             ExpressionType::InstanceOf(id) => declarations[id].is_affine(),
-            ExpressionType::ReferenceTo(_)
-                | ExpressionType::TypeParameterReference(_)
-                | ExpressionType::Collection(_)
-                | ExpressionType::Generator { .. }
+            ExpressionType::ReferenceToType(_)
+            | ExpressionType::TypeParameterReference(_)
+            | ExpressionType::Collection(_)
+            | ExpressionType::Generator { .. }
+            | ExpressionType::ReferenceToFunction(_)
             | ExpressionType::FunctionReference { .. } => true,
         }
     }
@@ -84,7 +83,8 @@ impl ExpressionType {
             | ExpressionType::InstanceOf(_)
             | ExpressionType::Generator { .. }
             | ExpressionType::FunctionReference { .. }
-            | ExpressionType::ReferenceTo(_)
+            | ExpressionType::ReferenceToType(_)
+            | ExpressionType::ReferenceToFunction(_)
             | ExpressionType::TypeParameterReference(_) => false,
             ExpressionType::Pointer(_, _) => true,
             ExpressionType::Nullable(inner) => inner.is_reference(),
@@ -106,78 +106,43 @@ pub enum PointerKind {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum StaticDeclaration {
-    Func(FuncType),
+pub enum TypeDeclaration {
     Struct(StructType),
     Interface(InterfaceType),
     Union(UnionType),
     Module(ModuleType),
 }
 
-impl StaticDeclaration {
+impl TypeDeclaration {
     pub fn id(&self) -> TypeID {
         match self {
-            StaticDeclaration::Func(inner) => inner.id,
-            StaticDeclaration::Struct(inner) => inner.id,
-            StaticDeclaration::Interface(inner) => inner.id,
-            StaticDeclaration::Union(inner) => inner.id,
-            StaticDeclaration::Module(inner) => inner.id,
+            TypeDeclaration::Struct(inner) => inner.id,
+            TypeDeclaration::Interface(inner) => inner.id,
+            TypeDeclaration::Union(inner) => inner.id,
+            TypeDeclaration::Module(inner) => inner.id,
         }
     }
 
     pub fn fn_id_or_type_id(&self) -> AnyID {
         match self {
-            StaticDeclaration::Func(inner) => inner.func_id.into(),
-            StaticDeclaration::Struct(inner) => inner.id.into(),
-            StaticDeclaration::Interface(inner) => inner.id.into(),
-            StaticDeclaration::Union(inner) => inner.id.into(),
-            StaticDeclaration::Module(inner) => inner.id.into(),
+            TypeDeclaration::Struct(inner) => inner.id.into(),
+            TypeDeclaration::Interface(inner) => inner.id.into(),
+            TypeDeclaration::Union(inner) => inner.id.into(),
+            TypeDeclaration::Module(inner) => inner.id.into(),
         }
     }
 
     pub fn is_affine(&self) -> bool {
         match self {
-            StaticDeclaration::Func(_) => false,
-            StaticDeclaration::Struct(decl) => decl.is_affine,
-            StaticDeclaration::Interface(_) => true,
-            StaticDeclaration::Union(decl) => decl.is_affine,
-            StaticDeclaration::Module(_) => false,
-        }
-    }
-
-    pub fn unwrap_fn_id(&self) -> FunctionID {
-        match self {
-            StaticDeclaration::Func(inner) => inner.func_id,
-            _ => panic!("Not a function: {:?}", self),
+            TypeDeclaration::Struct(decl) => decl.is_affine,
+            TypeDeclaration::Interface(_) => true,
+            TypeDeclaration::Union(decl) => decl.is_affine,
+            TypeDeclaration::Module(_) => false,
         }
     }
 
     pub fn ref_to(&self) -> ExpressionType {
-        ExpressionType::ReferenceTo(self.id())
-    }
-
-    pub fn visit<'a>(&'a self, visitor: &mut impl FnMut(&'a StaticDeclaration)) {
-        visitor(self);
-        match self {
-            StaticDeclaration::Module(module) => {
-                for child in module.exports.values() {
-                    child.visit(visitor);
-                }
-            }
-            StaticDeclaration::Struct(StructType {
-                associated_functions,
-                ..
-            })
-            | StaticDeclaration::Interface(InterfaceType {
-                associated_functions,
-                ..
-            }) => {
-                for child in associated_functions.values() {
-                    child.visit(visitor);
-                }
-            }
-            StaticDeclaration::Func(_) | StaticDeclaration::Union(_) => {}
-        }
+        ExpressionType::ReferenceToType(self.id())
     }
 
     pub fn field_access(
@@ -186,7 +151,7 @@ impl StaticDeclaration {
         provenance: &SourceRange,
     ) -> Result<ExpressionType, TypecheckError> {
         match self {
-            StaticDeclaration::Struct(StructType {
+            TypeDeclaration::Struct(StructType {
                 fields,
                 associated_functions,
                 ..
@@ -196,21 +161,21 @@ impl StaticDeclaration {
                 .or_else(|| {
                     associated_functions
                         .get(field)
-                        .map(|decl| ExpressionType::InstanceOf(decl.id()))
+                        .map(|decl| ExpressionType::ReferenceToFunction(*decl))
                 })
                 .ok_or_else(|| {
                     TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
                 }),
-            StaticDeclaration::Interface(InterfaceType {
+            TypeDeclaration::Interface(InterfaceType {
                 associated_functions,
                 ..
             }) => associated_functions
                 .get(field)
-                .map(|decl| ExpressionType::InstanceOf(decl.id()))
+                .map(|decl| ExpressionType::ReferenceToFunction(*decl))
                 .ok_or_else(|| {
                     TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
                 }),
-            StaticDeclaration::Union(lhs_type) => Ok(ExpressionType::Nullable(Box::new(
+            TypeDeclaration::Union(lhs_type) => Ok(ExpressionType::Nullable(Box::new(
                 lhs_type
                     .variants
                     .get(field)
@@ -220,14 +185,11 @@ impl StaticDeclaration {
                     .clone()
                     .unwrap_or(ExpressionType::Void),
             ))),
-            StaticDeclaration::Module(lhs_type) => lhs_type
-                .exports
-                .get(field)
-                .map(|decl| decl.ref_to())
-                .ok_or_else(|| {
+            TypeDeclaration::Module(lhs_type) => {
+                lhs_type.exports.get(field).cloned().ok_or_else(|| {
                     TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
-                }),
-            StaticDeclaration::Func(_) => Err(TypecheckError::IllegalDotLHS(provenance.clone())),
+                })
+            }
         }
     }
 }
@@ -235,21 +197,20 @@ impl StaticDeclaration {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ModuleType {
     pub id: TypeID,
-    pub exports: HashMap<String, StaticDeclaration>,
+    pub exports: HashMap<String, ExpressionType>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct StructType {
     pub id: TypeID,
     pub fields: HashMap<String, ExpressionType>,
-    pub associated_functions: HashMap<String, StaticDeclaration>,
+    pub associated_functions: HashMap<String, FunctionID>,
     pub is_affine: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FuncType {
-    pub id: TypeID,
-    pub func_id: FunctionID,
+    pub id: FunctionID,
     pub type_param_count: usize,
     pub params: Vec<ExpressionType>,
     pub returns: ExpressionType,
@@ -269,17 +230,7 @@ pub struct UnionType {
 #[derive(Debug, PartialEq, Eq)]
 pub struct InterfaceType {
     pub id: TypeID,
-    pub associated_functions: HashMap<String, StaticDeclaration>,
-}
-
-pub fn find_func<'a>(
-    decls: &HashMap<TypeID, &'a StaticDeclaration>,
-    id: FunctionID,
-) -> Option<&'a FuncType> {
-    decls.values().find_map(|decl| match decl {
-        StaticDeclaration::Func(func) if func.func_id == id => Some(func),
-        _ => None,
-    })
+    pub associated_functions: HashMap<String, FunctionID>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -365,29 +316,27 @@ impl MultiError for TypecheckError {
     }
 }
 
-struct Declarations<'a> {
-    name_to_type_id: HashMap<&'a str, TypeID>,
-    name_to_context_entry: HashMap<String, (AnyID, ExpressionType)>,
-    id_to_decl: HashMap<TypeID, &'a StaticDeclaration>,
+struct TypecheckContext<'a> {
+    declarations: &'a DeclarationContext,
+    top_level_type_names: HashMap<&'a str, TypeID>,
+    top_level_function_names: HashMap<&'a str, FunctionID>,
+    top_level_name_to_expr_type: HashMap<String, (AnyID, ExpressionType)>,
 }
 
-impl<'a> Declarations<'a> {
-    fn decl(&self, id: &TypeID) -> Option<&StaticDeclaration> {
-        self.id_to_decl.get(id).copied()
+impl<'a> TypecheckContext<'a> {
+    fn id_to_decl(&self) -> &HashMap<TypeID, TypeDeclaration> {
+        &self.declarations.id_to_decl
     }
 
-    fn id_to_func(&self, id: &TypeID) -> &FuncType {
-        let expr = self.decl(id).expect("function with ID should exist");
-        match expr {
-            StaticDeclaration::Func(inner) => inner,
-            _ => panic!("ID unexpectedly pointed to non-function"),
-        }
+    fn decl(&self, id: &TypeID) -> Option<&TypeDeclaration> {
+        self.declarations.id_to_decl.get(id)
     }
 }
 
 pub struct TypecheckedFile<'a> {
     pub functions: Vec<TypecheckedFunction<'a>>,
     pub top_level_statements: Vec<&'a AstNode<'a>>,
+    pub module: &'a Module,
 }
 
 #[derive(Clone, Debug)]
@@ -401,37 +350,38 @@ pub struct TypecheckedFunction<'a> {
 pub fn typecheck<'a>(
     file: impl Iterator<Item = &'a AstNode<'a>>,
     current_module_name: &str,
-    declarations: &HashMap<String, StaticDeclaration>,
+    declarations: &'a DeclarationContext,
 ) -> Result<TypecheckedFile<'a>, TypecheckError> {
-    let mut name_to_context_entry = HashMap::new();
-    let mut name_to_type_id = HashMap::new();
-    let mut id_to_decl = HashMap::new();
-    add_intrinsics(&mut id_to_decl);
+    let mut top_level_type_names = HashMap::new();
+    let mut top_level_function_names = HashMap::new();
+    let mut top_level_name_to_expr_type = HashMap::new();
 
-    for (name, value) in declarations {
-        match value {
-            StaticDeclaration::Module(module) if current_module_name == name => {
-                for (name, value) in module.exports.iter() {
-                    name_to_context_entry
-                        .insert(name.clone(), (value.fn_id_or_type_id(), value.ref_to()));
-                    name_to_type_id.insert(name.as_str(), value.id());
-                }
-            }
-            _ => {
-                name_to_context_entry
-                    .insert(name.clone(), (value.fn_id_or_type_id(), value.ref_to()));
-                name_to_type_id.insert(name.as_str(), value.id());
-            }
-        }
-        value.visit(&mut |decl| {
-            id_to_decl.insert(decl.id(), decl);
-        });
+    let module = &declarations.modules[current_module_name];
+
+    // Insert the module's top-level
+    for (name, ty_id) in module.type_name_to_id.iter() {
+        let value = &declarations.id_to_decl[ty_id];
+        top_level_type_names.insert(name.as_str(), *ty_id);
+        top_level_name_to_expr_type
+            .insert(name.clone(), (value.fn_id_or_type_id(), value.ref_to()));
+    }
+    for (name, fn_id) in module.func_name_to_id.iter() {
+        let value = &declarations.id_to_func[fn_id];
+        top_level_function_names.insert(name.as_str(), *fn_id);
+        top_level_name_to_expr_type.insert(
+            name.clone(),
+            (
+                value.id.into(),
+                ExpressionType::ReferenceToFunction(value.id),
+            ),
+        );
     }
 
-    let context = Declarations {
-        name_to_context_entry,
-        name_to_type_id,
-        id_to_decl,
+    let context = TypecheckContext {
+        declarations,
+        top_level_name_to_expr_type,
+        top_level_function_names,
+        top_level_type_names,
     };
 
     let mut functions = Vec::new();
@@ -456,44 +406,63 @@ pub fn typecheck<'a>(
     Ok(TypecheckedFile {
         functions,
         top_level_statements,
+        module,
     })
 }
 
 fn typecheck_node<'ast>(
     statement: &'ast AstNode<'ast>,
-    context: &Declarations,
+    context: &TypecheckContext,
     top_level_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     functions: &mut Vec<TypecheckedFunction<'ast>>,
     top_level_statements: &mut Vec<&AstNode<'ast>>,
 ) -> Result<(), TypecheckError> {
     match &statement.value {
         AstNodeValue::FunctionDeclaration(func) => {
-            typecheck_function(func, context)?;
+            let func_id = &context.top_level_function_names[func.name.as_str()];
+            let func_type = &context.declarations.id_to_func[func_id];
+            typecheck_function(context, func, func_type)?;
             functions.push(TypecheckedFunction {
-                id: func.id,
+                id: *func_id,
                 name: func.name.clone(),
                 func,
             });
         }
         AstNodeValue::StructDeclaration(StructDeclarationValue {
+            name,
             associated_functions,
             ..
         })
         | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
+            name,
             associated_functions,
             ..
         }) => {
+            let ty_id = &context.top_level_type_names[name.as_str()];
+            let (TypeDeclaration::Struct(StructType {
+                associated_functions: associated_functions_ty,
+                ..
+            })
+            | TypeDeclaration::Interface(InterfaceType {
+                associated_functions: associated_functions_ty,
+                ..
+            })) = &context.declarations.id_to_decl[ty_id]
+            else {
+                unreachable!()
+            };
             let associated_functions = associated_functions
                 .iter()
                 .filter_map(|function| {
                     let AstNodeValue::FunctionDeclaration(func) = &function.value else {
                         return None;
                     };
-                    if let Err(err) = typecheck_function(func, context) {
+                    let func_id = &associated_functions_ty[func.name.as_str()];
+                    let func_ty = &context.declarations.id_to_func[func_id];
+                    if let Err(err) = typecheck_function(context, func, func_ty) {
                         Some(Err(err))
                     } else {
                         Some(Ok(TypecheckedFunction {
-                            id: func.id,
+                            id: func_ty.id,
                             name: func.name.clone(),
                             func,
                         }))
@@ -509,7 +478,7 @@ fn typecheck_node<'ast>(
         _ => {
             typecheck_expression(
                 statement,
-                &[&context.name_to_context_entry],
+                &[&context.top_level_name_to_expr_type],
                 top_level_scope,
                 context,
                 None,
@@ -522,10 +491,10 @@ fn typecheck_node<'ast>(
 }
 
 fn typecheck_function<'a>(
+    context: &TypecheckContext,
     function: &'a FunctionDeclarationValue<'a>,
-    context: &Declarations,
+    function_type: &FuncType,
 ) -> Result<(), TypecheckError> {
-    let function_type = find_func(&context.id_to_decl, function.id).unwrap();
     let parameters = function
         .params
         .iter()
@@ -541,7 +510,7 @@ fn typecheck_function<'a>(
         };
         let return_ty = typecheck_expression(
             function.body,
-            &[&context.name_to_context_entry, &parameters],
+            &[&context.top_level_name_to_expr_type, &parameters],
             &mut HashMap::new(),
             context,
             Some(param_ty),
@@ -556,12 +525,12 @@ fn typecheck_function<'a>(
     } else {
         let return_ty = typecheck_expression(
             function.body,
-            &[&context.name_to_context_entry, &parameters],
+            &[&context.top_level_name_to_expr_type, &parameters],
             &mut HashMap::new(),
             context,
             None,
         )?;
-        assert_assignable_to(&context.id_to_decl, &function_type.returns, return_ty)?;
+        assert_assignable_to(context.declarations, &function_type.returns, return_ty)?;
 
         typecheck_returns(context, &function_type.returns, function.body)?;
     }
@@ -573,7 +542,7 @@ fn typecheck_expression<'a>(
     node: &'a AstNode<'a>,
     outer_scopes: &[&HashMap<String, (AnyID, ExpressionType)>],
     current_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
-    context: &Declarations,
+    context: &TypecheckContext,
     generator_input_ty: Option<&ExpressionType>,
 ) -> Result<&'a ExpressionType, TypecheckError> {
     let ty = match &node.value {
@@ -624,7 +593,7 @@ fn typecheck_expression<'a>(
             }
 
             if let Some(type_hint) = type_hint {
-                let hint_ty = resolve_type_expr(&context.name_to_type_id, type_hint)?;
+                let hint_ty = resolve_type_expr(&context.top_level_type_names, type_hint)?;
                 if matches!(hint_ty, ExpressionType::Pointer(_, _)) {
                     merge_results(
                         &mut result,
@@ -636,7 +605,7 @@ fn typecheck_expression<'a>(
 
                 merge_results(
                     &mut result,
-                    assert_assignable_to(&context.id_to_decl, &hint_ty, value_ty),
+                    assert_assignable_to(context.declarations, &hint_ty, value_ty),
                 );
                 type_hint.ty.set(hint_ty.clone()).unwrap();
                 current_scope.insert(name.clone(), ((*variable_id).into(), hint_ty));
@@ -758,8 +727,8 @@ fn typecheck_expression<'a>(
                     .decl(id)
                     .unwrap()
                     .field_access(name, &right.provenance)?,
-                ExpressionType::ReferenceTo(id) => match context.decl(id).unwrap() {
-                    StaticDeclaration::Union(union_ty) => {
+                ExpressionType::ReferenceToType(id) => match context.decl(id).unwrap() {
+                    TypeDeclaration::Union(union_ty) => {
                         let variant_ty = union_ty.variants.get(name).ok_or_else(|| {
                             TypecheckError::FieldNotPresent(name.clone(), node.provenance.clone())
                         })?;
@@ -775,25 +744,22 @@ fn typecheck_expression<'a>(
                     }
                     // TODO: module dot operator
                     // TODO: static functions on structs?
-                    StaticDeclaration::Struct(_)
-                    | StaticDeclaration::Module(_)
-                    | StaticDeclaration::Func(_)
-                    | StaticDeclaration::Interface(_) => {
+                    TypeDeclaration::Struct(_)
+                    | TypeDeclaration::Module(_)
+                    | TypeDeclaration::Interface(_) => {
                         return Err(TypecheckError::IllegalDotLHS(left.provenance.clone()));
                     }
                 },
                 ExpressionType::Collection(CollectionType::Array(_item_ty)) => {
-                    let runtime = array_intrinsics();
-                    if let Some(ty) = runtime.get(name) {
-                        ExpressionType::ReferenceTo(ty.decl.id())
+                    if let Some(ty) = context.declarations.array_intrinsics.get(name.as_str()) {
+                        ExpressionType::ReferenceToFunction(ty.fn_id)
                     } else {
                         todo!("array methods")
                     }
                 }
                 ExpressionType::Collection(CollectionType::Dict(_key_ty, _value_ty)) => {
-                    let runtime = dictionary_intrinsics();
-                    if let Some(ty) = runtime.get(name) {
-                        ExpressionType::ReferenceTo(ty.decl.id())
+                    if let Some(ty) = context.declarations.dict_intrinsics.get(name.as_str()) {
+                        ExpressionType::ReferenceToFunction(ty.fn_id)
                     } else {
                         todo!("dict methods")
                     }
@@ -817,7 +783,7 @@ fn typecheck_expression<'a>(
                 )
                 .and_then(|left_ty| {
                     assert_assignable_to(
-                        &context.id_to_decl,
+                        context.declarations,
                         &ExpressionType::Collection(CollectionType::String),
                         left_ty,
                     )
@@ -834,7 +800,7 @@ fn typecheck_expression<'a>(
                 )
                 .and_then(|right_ty| {
                     assert_assignable_to(
-                        &context.id_to_decl,
+                        context.declarations,
                         &ExpressionType::Collection(CollectionType::String),
                         right_ty,
                     )
@@ -855,7 +821,7 @@ fn typecheck_expression<'a>(
             let ExpressionType::Nullable(ty) = fully_dereference(left) else {
                 panic!("TODO: left side of nullable dot operator");
             };
-            let mut field_ty = Ok(*ty.clone());
+            let mut field_ty = Ok(ty.as_ref().clone());
             traverse_dots(right, |name, provenance| {
                 let Ok(ty) = &field_ty else {
                     return;
@@ -885,12 +851,12 @@ fn typecheck_expression<'a>(
                         generator_input_ty,
                     )?;
                     assert_assignable_to(
-                        &context.id_to_decl,
+                        context.declarations,
                         &ExpressionType::Primitive(PrimitiveType::PointerSize),
                         index_ty,
                     )?;
 
-                    *item_ty.clone()
+                    item_ty.as_ref().clone()
                 }
                 ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) => {
                     let index_ty = typecheck_expression(
@@ -900,9 +866,9 @@ fn typecheck_expression<'a>(
                         context,
                         generator_input_ty,
                     )?;
-                    assert_assignable_to(&context.id_to_decl, index_ty, key_ty)?;
+                    assert_assignable_to(context.declarations, index_ty, key_ty)?;
 
-                    *value_ty.clone()
+                    value_ty.as_ref().clone()
                 }
                 ty => todo!("can't index {:?}", ty),
             }
@@ -932,9 +898,9 @@ fn typecheck_expression<'a>(
             let ExpressionType::Primitive(_) = fully_dereference(right) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             };
-            if is_assignable_to(&context.id_to_decl, None, left, right) {
+            if is_assignable_to(context.declarations, None, left, right) {
                 left.clone()
-            } else if is_assignable_to(&context.id_to_decl, None, right, left) {
+            } else if is_assignable_to(context.declarations, None, right, left) {
                 right.clone()
             } else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
@@ -960,7 +926,7 @@ fn typecheck_expression<'a>(
             merge_results(
                 &mut results,
                 assert_assignable_to(
-                    &context.id_to_decl,
+                    context.declarations,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
                     left,
                 ),
@@ -968,7 +934,7 @@ fn typecheck_expression<'a>(
             merge_results(
                 &mut results,
                 assert_assignable_to(
-                    &context.id_to_decl,
+                    context.declarations,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
                     right,
                 ),
@@ -1031,7 +997,7 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
 
-            assert_assignable_to(&context.id_to_decl, left_ty, right)?;
+            assert_assignable_to(context.declarations, left_ty, right)?;
 
             ExpressionType::Void
         }
@@ -1064,7 +1030,7 @@ fn typecheck_expression<'a>(
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
             }
 
-            assert_assignable_to(&context.id_to_decl, left_ty, right)?;
+            assert_assignable_to(context.declarations, left_ty, right)?;
 
             ExpressionType::Void
         }
@@ -1086,11 +1052,10 @@ fn typecheck_expression<'a>(
             let ExpressionType::Nullable(ty) = left_ty else {
                 return Err(TypecheckError::ExpectedNullableLHS(left.provenance.clone()));
             };
-            let ty = *ty.clone();
 
-            assert_assignable_to(&context.id_to_decl, &ty, right_ty)?;
+            assert_assignable_to(context.declarations, ty, right_ty)?;
 
-            ty.clone()
+            ty.as_ref().clone()
         }
         AstNodeValue::While(condition, body) => {
             let condition = typecheck_expression(
@@ -1176,10 +1141,10 @@ fn typecheck_expression<'a>(
 
             match else_branch {
                 Some(else_branch) => {
-                    if is_assignable_to(&context.id_to_decl, None, if_branch, else_branch) {
+                    if is_assignable_to(context.declarations, None, if_branch, else_branch) {
                         if_branch.clone()
                     } else {
-                        assert_assignable_to(&context.id_to_decl, else_branch, if_branch)?;
+                        assert_assignable_to(context.declarations, else_branch, if_branch)?;
                         else_branch.clone()
                     }
                 }
@@ -1194,9 +1159,9 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            let Some(StaticDeclaration::Union(union_ty)) = shallow_dereference(input_ty)
-                .id()
-                .map(|ty_id| context.id_to_decl[ty_id])
+            let Some(TypeDeclaration::Union(union_ty)) = shallow_dereference(input_ty)
+                .type_id()
+                .map(|ty_id| &context.id_to_decl()[ty_id])
             else {
                 return Err(TypecheckError::CaseStatementRequiresUnion(
                     value.provenance.clone(),
@@ -1238,7 +1203,7 @@ fn typecheck_expression<'a>(
                                 merge_results(
                                     &mut results,
                                     assert_assignable_to(
-                                        &context.id_to_decl,
+                                        context.declarations,
                                         binding_ty,
                                         variant_ty,
                                     ),
@@ -1285,7 +1250,7 @@ fn typecheck_expression<'a>(
                 if let Some(return_type) = &return_type {
                     merge_results(
                         &mut results,
-                        assert_assignable_to(&context.id_to_decl, return_type, body_ty),
+                        assert_assignable_to(context.declarations, return_type, body_ty),
                     );
                 } else {
                     return_type = Some(body_ty.clone());
@@ -1368,8 +1333,8 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?) {
-                ExpressionType::InstanceOf(func) | ExpressionType::ReferenceTo(func) => {
-                    let func = context.id_to_func(func);
+                ExpressionType::ReferenceToFunction(func) => {
+                    let func = &context.declarations.id_to_func[func];
                     let params = if func.is_associated {
                         &func.params[1..]
                     } else {
@@ -1389,7 +1354,8 @@ fn typecheck_expression<'a>(
                             generator_input_ty,
                         )?;
                         find_generic_bindings(&mut generic_args[..], param, arg);
-                        if !is_assignable_to(&context.id_to_decl, Some(&generic_args), param, arg) {
+                        if !is_assignable_to(context.declarations, Some(&generic_args), param, arg)
+                        {
                             return Err(TypecheckError::TypeMismatch {
                                 received: arg.clone(),
                                 expected: param.clone(),
@@ -1418,9 +1384,9 @@ fn typecheck_expression<'a>(
                             generator_input_ty,
                         )?;
                         // TODO: generic generators?
-                        assert_assignable_to(&context.id_to_decl, param_ty, arg)?;
+                        assert_assignable_to(context.declarations, param_ty, arg)?;
                     }
-                    *yield_ty.clone()
+                    yield_ty.as_ref().clone()
                 }
                 ExpressionType::FunctionReference {
                     parameters,
@@ -1437,7 +1403,7 @@ fn typecheck_expression<'a>(
                         )?;
                         merge_results(
                             &mut results,
-                            assert_assignable_to(&context.id_to_decl, param, arg),
+                            assert_assignable_to(context.declarations, param, arg),
                         );
                     }
 
@@ -1449,7 +1415,7 @@ fn typecheck_expression<'a>(
             }
         }
         AstNodeValue::RecordLiteral { name, fields } => {
-            let ExpressionType::ReferenceTo(ty_id) = typecheck_expression(
+            let ExpressionType::ReferenceToType(ty_id) = typecheck_expression(
                 name,
                 outer_scopes,
                 current_scope,
@@ -1461,7 +1427,7 @@ fn typecheck_expression<'a>(
             };
 
             match context.decl(ty_id).unwrap() {
-                StaticDeclaration::Struct(struct_type) => {
+                TypeDeclaration::Struct(struct_type) => {
                     if struct_type.fields.len() != fields.len() {
                         return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
                     }
@@ -1482,7 +1448,7 @@ fn typecheck_expression<'a>(
                                 merge_results(
                                     &mut results,
                                     assert_assignable_to(
-                                        &context.id_to_decl,
+                                        context.declarations,
                                         param_field,
                                         arg_field,
                                     ),
@@ -1498,10 +1464,9 @@ fn typecheck_expression<'a>(
 
                     ExpressionType::InstanceOf(*ty_id)
                 }
-                StaticDeclaration::Union(_)
-                | StaticDeclaration::Func(_)
-                | StaticDeclaration::Interface(_)
-                | StaticDeclaration::Module(_) => {
+                TypeDeclaration::Union(_)
+                | TypeDeclaration::Interface(_)
+                | TypeDeclaration::Module(_) => {
                     return Err(TypecheckError::NonStructDeclStructLiteral(
                         node.provenance.clone(),
                     ));
@@ -1520,7 +1485,7 @@ fn typecheck_expression<'a>(
                     generator_input_ty,
                 )?;
                 if let Some(expected_key_ty) = result_key_ty {
-                    assert_assignable_to(&context.id_to_decl, key_ty, expected_key_ty)?;
+                    assert_assignable_to(context.declarations, key_ty, expected_key_ty)?;
                 } else {
                     result_key_ty = Some(key_ty);
                 }
@@ -1532,7 +1497,7 @@ fn typecheck_expression<'a>(
                     generator_input_ty,
                 )?;
                 if let Some(expected_value_ty) = result_value_ty {
-                    assert_assignable_to(&context.id_to_decl, value_ty, expected_value_ty)?;
+                    assert_assignable_to(context.declarations, value_ty, expected_value_ty)?;
                 } else {
                     result_value_ty = Some(value_ty);
                 }
@@ -1582,7 +1547,7 @@ fn typecheck_expression<'a>(
                     inner.provenance.clone(),
                 ));
             };
-            *ty.clone()
+            ty.as_ref().clone()
         }
         AstNodeValue::ArrayLiteral(items) => {
             if items.is_empty() {
@@ -1630,7 +1595,7 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             assert_assignable_to(
-                &context.id_to_decl,
+                context.declarations,
                 &ExpressionType::Primitive(PrimitiveType::PointerSize),
                 length,
             )?;
@@ -1646,7 +1611,7 @@ fn typecheck_expression<'a>(
                     generator_input_ty,
                 )?;
                 assert_assignable_to(
-                    &context.id_to_decl,
+                    context.declarations,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
                     child_ty,
                 )?;
@@ -1684,7 +1649,7 @@ fn traverse_dots_recursive(node: &AstNode, callback: &mut impl FnMut(&str, &Sour
 }
 
 fn typecheck_returns<'a>(
-    context: &Declarations,
+    context: &TypecheckContext,
     expected_ty: &ExpressionType,
     current: &'a AstNode<'a>,
 ) -> Result<(), TypecheckError> {
@@ -1694,7 +1659,7 @@ fn typecheck_returns<'a>(
             .as_ref()
             .map(|child| child.ty.get().unwrap())
             .unwrap_or(&ExpressionType::Void);
-        if !is_assignable_to(&context.id_to_decl, None, expected_ty, return_ty) {
+        if !is_assignable_to(context.declarations, None, expected_ty, return_ty) {
             merge_results(
                 &mut results,
                 Err(TypecheckError::TypeMismatch {
@@ -1789,7 +1754,7 @@ fn find_generic_bindings(
             | ExpressionType::Unreachable
             | ExpressionType::Primitive(_)
             | ExpressionType::InstanceOf(_)
-            | ExpressionType::ReferenceTo(_)
+            | ExpressionType::ReferenceToType(_)
             | ExpressionType::Null
             | ExpressionType::Collection(CollectionType::String),
             _,
@@ -1839,6 +1804,10 @@ fn find_generic_bindings(
         | (_, ExpressionType::FunctionReference { .. }) => {
             todo!("function references only exist within the compiler")
         }
+        (ExpressionType::ReferenceToFunction(_), _)
+        | (_, ExpressionType::ReferenceToFunction(_)) => {
+            todo!("first class functions")
+        }
         (ExpressionType::Collection(CollectionType::Dict(..) | CollectionType::Array(_)), _)
         | (ExpressionType::Pointer(_, _), _)
         | (ExpressionType::Generator { .. }, _) => {}
@@ -1846,7 +1815,7 @@ fn find_generic_bindings(
 }
 
 pub fn is_assignable_to(
-    id_to_decl: &HashMap<TypeID, &StaticDeclaration>,
+    context: &DeclarationContext,
     generic_args: Option<&[ExpressionType]>,
     left: &ExpressionType,
     right: &ExpressionType,
@@ -1855,12 +1824,9 @@ pub fn is_assignable_to(
     use PrimitiveType::*;
 
     match (left, right) {
-        (TypeParameterReference(idx), _) => is_assignable_to(
-            id_to_decl,
-            generic_args,
-            &generic_args.unwrap()[*idx],
-            right,
-        ),
+        (TypeParameterReference(idx), _) => {
+            is_assignable_to(context, generic_args, &generic_args.unwrap()[*idx], right)
+        }
         (_, TypeParameterReference(_)) => {
             todo!("can you ever end up here?")
         }
@@ -1877,11 +1843,11 @@ pub fn is_assignable_to(
         (Pointer(left_ty, left_inner), Pointer(right_ty, right_inner)) => {
             (left_ty == right_ty
                 || *left_ty == PointerKind::Shared && *right_ty == PointerKind::Unique)
-                && is_assignable_to(id_to_decl, generic_args, left_inner, right_inner)
+                && is_assignable_to(context, generic_args, left_inner, right_inner)
         }
         // TODO: auto-dereference in the IR
         (left, Pointer(_, right_inner)) => {
-            is_assignable_to(id_to_decl, generic_args, left, right_inner)
+            is_assignable_to(context, generic_args, left, right_inner)
         }
         // TODO: support auto-dereferencing on lhs
         (Pointer(_, _), _right) => false,
@@ -1889,10 +1855,8 @@ pub fn is_assignable_to(
         // Nullability
         (Nullable(_), Null) => true,
         (_, Null) => false,
-        (Nullable(left), Nullable(right)) => {
-            is_assignable_to(id_to_decl, generic_args, left, right)
-        }
-        (Nullable(left), right) => is_assignable_to(id_to_decl, generic_args, left, right),
+        (Nullable(left), Nullable(right)) => is_assignable_to(context, generic_args, left, right),
+        (Nullable(left), right) => is_assignable_to(context, generic_args, left, right),
         (_, Nullable(_)) => false,
 
         (Primitive(Float32), Primitive(Int32))
@@ -1905,20 +1869,10 @@ pub fn is_assignable_to(
         (Primitive(_), _) => false,
 
         (InstanceOf(left), InstanceOf(right)) => {
-            let left = id_to_decl[left];
-            let right = id_to_decl[right];
-            use StaticDeclaration::*;
+            let left = &context.id_to_decl[left];
+            let right = &context.id_to_decl[right];
+            use TypeDeclaration::*;
             match (left, right) {
-                // TODO: support function pointer types?
-                (Func(left), Func(right)) => {
-                    left.params
-                        .iter()
-                        .zip(right.params.iter())
-                        .all(|(left, right)| left == right)
-                        && left.returns == right.returns
-                }
-                (Func(_), _) => false,
-
                 (Struct(_), Struct(_)) => left == right,
                 (Struct(_), _) => false,
 
@@ -1938,12 +1892,8 @@ pub fn is_assignable_to(
                     let Some(rhs_ty) = rhs_assoc.get(name) else {
                         return false;
                     };
-                    let StaticDeclaration::Func(lhs) = lhs_ty else {
-                        return false;
-                    };
-                    let StaticDeclaration::Func(rhs) = rhs_ty else {
-                        return false;
-                    };
+                    let lhs = &context.id_to_func[lhs_ty];
+                    let rhs = &context.id_to_func[rhs_ty];
                     // Ignore the first argument to both associated functions -
                     // the type will differ because it's a self param
                     lhs.params[1..]
@@ -1953,7 +1903,6 @@ pub fn is_assignable_to(
                         && lhs.returns == rhs.returns
                 }),
                 (Interface(_), Interface(_)) => left == right,
-                (Interface(_), Func(_)) => todo!(),
                 (Interface(_), Union(_)) => todo!(),
 
                 (_, Module(_)) => false,
@@ -1992,8 +1941,12 @@ pub fn is_assignable_to(
         | (_, ExpressionType::FunctionReference { .. }) => {
             todo!("function references only exist within the compiler")
         }
+        (ExpressionType::ReferenceToFunction(_), _)
+        | (_, ExpressionType::ReferenceToFunction(_)) => {
+            todo!("first class functions")
+        }
 
-        (ReferenceTo(_), _) | (_, ReferenceTo(_)) => todo!("{:?} = {:?}", left, right),
+        (ReferenceToType(_), _) | (_, ReferenceToType(_)) => todo!("{:?} = {:?}", left, right),
     }
 }
 
@@ -2014,11 +1967,11 @@ pub fn shallow_dereference(ty: &ExpressionType) -> &ExpressionType {
 }
 
 fn assert_assignable_to(
-    id_to_decl: &HashMap<TypeID, &StaticDeclaration>,
+    declarations: &DeclarationContext,
     lhs: &ExpressionType,
     rhs: &ExpressionType,
 ) -> Result<(), TypecheckError> {
-    if is_assignable_to(id_to_decl, None, lhs, rhs) {
+    if is_assignable_to(declarations, None, lhs, rhs) {
         Ok(())
     } else {
         Err(TypecheckError::TypeMismatch {

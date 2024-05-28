@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use crate::{
+    declaration_context::{IntrinsicFunction, TypeID},
     hir::{
         ArithmeticOp, BinaryLogicalOp, ComparisonOp, GeneratorProperties, HirFunction, HirNode,
         HirNodeValue, UnaryLogicalOp,
     },
-    id::{AnyID, FunctionID, RegisterID, TypeID, VariableID},
-    intrinsics::IntrinsicFunction,
+    id::{AnyID, FunctionID, RegisterID, VariableID},
     provenance::SourceRange,
     typecheck::{
-        shallow_dereference, CollectionType, ExpressionType, PrimitiveType, StaticDeclaration,
+        shallow_dereference, CollectionType, ExpressionType, PrimitiveType, TypeDeclaration,
     },
 };
 
@@ -25,7 +25,7 @@ pub struct LinearFunction {
 
 pub fn linearize_function(
     constant_data_region: &mut Vec<u8>,
-    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
+    layouts: &HashMap<TypeID, DeclaredTypeLayout>,
     function: HirFunction,
     byte_size: usize,
     pointer_size: usize,
@@ -33,7 +33,7 @@ pub fn linearize_function(
     let HirNodeValue::Sequence(block) = function.body.value else {
         unreachable!()
     };
-    let mut ctx = LinearContext::new(declarations, constant_data_region, byte_size, pointer_size);
+    let mut ctx = LinearContext::new(layouts, constant_data_region, byte_size, pointer_size);
     let mut body = ctx.linearize_nodes(block);
     if let Some(GeneratorProperties {
         generator_var_id,
@@ -565,13 +565,13 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             }
         }
         HirNodeValue::Access(lhs, rhs) => {
-            if let Some(variants) = lhs
-                .ty
-                .id()
-                .and_then(|id| match &ctx.declarations[id].value {
-                    TypeLayoutValue::Union(variants) => Some(variants),
-                    _ => None,
-                })
+            if let Some(variants) =
+                lhs.ty
+                    .type_id()
+                    .and_then(|id| match &ctx.declarations[id].value {
+                        TypeLayoutValue::Union(variants) => Some(variants),
+                        _ => None,
+                    })
             {
                 let (variant_idx, variant_ty) = &variants[&rhs];
                 let (location, offset) = lower_lvalue(ctx, *lhs);
@@ -1116,7 +1116,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 unreachable!()
             };
 
-            let (dict_location, dict_offset) = lower_lvalue(ctx, *dict.clone());
+            let (dict_location, dict_offset) = lower_lvalue(ctx, dict.as_ref().clone());
 
             let key = lower_expression(ctx, key);
             let value = lower_expression(ctx, value);
@@ -1271,7 +1271,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         }
         HirNodeValue::UnionVariant(union, variant) => {
             let ty = shallow_dereference(&union.ty)
-                .id()
+                .type_id()
                 .and_then(|id| match &ctx.declarations[id].value {
                     TypeLayoutValue::Union(ty) => Some(ty),
                     _ => None,
@@ -1799,24 +1799,20 @@ impl PhysicalType {
 }
 
 pub fn layout_types(
-    declarations: &HashMap<String, StaticDeclaration>,
+    declarations: &HashMap<TypeID, TypeDeclaration>,
     layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
     byte_size: usize,
     pointer_size: usize,
 ) {
-    let declarations: HashMap<_, _> = declarations
-        .iter()
-        .map(|(_, decl)| (decl.id(), decl))
-        .collect();
     for decl in declarations.values() {
-        layout_static_decl(&declarations, layouts, decl, byte_size, pointer_size);
+        layout_static_decl(declarations, layouts, decl, byte_size, pointer_size);
     }
 }
 
 fn layout_static_decl(
-    declarations: &HashMap<TypeID, &StaticDeclaration>,
+    declarations: &HashMap<TypeID, TypeDeclaration>,
     layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
-    decl: &StaticDeclaration,
+    decl: &TypeDeclaration,
     byte_size: usize,
     pointer_size: usize,
 ) -> usize {
@@ -1825,7 +1821,7 @@ fn layout_static_decl(
     }
 
     let layout = match decl {
-        StaticDeclaration::Struct(struct_ty) => {
+        TypeDeclaration::Struct(struct_ty) => {
             let mut size = 0;
             let fields = struct_ty
                 .fields
@@ -1843,20 +1839,14 @@ fn layout_static_decl(
                 size,
             }
         }
-        StaticDeclaration::Func(_) => {
-            return pointer_size;
-        }
-        StaticDeclaration::Interface(interface_ty) => {
+        TypeDeclaration::Interface(interface_ty) => {
             let mut size = pointer_size;
             let fields = interface_ty
                 .associated_functions
                 .values()
                 .map(|decl| {
                     size += FUNCTION_ID_SIZE;
-                    let StaticDeclaration::Func(func) = decl else {
-                        unreachable!()
-                    };
-                    func.func_id
+                    *decl
                 })
                 .collect();
             DeclaredTypeLayout {
@@ -1864,7 +1854,7 @@ fn layout_static_decl(
                 size,
             }
         }
-        StaticDeclaration::Union(union_ty) => {
+        TypeDeclaration::Union(union_ty) => {
             let mut largest_variant = 0;
             let variants = union_ty
                 .variant_order
@@ -1892,9 +1882,8 @@ fn layout_static_decl(
                 size: UNION_TAG_SIZE.size(pointer_size) + largest_variant,
             }
         }
-        // Modules are completely compiled out
-        StaticDeclaration::Module(module) => {
-            layout_types(&module.exports, layouts, byte_size, pointer_size);
+        TypeDeclaration::Module(_module) => {
+            // Modules are completely compiled out
             return 0;
         }
     };
@@ -1905,7 +1894,7 @@ fn layout_static_decl(
 }
 
 fn layout_type(
-    declarations: &HashMap<TypeID, &StaticDeclaration>,
+    declarations: &HashMap<TypeID, TypeDeclaration>,
     layouts: &mut HashMap<TypeID, DeclaredTypeLayout>,
     ty: &ExpressionType,
     byte_size: usize,
@@ -1921,7 +1910,7 @@ fn layout_type(
             layout_static_decl(
                 declarations,
                 layouts,
-                declarations[id],
+                &declarations[id],
                 byte_size,
                 pointer_size,
             );
@@ -1941,7 +1930,8 @@ fn layout_type(
             let inner = layout_type(declarations, layouts, inner, byte_size, pointer_size);
             PhysicalType::Nullable(Box::new(inner))
         }
-        ExpressionType::ReferenceTo(_) => todo!(),
+        ExpressionType::ReferenceToType(_) => todo!(),
+        ExpressionType::ReferenceToFunction(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => PhysicalType::Generator,
         ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,
@@ -1965,7 +1955,8 @@ pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
             let ty = expr_ty_to_physical(inner);
             PhysicalType::Nullable(Box::new(ty))
         }
-        ExpressionType::ReferenceTo(_) => todo!(),
+        ExpressionType::ReferenceToType(_) => todo!(),
+        ExpressionType::ReferenceToFunction(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => PhysicalType::Generator,
         ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,

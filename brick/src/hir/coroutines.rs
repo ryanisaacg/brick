@@ -22,7 +22,7 @@ pub fn rewrite_generator_calls(module: &mut HirModule) {
             }),
         )];
         if param_ty.as_ref() != &ExpressionType::Void {
-            parameters.push(*param_ty.clone());
+            parameters.push(param_ty.as_ref().clone());
         }
 
         let yield_ty = yield_ty.clone();

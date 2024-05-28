@@ -1,13 +1,8 @@
-use std::collections::HashMap;
-
-use crate::{id::TypeID, typecheck::ExpressionType, HirNodeValue, StaticDeclaration};
+use crate::{typecheck::ExpressionType, DeclarationContext, HirNodeValue, TypeDeclaration};
 
 use super::HirModule;
 
-pub fn convert_calls_to_union_literals(
-    module: &mut HirModule,
-    declarations: &HashMap<TypeID, &StaticDeclaration>,
-) {
+pub fn convert_calls_to_union_literals(module: &mut HirModule, declarations: &DeclarationContext) {
     // Rewrite union variants with values
     module.visit_mut(|node| {
         let HirNodeValue::Call(func, _args) = &node.value else {
@@ -17,10 +12,13 @@ pub fn convert_calls_to_union_literals(
         let HirNodeValue::Access(lhs, _) = &func.value else {
             return;
         };
-        let ExpressionType::ReferenceTo(ty_id) = &lhs.ty else {
+        let ExpressionType::ReferenceToType(ty_id) = &lhs.ty else {
             return;
         };
-        if !matches!(declarations.get(ty_id), Some(StaticDeclaration::Union(_))) {
+        if !matches!(
+            declarations.id_to_decl.get(ty_id),
+            Some(TypeDeclaration::Union(_))
+        ) {
             return;
         }
         let ty_id = *ty_id;
@@ -40,10 +38,13 @@ pub fn convert_calls_to_union_literals(
         let HirNodeValue::Access(lhs, _) = &node.value else {
             return;
         };
-        let ExpressionType::ReferenceTo(ty_id) = &lhs.ty else {
+        let ExpressionType::ReferenceToType(ty_id) = &lhs.ty else {
             return;
         };
-        if !matches!(declarations.get(ty_id), Some(StaticDeclaration::Union(_))) {
+        if !matches!(
+            declarations.id_to_decl.get(ty_id),
+            Some(TypeDeclaration::Union(_))
+        ) {
             return;
         }
         let ty_id = *ty_id;

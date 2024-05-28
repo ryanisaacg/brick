@@ -1,6 +1,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use bytemuck::{Pod, Zeroable};
+//use bytemuck::{Pod, Zeroable};
+
+pub use crate::declaration_context::FunctionID;
+use crate::declaration_context::TypeID;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AnyID {
@@ -66,35 +69,6 @@ impl NodeID {
 
     pub fn as_variable(&self) -> VariableID {
         VariableID(self.0)
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct FunctionID(u32);
-
-impl FunctionID {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        static FUNCTION_COUNTER: AtomicUsize = AtomicUsize::new(1);
-        Self(FUNCTION_COUNTER.fetch_add(1, Ordering::Relaxed) as u32)
-    }
-}
-
-unsafe impl Zeroable for FunctionID {
-    fn zeroed() -> Self {
-        FunctionID(0)
-    }
-}
-unsafe impl Pod for FunctionID {}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct TypeID(u32);
-
-impl TypeID {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        static TYPE_COUNTER: AtomicUsize = AtomicUsize::new(1);
-        Self(TYPE_COUNTER.fetch_add(1, Ordering::Relaxed) as u32)
     }
 }
 

@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-
 use crate::{
-    id::{NodeID, TypeID, VariableID},
+    id::{NodeID, VariableID},
     provenance::SourceRange,
-    typecheck::{ExpressionType, StaticDeclaration},
+    typecheck::ExpressionType,
+    DeclarationContext,
 };
 
 use super::{HirModule, HirNode, HirNodeValue};
@@ -81,10 +80,7 @@ fn replace_last_with_assignment(
     );
 }
 
-pub fn simplify_sequence_uses(
-    module: &mut HirModule,
-    declarations: &HashMap<TypeID, &StaticDeclaration>,
-) {
+pub fn simplify_sequence_uses(module: &mut HirModule, declarations: &DeclarationContext) {
     module.visit_mut(|node| {
         let mut temporaries = Vec::new();
         node.walk_expected_types_for_children_mut(declarations, |ty, child| {

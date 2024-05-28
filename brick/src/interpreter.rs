@@ -6,8 +6,9 @@ use brick_runtime::{
 };
 
 use crate::{
+    declaration_context::TypeID,
     hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
-    id::{FunctionID, RegisterID, TypeID, VariableID},
+    id::{FunctionID, RegisterID, VariableID},
     linear_ir::{
         DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
         PhysicalPrimitive, PhysicalType, RuntimeFunction, TypeLayoutValue, NULL_TAG_SIZE,
@@ -164,7 +165,9 @@ impl<'a> VM<'a> {
         let Value::Size(location) = generator_ptr else {
             panic!("must provide a valid generator pointer to resume_generator");
         };
-        let fn_id: FunctionID = *bytemuck::from_bytes(&self.memory[location..(location + 4)]);
+        let fn_id: FunctionID = *bytemuck::from_bytes(
+            &self.memory[location..(location + std::mem::size_of::<FunctionID>())],
+        );
         self.evaluate_function(&mut [generator_ptr], fn_id)?;
 
         Ok(())
@@ -923,7 +926,9 @@ fn read(
             }
         }
         PhysicalType::FunctionPointer => {
-            let fn_id: FunctionID = *bytemuck::from_bytes(&memory[location..(location + 4)]);
+            let fn_id: FunctionID = *bytemuck::from_bytes(
+                &memory[location..(location + std::mem::size_of::<FunctionID>())],
+            );
             op_stack.push(Value::FunctionID(fn_id));
         }
     }

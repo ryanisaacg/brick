@@ -44,7 +44,7 @@ fn data() {
                             mem.add(allocator as usize),
                             size as usize,
                         );
-                        (allocated_block as *mut u8).offset_from(mem) as i32
+                        allocated_block.offset_from(mem) as i32
                     }
                 },
             )?;
@@ -59,7 +59,7 @@ fn data() {
                             mem.add(ptr as usize),
                             size as usize,
                         );
-                        (allocated_block as *mut u8).offset_from(mem) as i32
+                        allocated_block.offset_from(mem) as i32
                     }
                 },
             )?;
@@ -121,12 +121,15 @@ fn data() {
             look_for_value(store, memory, func, expected)
         },
         [
+            // Mysterious array issue
             "collections/append_to_array.brick",
+            // Dictionaries don't compile correctly
             "collections/basic_dict_keys.brick",
             "collections/dict_contains.brick",
             "collections/insert_existing_dict.brick",
             "collections/insert_new_in_dict.brick",
             "collections/write_to_dict.brick",
+            // Coroutines not yet implemented
             "coroutine/count_up.brick",
             "coroutine/echo.brick",
             "coroutine/infinite.brick",
@@ -139,7 +142,7 @@ fn data() {
             "coroutine/yield_basic.brick",
             "coroutine/yield_once.brick",
             "coroutine/yield_twice.brick",
-            "functions/can_assign_structs.brick",
+            // indirect function calls
             "interfaces/can_assign_structs.brick",
             // nulls not implemented
             "nullability/basic_null.brick",

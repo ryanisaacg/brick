@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use petgraph::stable_graph::NodeIndex;
 
 use crate::{
+    declaration_context::IntrinsicFunction,
     hir::HirNode,
     id::{NodeID, VariableID},
-    intrinsics::IntrinsicFunction,
     typecheck::CollectionType,
     ExpressionType, HirNodeValue,
 };

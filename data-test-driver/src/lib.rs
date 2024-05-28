@@ -101,7 +101,7 @@ fn path_display(path: &Path) -> String {
 
 pub fn test_folder(
     mut path: PathBuf,
-    check_does_compile: impl Fn(&str) -> anyhow::Result<()> + Send + Sync,
+    check_does_compile: impl Fn(&str) -> anyhow::Result<()> + Send + Sync + UnwindSafe + RefUnwindSafe,
     execute: impl (Fn(&str, &TestValue) -> anyhow::Result<TestValue>)
         + Send
         + Sync
@@ -121,7 +121,7 @@ pub fn test_folder(
             let path = entry.unwrap();
             let contents = fs::read_to_string(&path).unwrap();
             let cloned_path = path.clone();
-            let result = match parse_intended_result(&contents) {
+            let result = panic::catch_unwind(|| match parse_intended_result(&contents) {
                 TestExpectation::Compiles => match check_does_compile(&contents) {
                     Ok(_) => TestSuccessOrFailure::Succeeded(path),
                     Err(error) => TestSuccessOrFailure::FailsToCompile(path, error),
@@ -139,22 +139,19 @@ pub fn test_folder(
                         TestSuccessOrFailure::RanButShouldnt(path)
                     }
                 }
-                TestExpectation::ProducesValue(expected) => {
-                    match panic::catch_unwind(|| execute(&contents, &expected)) {
-                        Ok(executed) => match executed {
-                            Ok(received) if expected == received => {
-                                TestSuccessOrFailure::Succeeded(path)
-                            }
-                            Ok(received) => TestSuccessOrFailure::MismatchedResult {
-                                path,
-                                expected,
-                                received,
-                            },
-                            Err(error) => TestSuccessOrFailure::ErroredWhenRun(path, error),
-                        },
-                        Err(panic) => TestSuccessOrFailure::PanickedWhenRun(path, panic),
-                    }
-                }
+                TestExpectation::ProducesValue(expected) => match execute(&contents, &expected) {
+                    Ok(received) if expected == received => TestSuccessOrFailure::Succeeded(path),
+                    Ok(received) => TestSuccessOrFailure::MismatchedResult {
+                        path,
+                        expected,
+                        received,
+                    },
+                    Err(error) => TestSuccessOrFailure::ErroredWhenRun(path, error),
+                },
+            });
+            let result = match result {
+                Ok(result) => result,
+                Err(panic) => TestSuccessOrFailure::PanickedWhenRun(cloned_path.clone(), panic),
             };
             (cloned_path, result)
         })

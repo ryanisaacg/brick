@@ -8,7 +8,7 @@ pub fn auto_deref_dot(module: &mut HirModule) {
             return;
         };
         while let ExpressionType::Pointer(_, inner) = &lhs.ty {
-            deref(lhs, *inner.clone());
+            deref(lhs, inner.as_ref().clone())
         }
     });
 }

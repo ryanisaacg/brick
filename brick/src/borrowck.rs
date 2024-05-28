@@ -9,11 +9,12 @@ use petgraph::{
 use thiserror::Error;
 
 use crate::{
+    declaration_context::TypeID,
     hir::{HirModule, HirNode},
-    id::{AnyID, NodeID, TypeID, VariableID},
+    id::{AnyID, NodeID, VariableID},
     multi_error::{merge_results, print_multi_errors, MultiError},
     typecheck::{ExpressionType, PointerKind},
-    HirNodeValue, SourceRange, StaticDeclaration,
+    HirNodeValue, SourceRange, TypeDeclaration,
 };
 
 use self::control_flow_graph::{CfgEdge, CfgNode, ControlFlowGraph, FunctionCFG};
@@ -75,7 +76,7 @@ fn maybe_range(range: &Option<SourceRange>) -> String {
 
 pub fn borrow_check(
     module: &mut HirModule,
-    declarations: &HashMap<TypeID, &StaticDeclaration>,
+    declarations: &HashMap<TypeID, TypeDeclaration>,
 ) -> Result<(), LifetimeError> {
     let mut result = Ok(());
 
@@ -91,7 +92,7 @@ pub fn borrow_check(
 }
 
 fn borrow_check_body(
-    declarations: &HashMap<TypeID, &StaticDeclaration>,
+    declarations: &HashMap<TypeID, TypeDeclaration>,
     node: &mut HirNode,
 ) -> Result<(), LifetimeError> {
     let FunctionCFG {
@@ -165,7 +166,7 @@ enum BorrowLifeState {
 }
 
 struct Context<'a> {
-    declarations: &'a HashMap<TypeID, &'a StaticDeclaration>,
+    declarations: &'a HashMap<TypeID, TypeDeclaration>,
     block_queue: VecDeque<NodeIndex>,
     loops_visited: HashSet<EdgeIndex>,
 }
@@ -558,7 +559,7 @@ fn invalidate_borrowers(
     }
 }
 
-fn is_copy(declarations: &HashMap<TypeID, &StaticDeclaration>, ty: &ExpressionType) -> bool {
+fn is_copy(declarations: &HashMap<TypeID, TypeDeclaration>, ty: &ExpressionType) -> bool {
     !ty.is_affine(declarations)
 }
 

@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use brick::id::{AnyID, FunctionID};
+use brick::id::AnyID;
+use brick::HirNodeValue;
 use brick::SourceRange;
-use brick::{HirNodeValue, StaticDeclaration};
 use lsp_types::{
     request::GotoDefinition, GotoDefinitionResponse, InitializeParams, ServerCapabilities,
 };
@@ -140,24 +140,10 @@ fn find_definition(params: &GotoDefinitionParams) -> anyhow::Result<Option<Sourc
 
     Ok(match found {
         Some(id) => match id {
-            AnyID::Function(fn_id) => decls.values().find_map(|decl| find_function(decl, fn_id)),
+            AnyID::Function(fn_id) => decls.id_to_func[&fn_id].provenance.clone(),
             AnyID::Type(_) => todo!(),
             AnyID::Variable(_) => todo!(),
         },
         None => None,
     })
-}
-
-fn find_function(module: &StaticDeclaration, id: FunctionID) -> Option<SourceRange> {
-    let mut found = None;
-    module.visit(&mut |decl| {
-        let StaticDeclaration::Func(func) = decl else {
-            return;
-        };
-        if func.func_id == id {
-            found = func.provenance.clone();
-        }
-    });
-
-    found
 }
