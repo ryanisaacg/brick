@@ -10,76 +10,63 @@ use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
 use crate::{WASM_BOOL_SIZE, WASM_USIZE};
 
-#[allow(clippy::too_many_arguments)]
-pub fn encode(
-    function_id_to_idx: &HashMap<FunctionID, u32>,
-    declarations: &HashMap<TypeID, DeclaredTypeLayout>,
-    function_return_types: &HashMap<FunctionID, Option<PhysicalType>>,
-    stackptr_global_idx: u32,
-    allocptr_global_idx: u32,
-    linear_function_to_id: &HashMap<RuntimeFunction, u32>,
-    constant_data_start: i32,
-    func: &LinearFunction,
-) -> Function {
-    let mut parameter_start_idx = 0;
-    let parameter_starts = func
-        .params
-        .iter()
-        .map(|param| {
-            let start_idx = parameter_start_idx;
-            walk_vals_read_order(declarations, param, 0, &mut |_, _| {
-                parameter_start_idx += 1;
-            });
-            start_idx
-        })
-        .collect();
-    let mut ctx = Context {
-        func,
-        declarations,
-        stackptr_global_idx,
-        allocptr_global_idx,
-        linear_function_to_id,
-        parameter_starts,
-        constant_data_start,
-        function_return_types,
-
-        instructions: Vec::new(),
-
-        function_id_to_idx,
-        register_to_local: HashMap::new(),
-        locals: Vec::new(),
-        local_index: parameter_start_idx,
-        variable_locations: HashMap::new(),
-        stack_size: 0,
-        last_loop_depth: 0,
-    };
-    for node in func.body.iter() {
-        encode_node(&mut ctx, node, None);
-    }
-    let locals = ctx.locals.iter().cloned();
-    let mut f = Function::new(locals);
-    // Expand stack
-    f.instruction(&Instruction::GlobalGet(stackptr_global_idx));
-    f.instruction(&Instruction::I32Const(ctx.stack_size));
-    f.instruction(&Instruction::I32Sub);
-    f.instruction(&Instruction::GlobalSet(stackptr_global_idx));
-    for instr in ctx.instructions.iter() {
-        if matches!(instr, Instruction::Return) {
-            contract_stack(&mut f, stackptr_global_idx, ctx.stack_size);
-        }
-        f.instruction(instr);
-    }
-    // Contract stack
-    contract_stack(&mut f, stackptr_global_idx, ctx.stack_size);
-    f.instruction(&Instruction::End);
-
-    f
+pub struct FunctionEncoder<'a> {
+    pub function_id_to_fn_idx: &'a HashMap<FunctionID, u32>,
+    pub function_id_to_ty_idx: &'a HashMap<FunctionID, u32>,
+    pub type_layouts: &'a HashMap<TypeID, DeclaredTypeLayout>,
+    pub function_return_types: &'a HashMap<FunctionID, Option<PhysicalType>>,
+    pub stackptr_global_idx: u32,
+    pub allocptr_global_idx: u32,
+    pub linear_function_to_id: &'a HashMap<RuntimeFunction, u32>,
+    pub constant_data_start: i32,
+    pub indirect_call_table: u32,
+    pub indirect_function_id_to_table: &'a HashMap<FunctionID, u32>,
 }
 
-struct Context<'a> {
+impl FunctionEncoder<'_> {
+    pub fn encode(&self, func: &LinearFunction) -> Function {
+        let mut parameter_start_idx = 0;
+        let parameter_starts = func
+            .params
+            .iter()
+            .map(|param| {
+                let start_idx = parameter_start_idx;
+                walk_vals_read_order(self.type_layouts, param, 0, &mut |_, _| {
+                    parameter_start_idx += 1;
+                });
+                start_idx
+            })
+            .collect();
+        let mut ctx = FunctionContext::new(self, func, parameter_starts, parameter_start_idx);
+        for node in func.body.iter() {
+            encode_node(&mut ctx, node, None);
+        }
+        let locals = ctx.locals.iter().cloned();
+        let mut f = Function::new(locals);
+        // Expand stack
+        f.instruction(&Instruction::GlobalGet(ctx.stackptr_global_idx));
+        f.instruction(&Instruction::I32Const(ctx.stack_size));
+        f.instruction(&Instruction::I32Sub);
+        f.instruction(&Instruction::GlobalSet(ctx.stackptr_global_idx));
+        for instr in ctx.instructions.iter() {
+            if matches!(instr, Instruction::Return) {
+                contract_stack(&mut f, ctx.stackptr_global_idx, ctx.stack_size);
+            }
+            f.instruction(instr);
+        }
+        // Contract stack
+        contract_stack(&mut f, ctx.stackptr_global_idx, ctx.stack_size);
+        f.instruction(&Instruction::End);
+
+        f
+    }
+}
+
+struct FunctionContext<'a> {
     // Environment
     func: &'a LinearFunction,
-    function_id_to_idx: &'a HashMap<FunctionID, u32>,
+    function_id_to_fn_idx: &'a HashMap<FunctionID, u32>,
+    function_id_to_ty_idx: &'a HashMap<FunctionID, u32>,
     stackptr_global_idx: u32,
     allocptr_global_idx: u32,
     declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
@@ -87,6 +74,8 @@ struct Context<'a> {
     linear_function_to_id: &'a HashMap<RuntimeFunction, u32>,
     parameter_starts: Vec<u32>,
     constant_data_start: i32,
+    indirect_call_table: u32,
+    indirect_function_id_to_table: &'a HashMap<FunctionID, u32>,
     // Result
     instructions: Vec<Instruction<'a>>,
     // Temp
@@ -98,7 +87,49 @@ struct Context<'a> {
     last_loop_depth: u32,
 }
 
-impl<'a> Context<'a> {
+impl<'a> FunctionContext<'a> {
+    fn new(
+        FunctionEncoder {
+            function_id_to_fn_idx,
+            function_id_to_ty_idx,
+            type_layouts: declarations,
+            function_return_types,
+            stackptr_global_idx,
+            allocptr_global_idx,
+            linear_function_to_id,
+            constant_data_start,
+            indirect_call_table,
+            indirect_function_id_to_table,
+        }: &'a FunctionEncoder<'a>,
+        func: &'a LinearFunction,
+        parameter_starts: Vec<u32>,
+        parameter_start_idx: u32,
+    ) -> Self {
+        FunctionContext {
+            func,
+            declarations,
+            stackptr_global_idx: *stackptr_global_idx,
+            allocptr_global_idx: *allocptr_global_idx,
+            linear_function_to_id,
+            parameter_starts,
+            constant_data_start: *constant_data_start,
+            function_return_types,
+            indirect_call_table: *indirect_call_table,
+            indirect_function_id_to_table,
+            function_id_to_fn_idx,
+            function_id_to_ty_idx,
+
+            instructions: Vec::new(),
+
+            register_to_local: HashMap::new(),
+            locals: Vec::new(),
+            local_index: parameter_start_idx,
+            variable_locations: HashMap::new(),
+            stack_size: 0,
+            last_loop_depth: 0,
+        }
+    }
+
     fn alloc_local(&mut self, val: ValType) -> u32 {
         let local_idx = self.local_index;
         match self.locals.last_mut() {
@@ -114,7 +145,7 @@ impl<'a> Context<'a> {
     }
 }
 
-type PrimitiveCallback<'a> = Option<&'a dyn Fn(&mut Context<'_>, ValType, usize)>;
+type PrimitiveCallback<'a> = Option<&'a dyn Fn(&mut FunctionContext<'_>, ValType, usize)>;
 
 struct Callbacks<'a> {
     index: Rc<RwLock<usize>>,
@@ -139,12 +170,12 @@ impl Callbacks<'_> {
         *self.index.write().unwrap() = idx;
     }
 
-    fn call_before(&self, ctx: &mut Context<'_>, val: ValType) {
+    fn call_before(&self, ctx: &mut FunctionContext<'_>, val: ValType) {
         let Some(before) = &self.before else { return };
         before(ctx, val, self.index());
     }
 
-    fn call_after(&self, ctx: &mut Context<'_>, val: ValType) {
+    fn call_after(&self, ctx: &mut FunctionContext<'_>, val: ValType) {
         let Some(after) = &self.after else { return };
         let index = self.index();
         after(ctx, val, index);
@@ -152,7 +183,11 @@ impl Callbacks<'_> {
     }
 }
 
-fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Callbacks<'_>>) {
+fn encode_node(
+    ctx: &mut FunctionContext<'_>,
+    node: &LinearNode,
+    callbacks: Option<&Callbacks<'_>>,
+) {
     let node_ty = node.ty(ctx.function_return_types);
     if let Some(PhysicalType::Primitive(prim)) = node_ty {
         if let Some(inner_callbacks) = callbacks {
@@ -235,7 +270,8 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
                 match prim {
                     PhysicalPrimitive::Byte
                     | PhysicalPrimitive::Int32
-                    | PhysicalPrimitive::PointerSize => {
+                    | PhysicalPrimitive::PointerSize
+                    | PhysicalPrimitive::FunctionPointer => {
                         ctx.instructions.push(Instruction::I32Store(mem));
                     }
                     PhysicalPrimitive::Float32 => {
@@ -288,12 +324,20 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
             for arg in args.iter() {
                 encode_node(ctx, arg, None);
             }
-            let fn_idx = ctx.function_id_to_idx[fn_id];
+            let fn_idx = ctx.function_id_to_fn_idx[fn_id];
             ctx.instructions.push(Instruction::Call(fn_idx));
             handle_function_call_results(ctx, callbacks, node_ty.as_ref());
         }
-        LinearNodeValue::IndirectCall(_lhs, _args) => {
-            // not yet implemented
+        LinearNodeValue::IndirectCall(fn_id, lhs, args) => {
+            for arg in args.iter() {
+                encode_node(ctx, arg, None);
+            }
+            encode_node(ctx, lhs, None);
+            ctx.instructions.push(Instruction::CallIndirect {
+                ty: ctx.function_id_to_ty_idx[fn_id],
+                table: ctx.indirect_call_table,
+            });
+            handle_function_call_results(ctx, callbacks, node_ty.as_ref());
         }
         LinearNodeValue::RuntimeCall(
             func @ (RuntimeFunction::Alloc
@@ -389,69 +433,39 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
         LinearNodeValue::Arithmetic(operator, prim, lhs, rhs) => {
             encode_node(ctx, lhs, None);
             encode_node(ctx, rhs, None);
-            match (operator, prim) {
+            ctx.instructions.push(match (operator, prim) {
+                (_, PhysicalPrimitive::FunctionPointer) => unreachable!(),
                 (ArithmeticOp::Add, PhysicalPrimitive::Byte)
                 | (ArithmeticOp::Add, PhysicalPrimitive::PointerSize)
-                | (ArithmeticOp::Add, PhysicalPrimitive::Int32) => {
-                    ctx.instructions.push(Instruction::I32Add);
-                }
-                (ArithmeticOp::Add, PhysicalPrimitive::Float32) => {
-                    ctx.instructions.push(Instruction::F32Add);
-                }
-                (ArithmeticOp::Add, PhysicalPrimitive::Int64) => {
-                    ctx.instructions.push(Instruction::I64Add);
-                }
-                (ArithmeticOp::Add, PhysicalPrimitive::Float64) => {
-                    ctx.instructions.push(Instruction::F64Add);
-                }
+                | (ArithmeticOp::Add, PhysicalPrimitive::Int32) => Instruction::I32Add,
+                (ArithmeticOp::Add, PhysicalPrimitive::Float32) => Instruction::F32Add,
+                (ArithmeticOp::Add, PhysicalPrimitive::Int64) => Instruction::I64Add,
+                (ArithmeticOp::Add, PhysicalPrimitive::Float64) => Instruction::F64Add,
                 (ArithmeticOp::Subtract, PhysicalPrimitive::Byte)
                 | (ArithmeticOp::Subtract, PhysicalPrimitive::PointerSize)
-                | (ArithmeticOp::Subtract, PhysicalPrimitive::Int32) => {
-                    ctx.instructions.push(Instruction::I32Sub);
-                }
-                (ArithmeticOp::Subtract, PhysicalPrimitive::Float32) => {
-                    ctx.instructions.push(Instruction::F32Sub);
-                }
-                (ArithmeticOp::Subtract, PhysicalPrimitive::Int64) => {
-                    ctx.instructions.push(Instruction::I64Sub);
-                }
-                (ArithmeticOp::Subtract, PhysicalPrimitive::Float64) => {
-                    ctx.instructions.push(Instruction::F64Sub);
-                }
+                | (ArithmeticOp::Subtract, PhysicalPrimitive::Int32) => Instruction::I32Sub,
+                (ArithmeticOp::Subtract, PhysicalPrimitive::Float32) => Instruction::F32Sub,
+                (ArithmeticOp::Subtract, PhysicalPrimitive::Int64) => Instruction::I64Sub,
+                (ArithmeticOp::Subtract, PhysicalPrimitive::Float64) => Instruction::F64Sub,
                 (ArithmeticOp::Multiply, PhysicalPrimitive::Byte)
                 | (ArithmeticOp::Multiply, PhysicalPrimitive::PointerSize)
-                | (ArithmeticOp::Multiply, PhysicalPrimitive::Int32) => {
-                    ctx.instructions.push(Instruction::I32Mul);
-                }
-                (ArithmeticOp::Multiply, PhysicalPrimitive::Float32) => {
-                    ctx.instructions.push(Instruction::F32Mul);
-                }
-                (ArithmeticOp::Multiply, PhysicalPrimitive::Int64) => {
-                    ctx.instructions.push(Instruction::I64Mul);
-                }
-                (ArithmeticOp::Multiply, PhysicalPrimitive::Float64) => {
-                    ctx.instructions.push(Instruction::F64Mul);
-                }
+                | (ArithmeticOp::Multiply, PhysicalPrimitive::Int32) => Instruction::I32Mul,
+                (ArithmeticOp::Multiply, PhysicalPrimitive::Float32) => Instruction::F32Mul,
+                (ArithmeticOp::Multiply, PhysicalPrimitive::Int64) => Instruction::I64Mul,
+                (ArithmeticOp::Multiply, PhysicalPrimitive::Float64) => Instruction::F64Mul,
                 (ArithmeticOp::Divide, PhysicalPrimitive::Byte)
                 | (ArithmeticOp::Divide, PhysicalPrimitive::PointerSize)
-                | (ArithmeticOp::Divide, PhysicalPrimitive::Int32) => {
-                    ctx.instructions.push(Instruction::I32DivS);
-                }
-                (ArithmeticOp::Divide, PhysicalPrimitive::Float32) => {
-                    ctx.instructions.push(Instruction::F32Div);
-                }
-                (ArithmeticOp::Divide, PhysicalPrimitive::Int64) => {
-                    ctx.instructions.push(Instruction::I64DivS);
-                }
-                (ArithmeticOp::Divide, PhysicalPrimitive::Float64) => {
-                    ctx.instructions.push(Instruction::F64Div);
-                }
-            }
+                | (ArithmeticOp::Divide, PhysicalPrimitive::Int32) => Instruction::I32DivS,
+                (ArithmeticOp::Divide, PhysicalPrimitive::Float32) => Instruction::F32Div,
+                (ArithmeticOp::Divide, PhysicalPrimitive::Int64) => Instruction::I64DivS,
+                (ArithmeticOp::Divide, PhysicalPrimitive::Float64) => Instruction::F64Div,
+            });
         }
         LinearNodeValue::Comparison(operator, prim, lhs, rhs) => {
             encode_node(ctx, lhs, None);
             encode_node(ctx, rhs, None);
             match (operator, prim) {
+                (_, PhysicalPrimitive::FunctionPointer) => unreachable!(),
                 (ComparisonOp::LessThan, PhysicalPrimitive::Byte) => {
                     ctx.instructions.push(Instruction::I32LtS);
                 }
@@ -586,6 +600,8 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
         LinearNodeValue::Cast { value, from, to } => {
             encode_node(ctx, value, None);
             match (from, to) {
+                (_, PhysicalPrimitive::FunctionPointer) => unreachable!(),
+                (PhysicalPrimitive::FunctionPointer, _) => unreachable!(),
                 (
                     PhysicalPrimitive::Byte
                     | PhysicalPrimitive::Int32
@@ -685,7 +701,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
             ctx.instructions.push(Instruction::I32Const(*value as i32));
         }
         LinearNodeValue::FunctionID(fn_id) => {
-            let fn_idx = ctx.function_id_to_idx[fn_id];
+            let fn_idx = ctx.indirect_function_id_to_table[fn_id];
             ctx.instructions.push(Instruction::I32Const(fn_idx as i32));
         }
         LinearNodeValue::ConstantDataAddress(offset) => {
@@ -739,7 +755,7 @@ fn encode_node(ctx: &mut Context<'_>, node: &LinearNode, callbacks: Option<&Call
     }
 }
 
-fn write_register(ctx: &mut Context<'_>, reg_id: &RegisterID) {
+fn write_register(ctx: &mut FunctionContext<'_>, reg_id: &RegisterID) {
     if !ctx.register_to_local.contains_key(reg_id) {
         let local = ctx.alloc_local(ValType::I32);
         ctx.register_to_local.insert(*reg_id, local);
@@ -756,7 +772,6 @@ pub fn walk_vals_read_order(
 ) {
     match ty {
         PhysicalType::Primitive(prim) => callback(primitive_to_val_type(*prim), offset),
-        PhysicalType::FunctionPointer => callback(ValType::I32, offset),
         PhysicalType::Referenced(ty_id) => {
             let ty = &declarations[ty_id];
             match &ty.value {
@@ -819,7 +834,7 @@ pub fn walk_vals_read_order(
     }
 }
 
-fn read_primitive(ctx: &mut Context<'_>, ty: ValType, offset: u64) {
+fn read_primitive(ctx: &mut FunctionContext<'_>, ty: ValType, offset: u64) {
     let mem = MemArg {
         offset,
         align: 0,
@@ -836,7 +851,7 @@ fn read_primitive(ctx: &mut Context<'_>, ty: ValType, offset: u64) {
 
 /// Reverse results of function call and handle callback
 fn handle_function_call_results(
-    ctx: &mut Context<'_>,
+    ctx: &mut FunctionContext<'_>,
     callbacks: Option<&Callbacks<'_>>,
     ty: Option<&PhysicalType>,
 ) {
@@ -866,9 +881,6 @@ pub fn walk_vals_write_order(
     match ty {
         PhysicalType::Primitive(prim) => {
             callback(primitive_to_val_type(*prim), offset);
-        }
-        PhysicalType::FunctionPointer => {
-            callback(ValType::I32, offset);
         }
         PhysicalType::Referenced(id) => match &declarations[id].value {
             TypeLayoutValue::Structure(fields) => {
@@ -930,9 +942,10 @@ fn contract_stack(f: &mut Function, stackptr_global_idx: u32, stack_size: i32) {
 
 fn primitive_to_val_type(primitive: PhysicalPrimitive) -> ValType {
     match primitive {
-        PhysicalPrimitive::Byte | PhysicalPrimitive::Int32 | PhysicalPrimitive::PointerSize => {
-            ValType::I32
-        }
+        PhysicalPrimitive::Byte
+        | PhysicalPrimitive::Int32
+        | PhysicalPrimitive::PointerSize
+        | PhysicalPrimitive::FunctionPointer => ValType::I32,
         PhysicalPrimitive::Float32 => ValType::F32,
         PhysicalPrimitive::Int64 => ValType::I64,
         PhysicalPrimitive::Float64 => ValType::F64,

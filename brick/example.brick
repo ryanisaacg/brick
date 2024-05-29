@@ -1,11 +1,15 @@
-let value = 0;
-let d = dict{ [1]: 30 };
-let key = 1;
-if d.contains_key(ref key) {
-    value += 5;
+interface HasArea {
+    fn area(area: HasArea): i32,
 }
-key = 2;
-if d.contains_key(ref key) {
-    value += 50;
+
+struct Square {
+    size: i32,
+
+    fn area(self: ref Square): i32 {
+        self.size
+    }
 }
-value
+
+let y = Square { size: 5 };
+let x: HasArea = y;
+x.area()

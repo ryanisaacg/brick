@@ -33,7 +33,6 @@ wasm backend:
 - handle nullability
 - handle coroutines
 - figure out and fix issue with dictionaries
-- vtables / dynamic functions
 - trailing return statements in functions cause miscompilations
 
 import support:

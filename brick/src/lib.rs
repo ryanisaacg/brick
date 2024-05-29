@@ -1,5 +1,6 @@
 #![allow(clippy::result_large_err)]
 
+use declaration_context::Module;
 pub use declaration_context::{DeclarationContext, TypeID};
 use multi_error::merge_results;
 use std::{
@@ -14,10 +15,10 @@ pub use linear_ir::{
     expr_ty_to_physical, DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue,
     PhysicalCollection, PhysicalPrimitive, PhysicalType, RuntimeFunction, TypeLayoutValue,
 };
-use linear_ir::{layout_types, linearize_function, LinearContext};
+use linear_ir::{layout_types, LinearContext};
 use thiserror::Error;
 use typecheck::typecheck;
-pub use typecheck::{ExpressionType, TypeDeclaration};
+pub use typecheck::{ExpressionType, FuncType, TypeDeclaration};
 
 mod borrowck;
 mod declaration_context;
@@ -134,7 +135,7 @@ pub fn lower_code(
 ) -> Result<LowerResults, CompileError> {
     let CompilationResults {
         modules,
-        declarations,
+        mut declarations,
     } = typecheck_module(module_name, source_name, contents)?;
 
     let mut type_layouts = HashMap::new();
@@ -148,6 +149,16 @@ pub fn lower_code(
     let mut statements = Vec::new();
     let mut functions = Vec::new();
     let mut constant_data = Vec::new();
+    let mut indirect_function_types = HashMap::new();
+
+    let mut linear_context = LinearContext {
+        layouts: &type_layouts,
+        constant_data_region: &mut constant_data,
+        indirect_function_types: &mut indirect_function_types,
+        byte_size,
+        pointer_size,
+        module: Module::new(),
+    };
 
     for (name, module) in modules {
         // TODO: execute imported statements?
@@ -155,13 +166,7 @@ pub fn lower_code(
             statements.push(module.top_level_statements);
         }
         for function in module.functions {
-            functions.push(linearize_function(
-                &mut constant_data,
-                &type_layouts,
-                function,
-                byte_size,
-                pointer_size,
-            ));
+            functions.push(linear_context.linearize_function(function));
         }
     }
 
@@ -169,8 +174,29 @@ pub fn lower_code(
         ExpressionType::Void | ExpressionType::Unreachable => None,
         return_ty => Some(expr_ty_to_physical(return_ty)),
     });
-    let statements = LinearContext::new(&type_layouts, &mut constant_data, byte_size, pointer_size)
-        .linearize_nodes(statements);
+    let statements = linear_context.linearize_nodes(statements);
+
+    for (expr, fn_id) in indirect_function_types {
+        let ExpressionType::FunctionReference {
+            parameters,
+            returns,
+        } = expr
+        else {
+            unreachable!();
+        };
+        declarations.id_to_func.insert(
+            fn_id,
+            FuncType {
+                id: fn_id,
+                type_param_count: 0,
+                params: parameters,
+                returns: *returns,
+                is_associated: false,
+                is_coroutine: false,
+                provenance: None,
+            },
+        );
+    }
 
     Ok(LowerResults {
         statements,

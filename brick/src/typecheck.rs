@@ -13,7 +13,7 @@ use crate::{
     provenance::SourceRange,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum ExpressionType {
     Void,
     Unreachable,
@@ -92,14 +92,14 @@ impl ExpressionType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum CollectionType {
     Array(Box<ExpressionType>),
     Dict(Box<ExpressionType>, Box<ExpressionType>),
     String,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum PointerKind {
     Shared,
     Unique,
@@ -233,7 +233,7 @@ pub struct InterfaceType {
     pub associated_functions: HashMap<String, FunctionID>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum PrimitiveType {
     Char,
     Int32,

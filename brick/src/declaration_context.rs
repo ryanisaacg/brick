@@ -111,7 +111,7 @@ pub struct Module {
 }
 
 impl Module {
-    fn new() -> Module {
+    pub(crate) fn new() -> Module {
         Module {
             id: PackageID::new(),
             type_name_to_id: HashMap::new(),

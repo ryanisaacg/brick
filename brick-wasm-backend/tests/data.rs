@@ -142,8 +142,6 @@ fn data() {
             "coroutine/yield_basic.brick",
             "coroutine/yield_once.brick",
             "coroutine/yield_twice.brick",
-            // indirect function calls
-            "interfaces/can_assign_structs.brick",
             // nulls not implemented
             "nullability/basic_null.brick",
             "nullability/null_coalesce.brick",

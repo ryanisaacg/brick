@@ -305,7 +305,7 @@ impl<'a> VM<'a> {
                     ty,
                 );
             }
-            LinearNodeValue::IndirectCall(lhs, parameters) => {
+            LinearNodeValue::IndirectCall(_, lhs, parameters) => {
                 self.evaluate_node(params, lhs)?;
                 let Some(Value::FunctionID(fn_id)) = self.op_stack.pop() else {
                     unreachable!()
@@ -555,6 +555,7 @@ impl<'a> VM<'a> {
                         PhysicalPrimitive::Float32 => Value::Float32(val as f32),
                         PhysicalPrimitive::Float64 => Value::Float64(val as f64),
                         PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                        PhysicalPrimitive::FunctionPointer => unreachable!(),
                     },
                     Value::Int32(val) => match to {
                         PhysicalPrimitive::Byte => Value::Byte(val as u8),
@@ -563,6 +564,7 @@ impl<'a> VM<'a> {
                         PhysicalPrimitive::Float32 => Value::Float32(val as f32),
                         PhysicalPrimitive::Float64 => Value::Float64(val as f64),
                         PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                        PhysicalPrimitive::FunctionPointer => unreachable!(),
                     },
                     Value::Int64(val) => match to {
                         PhysicalPrimitive::Byte => Value::Byte(val as u8),
@@ -571,6 +573,7 @@ impl<'a> VM<'a> {
                         PhysicalPrimitive::Float32 => Value::Float32(val as f32),
                         PhysicalPrimitive::Float64 => Value::Float64(val as f64),
                         PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                        PhysicalPrimitive::FunctionPointer => unreachable!(),
                     },
                     Value::Float32(val) => match to {
                         PhysicalPrimitive::Byte => Value::Byte(val as u8),
@@ -579,6 +582,7 @@ impl<'a> VM<'a> {
                         PhysicalPrimitive::Float32 => Value::Float32(val),
                         PhysicalPrimitive::Float64 => Value::Float64(val as f64),
                         PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                        PhysicalPrimitive::FunctionPointer => unreachable!(),
                     },
                     Value::Float64(val) => match to {
                         PhysicalPrimitive::Byte => Value::Byte(val as u8),
@@ -587,6 +591,7 @@ impl<'a> VM<'a> {
                         PhysicalPrimitive::Float32 => Value::Float32(val as f32),
                         PhysicalPrimitive::Float64 => Value::Float64(val),
                         PhysicalPrimitive::PointerSize => Value::Size(val as usize),
+                        PhysicalPrimitive::FunctionPointer => unreachable!(),
                     },
                 });
             }
@@ -795,9 +800,6 @@ fn write(
             write_primitive(op_stack, memory, location);
             write_primitive(op_stack, memory, location + 8);
         }
-        PhysicalType::FunctionPointer => {
-            write_primitive(op_stack, memory, location);
-        }
         PhysicalType::Nullable(ty) => match op_stack.pop().unwrap() {
             Value::Byte(0) => {
                 memory[location] = 0;
@@ -865,7 +867,7 @@ fn read(
                             layouts,
                             memory,
                             location,
-                            &PhysicalType::FunctionPointer,
+                            &PhysicalType::Primitive(PhysicalPrimitive::FunctionPointer),
                         );
                         location -= std::mem::size_of::<FunctionID>();
                     }
@@ -925,12 +927,6 @@ fn read(
                 op_stack.push(bool_value(true));
             }
         }
-        PhysicalType::FunctionPointer => {
-            let fn_id: FunctionID = *bytemuck::from_bytes(
-                &memory[location..(location + std::mem::size_of::<FunctionID>())],
-            );
-            op_stack.push(Value::FunctionID(fn_id));
-        }
     }
 }
 
@@ -958,6 +954,12 @@ fn read_primitive(
             let base_ptr = &memory[location..(location + 8)];
             let base_ptr = usize::from_le_bytes(base_ptr.try_into().unwrap());
             Value::Size(base_ptr)
+        }
+        PhysicalPrimitive::FunctionPointer => {
+            let fn_id: FunctionID = *bytemuck::from_bytes(
+                &memory[location..(location + std::mem::size_of::<FunctionID>())],
+            );
+            Value::FunctionID(fn_id)
         }
     });
 }

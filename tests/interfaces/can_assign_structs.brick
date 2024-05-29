@@ -1,21 +1,15 @@
-// Int | 17
-interface HasArea {
-    fn area(area: HasArea): i32,
+// Int | 5
+interface HasValue {
+    fn value(val: ref HasValue): i32,
 }
 
 struct Square {
     size: i32,
 
-    fn area(self: ref Square): i32 {
-        self.size * self.size
+    fn value(self: ref Square): i32 {
+        self.size
     }
 }
 
-fn area_2(shape: HasArea): i32 {
-    let area = shape.area();
-    area * area
-}
-
-let a1 = area_2(Square { size: 2 });
-let a2 = area_2(Square { size: 1 });
-a1 + a2
+let x: HasValue = Square { size: 5 };
+x.value()

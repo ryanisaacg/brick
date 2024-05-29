@@ -1,17 +1,19 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use brick::{
     expr_ty_to_physical, lower_code, CompileError, ExpressionType, LinearFunction, LowerResults,
 };
-use function_bodies::walk_vals_write_order;
+use function_bodies::{walk_vals_write_order, FunctionEncoder};
 use wasm_encoder::{
-    CodeSection, ConstExpr, DataSection, DataSegment, DataSegmentMode, ExportKind, ExportSection,
-    FunctionSection, GlobalSection, GlobalType, ImportSection, MemorySection, MemoryType, Module,
-    StartSection, TypeSection, ValType,
+    CodeSection, ConstExpr, DataSection, DataSegment, DataSegmentMode, ElementSection, Elements,
+    ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType, ImportSection,
+    MemorySection, MemoryType, Module, RefType, StartSection, TableSection, TableType, TypeSection,
+    ValType,
 };
 
 mod function_bodies;
 mod function_headers;
+mod indirect_function_table;
 mod runtime;
 
 /**
@@ -62,10 +64,10 @@ pub fn compile(
         );
     }
 
-    let mut start_results = Vec::new();
+    let mut main_fn_results = Vec::new();
     if let Some(return_ty) = &statements_ty {
         walk_vals_write_order(&type_layouts, return_ty, 0, &mut |p, _| {
-            start_results.push(p)
+            main_fn_results.push(p)
         });
     }
     let main = LinearFunction {
@@ -81,10 +83,12 @@ pub fn compile(
     let mut ty_section = TypeSection::new();
     let mut import_section = ImportSection::new();
     let mut fn_section = FunctionSection::new();
-    let mut codes = CodeSection::new();
+    let mut table_section = TableSection::new();
+    let mut memories = MemorySection::new();
     let mut globals = GlobalSection::new();
     let mut exports = ExportSection::new();
-    let mut memories = MemorySection::new();
+    let mut elem_section = ElementSection::new();
+    let mut codes = CodeSection::new();
     let mut data_section = DataSection::new();
 
     let constant_data_start = 0;
@@ -117,44 +121,70 @@ pub fn compile(
         &ConstExpr::i32_const(constant_data_offset),
     );
 
-    let mut function_id_to_idx = HashMap::new();
-    let mut type_index = 0;
-    let linear_function_to_id =
-        runtime::add_runtime_imports(&mut import_section, &mut ty_section, &mut type_index);
-    let runtime_init_idx =
-        runtime::add_init_import(&mut import_section, &mut ty_section, &mut type_index);
-    let main_index = type_index;
+    let mut function_id_to_fn_idx = HashMap::new();
+    let mut function_id_to_ty_idx = HashMap::new();
+    let linear_function_to_id = runtime::add_runtime_imports(&mut import_section, &mut ty_section);
+    let runtime_init_idx = fn_section.len() + import_section.len();
+    runtime::add_init_import(&mut import_section, &mut ty_section);
+    let main_index = ty_section.len();
+    let functions_with_bodies: HashSet<_> = functions.iter().map(|func| func.id).collect();
     for function in functions.iter() {
-        function_headers::encode(
-            &type_layouts,
-            type_index,
+        function_id_to_fn_idx.insert(function.id, fn_section.len() + import_section.len());
+        fn_section.function(ty_section.len());
+        function_id_to_ty_idx.insert(function.id, ty_section.len());
+        function_headers::encode_linear(&type_layouts, function, &mut ty_section);
+    }
+    for function in declarations.id_to_func.values() {
+        // Skip intrinsics with generics
+        if function.type_param_count > 0 || functions_with_bodies.contains(&function.id) {
+            continue;
+        }
+        function_id_to_ty_idx.insert(function.id, ty_section.len());
+        function_headers::encode_func_ty(&type_layouts, function, &mut ty_section);
+    }
+    let mut indirect_function_id_to_table = HashMap::new();
+    let mut indirect_functions_for_table = Vec::new();
+    for function in functions.iter() {
+        indirect_function_table::encode(
+            &mut indirect_function_id_to_table,
+            &mut indirect_functions_for_table,
+            &function_id_to_ty_idx,
             function,
-            &mut ty_section,
-            &mut fn_section,
         );
-        function_id_to_idx.insert(function.id, type_index);
-        type_index += 1;
     }
+    let indirect_call_table = table_section.len();
+    table_section.table(TableType {
+        element_type: RefType::FUNCREF,
+        minimum: indirect_functions_for_table.len() as u32,
+        maximum: Some(indirect_functions_for_table.len() as u32),
+    });
+    elem_section.active(
+        Some(indirect_call_table),
+        &ConstExpr::i32_const(0),
+        Elements::Functions(&indirect_functions_for_table[..]),
+    );
+    let context = FunctionEncoder {
+        function_id_to_fn_idx: &function_id_to_fn_idx,
+        function_id_to_ty_idx: &function_id_to_ty_idx,
+        type_layouts: &type_layouts,
+        function_return_types: &function_return_types,
+        stackptr_global_idx: stack_pointer,
+        allocptr_global_idx: alloc_pointer,
+        linear_function_to_id: &linear_function_to_id,
+        constant_data_start,
+        indirect_call_table,
+        indirect_function_id_to_table: &indirect_function_id_to_table,
+    };
     for function in functions.iter() {
-        codes.function(&function_bodies::encode(
-            &function_id_to_idx,
-            &type_layouts,
-            &function_return_types,
-            stack_pointer,
-            alloc_pointer,
-            &linear_function_to_id,
-            constant_data_start,
-            function,
-        ));
+        codes.function(&context.encode(function));
     }
-    let start_index = runtime::add_start(
-        &mut ty_section,
-        &mut fn_section,
+    let start_index = import_section.len() + fn_section.len();
+    fn_section.function(ty_section.len());
+    ty_section.function([], main_fn_results);
+    runtime::add_start(
         &mut codes,
-        &mut type_index,
         runtime_init_idx,
         main_index,
-        start_results,
         alloc_pointer,
         HEAP_SIZE,
     );
@@ -172,6 +202,7 @@ pub fn compile(
     module.section(&ty_section);
     module.section(&import_section);
     module.section(&fn_section);
+    module.section(&table_section);
     module.section(&memories);
     module.section(&globals);
     module.section(&exports);
@@ -180,6 +211,7 @@ pub fn compile(
             function_index: start_index,
         });
     }
+    module.section(&elem_section);
     module.section(&codes);
     module.section(&data_section);
 

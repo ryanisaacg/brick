@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    declaration_context::{IntrinsicFunction, TypeID},
+    declaration_context::{IntrinsicFunction, Module, TypeID},
     hir::{
         ArithmeticOp, BinaryLogicalOp, ComparisonOp, GeneratorProperties, HirFunction, HirNode,
         HirNodeValue, UnaryLogicalOp,
@@ -21,43 +21,6 @@ pub struct LinearFunction {
     pub params: Vec<PhysicalType>,
     pub returns: Option<PhysicalType>,
     pub body: Vec<LinearNode>,
-}
-
-pub fn linearize_function(
-    constant_data_region: &mut Vec<u8>,
-    layouts: &HashMap<TypeID, DeclaredTypeLayout>,
-    function: HirFunction,
-    byte_size: usize,
-    pointer_size: usize,
-) -> LinearFunction {
-    let HirNodeValue::Sequence(block) = function.body.value else {
-        unreachable!()
-    };
-    let mut ctx = LinearContext::new(layouts, constant_data_region, byte_size, pointer_size);
-    let mut body = ctx.linearize_nodes(block);
-    if let Some(GeneratorProperties {
-        generator_var_id,
-        param_var_id,
-        ..
-    }) = function.generator
-    {
-        generator_local_storage::generator_local_storage(
-            &ctx,
-            generator_var_id,
-            param_var_id,
-            &mut body[..],
-        );
-    }
-
-    LinearFunction {
-        id: function.id,
-        body,
-        params: function.params.iter().map(expr_ty_to_physical).collect(),
-        returns: match &function.body.ty {
-            ExpressionType::Void | ExpressionType::Unreachable => None,
-            return_ty => Some(expr_ty_to_physical(return_ty)),
-        },
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -248,8 +211,9 @@ impl LinearNode {
                 Some(ty.clone())
             }
             LinearNodeValue::Call(func, _) => function_returns.get(func).and_then(|x| x.clone()),
-            // TODO: other non-function ID calls
-            LinearNodeValue::IndirectCall(_, _) => None,
+            LinearNodeValue::IndirectCall(fn_id, _, _) => {
+                function_returns.get(fn_id).and_then(|x| x.clone())
+            }
             LinearNodeValue::RuntimeCall(func, _) => match func {
                 RuntimeFunction::StringConcat => {
                     Some(PhysicalType::Collection(PhysicalCollection::String))
@@ -274,7 +238,9 @@ impl LinearNode {
             }
             LinearNodeValue::Int(_) => Some(PhysicalType::Primitive(PhysicalPrimitive::Int32)),
             LinearNodeValue::Float(_) => Some(PhysicalType::Primitive(PhysicalPrimitive::Float32)),
-            LinearNodeValue::FunctionID(_) => Some(PhysicalType::FunctionPointer),
+            LinearNodeValue::FunctionID(_) => {
+                Some(PhysicalType::Primitive(PhysicalPrimitive::FunctionPointer))
+            }
             LinearNodeValue::Debug(child) => child.ty(function_returns),
         }
     }
@@ -304,7 +270,7 @@ pub enum LinearNodeValue {
 
     // Control flow
     Call(FunctionID, Vec<LinearNode>),
-    IndirectCall(Box<LinearNode>, Vec<LinearNode>),
+    IndirectCall(FunctionID, Box<LinearNode>, Vec<LinearNode>),
     RuntimeCall(RuntimeFunction, Vec<LinearNode>),
     Return(Option<Box<LinearNode>>),
     If(Box<LinearNode>, Vec<LinearNode>, Option<Vec<LinearNode>>),
@@ -373,6 +339,83 @@ pub enum RuntimeFunction {
 }
 
 impl LinearNode {
+    pub fn visit(&self, mut callback: impl FnMut(&LinearNode)) {
+        self.visit_recursive(&mut callback);
+    }
+
+    pub fn visit_recursive(&self, callback: &mut impl FnMut(&LinearNode)) {
+        callback(self);
+        self.children(|child| child.visit_recursive(callback));
+    }
+
+    pub fn children(&self, mut callback: impl FnMut(&LinearNode)) {
+        match &self.value {
+            LinearNodeValue::WriteRegistersSplitting(child, _)
+            | LinearNodeValue::Debug(child)
+            | LinearNodeValue::ReadMemory {
+                location: child, ..
+            }
+            | LinearNodeValue::WriteRegister(_, child)
+            | LinearNodeValue::Goto(child)
+            | LinearNodeValue::UnaryLogical(_, child)
+            | LinearNodeValue::Cast { value: child, .. }
+            | LinearNodeValue::Return(Some(child)) => callback(child),
+            LinearNodeValue::WriteMemory {
+                location: a,
+                value: b,
+                ..
+            }
+            | LinearNodeValue::Arithmetic(_, _, a, b)
+            | LinearNodeValue::Comparison(_, _, a, b)
+            | LinearNodeValue::BinaryLogical(_, a, b) => {
+                callback(a);
+                callback(b);
+            }
+            LinearNodeValue::IndirectCall(_, func, args) => {
+                callback(func);
+                args.iter().for_each(callback);
+            }
+            LinearNodeValue::If(cond, if_block, else_block) => {
+                callback(cond);
+                for node in if_block.iter() {
+                    callback(node);
+                }
+                if let Some(else_block) = else_block {
+                    else_block.iter().for_each(callback);
+                }
+            }
+            LinearNodeValue::Call(_, children)
+            | LinearNodeValue::RuntimeCall(_, children)
+            | LinearNodeValue::Loop(children)
+            | LinearNodeValue::Sequence(children) => {
+                children.iter().for_each(callback);
+            }
+            LinearNodeValue::Switch { value, cases } => {
+                callback(value);
+                for case in cases.iter() {
+                    callback(case);
+                }
+            }
+            LinearNodeValue::Size(_)
+            | LinearNodeValue::Int(_)
+            | LinearNodeValue::Float(_)
+            | LinearNodeValue::CharLiteral(_)
+            | LinearNodeValue::Byte(_)
+            | LinearNodeValue::FunctionID(_)
+            | LinearNodeValue::Parameter(_, _)
+            | LinearNodeValue::VariableInit(_, _)
+            | LinearNodeValue::VariableDestroy(_)
+            | LinearNodeValue::VariableLocation(_)
+            | LinearNodeValue::Break
+            | LinearNodeValue::GotoLabel(_)
+            | LinearNodeValue::Abort
+            | LinearNodeValue::ReadRegister(_)
+            | LinearNodeValue::KillRegister(_)
+            | LinearNodeValue::Return(None)
+            | LinearNodeValue::ConstantDataAddress(_) => {}
+        }
+    }
+
     fn visit_mut(&mut self, mut callback: impl FnMut(&mut LinearNode)) {
         self.visit_mut_recursive(&mut callback);
     }
@@ -405,7 +448,7 @@ impl LinearNode {
                 callback(a);
                 callback(b);
             }
-            LinearNodeValue::IndirectCall(func, args) => {
+            LinearNodeValue::IndirectCall(_, func, args) => {
                 callback(func);
                 args.iter_mut().for_each(callback);
             }
@@ -454,24 +497,42 @@ impl LinearNode {
 // TODO: produce a more CFG shaped result?
 
 pub struct LinearContext<'a> {
-    declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
-    constant_data_region: &'a mut Vec<u8>,
-    byte_size: usize,
-    pointer_size: usize,
+    pub layouts: &'a HashMap<TypeID, DeclaredTypeLayout>,
+    pub constant_data_region: &'a mut Vec<u8>,
+    pub indirect_function_types: &'a mut HashMap<ExpressionType, FunctionID>,
+    pub byte_size: usize,
+    pub pointer_size: usize,
+    pub module: Module,
 }
 
 impl<'a> LinearContext<'a> {
-    pub fn new(
-        declarations: &'a HashMap<TypeID, DeclaredTypeLayout>,
-        constant_data_region: &'a mut Vec<u8>,
-        byte_size: usize,
-        pointer_size: usize,
-    ) -> LinearContext<'a> {
-        LinearContext {
-            declarations,
-            constant_data_region,
-            pointer_size,
-            byte_size,
+    pub fn linearize_function(&mut self, function: HirFunction) -> LinearFunction {
+        let HirNodeValue::Sequence(block) = function.body.value else {
+            unreachable!()
+        };
+        let mut body = self.linearize_nodes(block);
+        if let Some(GeneratorProperties {
+            generator_var_id,
+            param_var_id,
+            ..
+        }) = function.generator
+        {
+            generator_local_storage::generator_local_storage(
+                self,
+                generator_var_id,
+                param_var_id,
+                &mut body[..],
+            );
+        }
+
+        LinearFunction {
+            id: function.id,
+            body,
+            params: function.params.iter().map(expr_ty_to_physical).collect(),
+            returns: match &function.body.ty {
+                ExpressionType::Void | ExpressionType::Unreachable => None,
+                return_ty => Some(expr_ty_to_physical(return_ty)),
+            },
         }
     }
 
@@ -559,19 +620,27 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                     LinearNodeValue::Call(*fn_id, params)
                 }
                 _ => {
+                    let indirect_fn = if let Some(fn_id) = ctx.indirect_function_types.get(&lhs.ty)
+                    {
+                        *fn_id
+                    } else {
+                        let fn_id = ctx.module.new_func_id();
+                        ctx.indirect_function_types.insert(lhs.ty.clone(), fn_id);
+                        fn_id
+                    };
                     let lhs = lower_expression(ctx, *lhs);
-                    LinearNodeValue::IndirectCall(Box::new(lhs), params)
+                    LinearNodeValue::IndirectCall(indirect_fn, Box::new(lhs), params)
                 }
             }
         }
         HirNodeValue::Access(lhs, rhs) => {
-            if let Some(variants) =
-                lhs.ty
-                    .type_id()
-                    .and_then(|id| match &ctx.declarations[id].value {
-                        TypeLayoutValue::Union(variants) => Some(variants),
-                        _ => None,
-                    })
+            if let Some(variants) = lhs
+                .ty
+                .type_id()
+                .and_then(|id| match &ctx.layouts[id].value {
+                    TypeLayoutValue::Union(variants) => Some(variants),
+                    _ => None,
+                })
             {
                 let (variant_idx, variant_ty) = &variants[&rhs];
                 let (location, offset) = lower_lvalue(ctx, *lhs);
@@ -631,7 +700,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 let PhysicalType::Referenced(id) = ty else {
                     unreachable!()
                 };
-                let decl = &ctx.declarations[&id];
+                let decl = &ctx.layouts[&id];
                 let TypeLayoutValue::Structure(fields) = &decl.value else {
                     todo!()
                 };
@@ -773,7 +842,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let Some(DeclaredTypeLayout {
                 value: TypeLayoutValue::Structure(layouts),
                 ..
-            }) = &ctx.declarations.get(&struct_id)
+            }) = &ctx.layouts.get(&struct_id)
             else {
                 unreachable!()
             };
@@ -901,7 +970,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let Some(DeclaredTypeLayout {
                 value: TypeLayoutValue::Interface(fields),
                 ..
-            }) = &ctx.declarations.get(ty_id)
+            }) = &ctx.layouts.get(ty_id)
             else {
                 unreachable!()
             };
@@ -924,10 +993,11 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 .collect();
 
             LinearNodeValue::IndirectCall(
+                fn_id,
                 Box::new(LinearNode::new(LinearNodeValue::ReadMemory {
                     location: Box::new(table),
                     offset,
-                    ty: PhysicalType::FunctionPointer,
+                    ty: PhysicalType::Primitive(PhysicalPrimitive::FunctionPointer),
                 })),
                 params,
             )
@@ -941,7 +1011,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let Some(DeclaredTypeLayout {
                 value: TypeLayoutValue::Interface(fields),
                 ..
-            }) = ctx.declarations.get(ty_id)
+            }) = ctx.layouts.get(ty_id)
             else {
                 unreachable!()
             };
@@ -1015,7 +1085,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             LinearNodeValue::Sequence(instrs)
         }
         HirNodeValue::UnionLiteral(ty, variant, value) => {
-            let union_ty = &ctx.declarations[&ty];
+            let union_ty = &ctx.layouts[&ty];
             let TypeLayoutValue::Union(ty) = &union_ty.value else {
                 unreachable!()
             };
@@ -1272,7 +1342,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         HirNodeValue::UnionVariant(union, variant) => {
             let ty = shallow_dereference(&union.ty)
                 .type_id()
-                .and_then(|id| match &ctx.declarations[id].value {
+                .and_then(|id| match &ctx.layouts[id].value {
                     TypeLayoutValue::Union(ty) => Some(ty),
                     _ => None,
                 })
@@ -1361,7 +1431,7 @@ fn access_location(ctx: &mut LinearContext<'_>, lhs: HirNode, rhs: String) -> (L
         },
         _ => unreachable!("{:?}", &lhs),
     };
-    let DeclaredTypeLayout { value, .. } = &ctx.declarations[ty_id];
+    let DeclaredTypeLayout { value, .. } = &ctx.layouts[ty_id];
     let (lhs, mut offset) = lower_lvalue(ctx, lhs);
     offset += match value {
         TypeLayoutValue::Structure(fields) => {
@@ -1714,7 +1784,7 @@ fn primitive_type_size(prim: PhysicalPrimitive, byte_size: usize, pointer_size: 
         PhysicalPrimitive::Int64 => 8,
         PhysicalPrimitive::Float64 => 8,
         PhysicalPrimitive::Byte => byte_size,
-        PhysicalPrimitive::PointerSize => pointer_size,
+        PhysicalPrimitive::FunctionPointer | PhysicalPrimitive::PointerSize => pointer_size,
     }
 }
 
@@ -1747,6 +1817,7 @@ pub enum PhysicalPrimitive {
     Int64,
     Float64,
     PointerSize,
+    FunctionPointer,
 }
 
 #[derive(Clone, Debug)]
@@ -1754,8 +1825,6 @@ pub enum PhysicalType {
     Primitive(PhysicalPrimitive),
     Referenced(TypeID),
     Nullable(Box<PhysicalType>),
-    // TODO: fold into primitives
-    FunctionPointer,
     Collection(PhysicalCollection),
     /// [function ID, resume point, stack ptr]
     Generator,
@@ -1770,7 +1839,7 @@ pub enum PhysicalCollection {
 
 impl PhysicalType {
     pub fn size(&self, ctx: &LinearContext<'_>) -> usize {
-        self.size_from_decls(ctx.declarations, ctx.byte_size, ctx.pointer_size)
+        self.size_from_decls(ctx.layouts, ctx.byte_size, ctx.pointer_size)
     }
 
     pub fn size_from_decls(
@@ -1786,7 +1855,6 @@ impl PhysicalType {
                 NULL_TAG_SIZE.size(pointer_size)
                     + ty.size_from_decls(declarations, byte_size, pointer_size)
             }
-            PhysicalType::FunctionPointer => pointer_size,
             PhysicalType::Collection(ty) => match ty {
                 PhysicalCollection::Array => pointer_size * 3,
                 PhysicalCollection::Dict => pointer_size * 3,
@@ -1933,7 +2001,9 @@ fn layout_type(
         ExpressionType::ReferenceToFunction(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => PhysicalType::Generator,
-        ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,
+        ExpressionType::FunctionReference { .. } => {
+            PhysicalType::Primitive(PhysicalPrimitive::FunctionPointer)
+        }
     }
 }
 
@@ -1958,7 +2028,9 @@ pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         ExpressionType::ReferenceToFunction(_) => todo!(),
         ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => PhysicalType::Generator,
-        ExpressionType::FunctionReference { .. } => PhysicalType::FunctionPointer,
+        ExpressionType::FunctionReference { .. } => {
+            PhysicalType::Primitive(PhysicalPrimitive::FunctionPointer)
+        }
     }
 }
 
