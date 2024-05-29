@@ -767,7 +767,7 @@ pub fn walk_vals_read_order(
                     }
                 }
                 TypeLayoutValue::Interface(fields) => {
-                    let mut location = offset + (ty.size as u64);
+                    let mut location = offset + (ty.size as u64) - 4;
                     for _ in fields.iter().rev() {
                         callback(ValType::I32, location);
                         location -= 4;

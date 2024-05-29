@@ -912,7 +912,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 .enumerate()
                 .find_map(|(idx, id)| {
                     if *id == fn_id {
-                        Some(idx * FUNCTION_ID_SIZE)
+                        Some(idx * ctx.pointer_size)
                     } else {
                         None
                     }
@@ -1693,7 +1693,6 @@ fn dict_get_entry_for_key(
 
 const UNION_TAG_SIZE: SizeInPointers = SizeInPointers(1);
 pub const NULL_TAG_SIZE: SizeInPointers = SizeInPointers(1);
-const FUNCTION_ID_SIZE: usize = 4;
 
 fn primitive_to_physical(p: PrimitiveType) -> PhysicalPrimitive {
     match p {
@@ -1787,7 +1786,7 @@ impl PhysicalType {
                 NULL_TAG_SIZE.size(pointer_size)
                     + ty.size_from_decls(declarations, byte_size, pointer_size)
             }
-            PhysicalType::FunctionPointer => FUNCTION_ID_SIZE,
+            PhysicalType::FunctionPointer => pointer_size,
             PhysicalType::Collection(ty) => match ty {
                 PhysicalCollection::Array => pointer_size * 3,
                 PhysicalCollection::Dict => pointer_size * 3,
@@ -1845,7 +1844,7 @@ fn layout_static_decl(
                 .associated_functions
                 .values()
                 .map(|decl| {
-                    size += FUNCTION_ID_SIZE;
+                    size += pointer_size;
                     *decl
                 })
                 .collect();

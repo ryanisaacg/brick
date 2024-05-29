@@ -858,7 +858,7 @@ fn read(
                     }
                 }
                 TypeLayoutValue::Interface(fields) => {
-                    let mut location = location + layout.size;
+                    let mut location = location + layout.size - std::mem::size_of::<FunctionID>();
                     for _ in fields.iter().rev() {
                         read(
                             op_stack,
@@ -867,7 +867,7 @@ fn read(
                             location,
                             &PhysicalType::FunctionPointer,
                         );
-                        location -= 4;
+                        location -= std::mem::size_of::<FunctionID>();
                     }
                     read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
                 }
