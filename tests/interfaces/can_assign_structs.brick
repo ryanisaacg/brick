@@ -16,8 +16,6 @@ fn area_2(shape: HasArea): i32 {
     area * area
 }
 
-let x = Square { size: 2 };
-let a1 = area_2(x);
-let x = Square { size: 1 };
-let a2 = area_2(x);
+let a1 = area_2(Square { size: 2 });
+let a2 = area_2(Square { size: 1 });
 a1 + a2

@@ -717,7 +717,8 @@ impl HirNodeValue {
             | HirNodeValue::NullableTraverse(lvalue, _)
             | HirNodeValue::TakeUnique(lvalue)
             | HirNodeValue::TakeShared(lvalue)
-            | HirNodeValue::UnionVariant(lvalue, _) => Some(lvalue),
+            | HirNodeValue::UnionVariant(lvalue, _)
+            | HirNodeValue::StructToInterface { value: lvalue, .. } => Some(lvalue),
             _ => None,
         }
     }
