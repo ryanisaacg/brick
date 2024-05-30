@@ -12,3 +12,11 @@ Its principle goal is to be enjoyable to use for writing games and toy software.
 It's a long way off from usable for even writing toys, though there is a small-but-growing collection of test programs.
 
 You may notice all the sub-projects are named "brick"; this was the original name I had for the project. Unfortunately there's an existing PL project with that name! So this repo goes nameless for now.
+
+## Sub-Crates
+
+- `brick/`: Core language code (parse, typeheck, de-sugar, borrowcheck, low-level IR, and a basic tree-walking interpreter)
+- `brick-wasm-backend/`: Emits WebAssembly, plus a wasmtime-based test harness. Not yet capable of producing linked binaries with `rust-runtime`
+- `brick-runtime/`: Rust-based runtime for the language, linked into both the interpreter and the wasmtime test harness
+- `brick-lsp/`: A proof-of-concept implementation of the Language Server Protocol, currently all it can do is go-to-definition for functions
+- `data-test-driver/`: Helper project to run both interpreter and wasm tests over a few hundred test scripts in `tests/`. Originally they were written via the Rust `#[test]` handlers but that was slowing compile and testing across two different implementations was difficult
