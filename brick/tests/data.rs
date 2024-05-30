@@ -1,7 +1,10 @@
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+};
 
 use anyhow::bail;
-use brick::{check_types, eval_preserve_vm, Value};
+use brick::{check_types, interpret_code, ExternBinding, Value};
 use data_test_driver::TestValue;
 
 #[test]
@@ -16,8 +19,20 @@ fn data() {
             Ok(())
         },
         |contents, expected| -> anyhow::Result<TestValue> {
-            let (mut results, memory) = eval_preserve_vm(contents)?;
-            look_for_value(&mut results, &memory[..], expected)
+            let counter = Arc::new(Mutex::new(0));
+
+            let func_counter = counter.clone();
+            let mut bindings: HashMap<String, ExternBinding> = HashMap::new();
+            bindings.insert(
+                "incr_test_counter".to_string(),
+                Box::new(move |_, _| {
+                    *func_counter.lock().unwrap() += 1;
+                    None
+                }),
+            );
+            let (mut results, memory) = interpret_code("eval", contents.to_string(), bindings)?;
+            let counter = *counter.lock().unwrap();
+            look_for_value(&mut results, &memory[..], expected, counter)
         },
         HashSet::new(),
     );
@@ -27,6 +42,7 @@ fn look_for_value(
     results: &mut Vec<Value>,
     memory: &[u8],
     expected: &TestValue,
+    counter: u32,
 ) -> anyhow::Result<TestValue> {
     match expected {
         TestValue::Void => {
@@ -52,7 +68,7 @@ fn look_for_value(
                 bail!("expected non-null marker, found {first:?}");
             }
             Ok(TestValue::Nullable(Box::new(look_for_value(
-                results, memory, expected,
+                results, memory, expected, counter,
             )?)))
         }
         TestValue::Float(_) | TestValue::Int(_) => {
@@ -85,6 +101,7 @@ fn look_for_value(
                 )
             }
         }
+        TestValue::Counter(_) => Ok(TestValue::Counter(counter)),
     }
 }
 

@@ -1,0 +1,3 @@
+// Counter | 1
+extern fn incr_test_counter();
+incr_test_counter();

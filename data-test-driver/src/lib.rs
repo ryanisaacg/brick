@@ -26,6 +26,7 @@ pub enum TestValue {
     Int(i64),
     Float(f64),
     String(String),
+    Counter(u32),
 }
 
 #[derive(Debug)]
@@ -219,6 +220,7 @@ fn parse_test_value(ty: &str, value: &str) -> TestValue {
         "Int" => TestValue::Int(value.parse().unwrap()),
         "Float" => TestValue::Float(value.parse().unwrap()),
         "String" => TestValue::String(value.to_string()),
+        "Counter" => TestValue::Counter(value.parse().unwrap()),
         other => panic!("Unexpected return type marker: {other}"),
     }
 }

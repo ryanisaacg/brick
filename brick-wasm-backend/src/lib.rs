@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use brick::{
     expr_ty_to_physical, lower_code, CompileError, ExpressionType, LinearFunction, LowerResults,
@@ -6,9 +6,9 @@ use brick::{
 use function_bodies::{walk_vals_write_order, FunctionEncoder};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, DataSegment, DataSegmentMode, ElementSection, Elements,
-    ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType, ImportSection,
-    MemorySection, MemoryType, Module, RefType, StartSection, TableSection, TableType, TypeSection,
-    ValType,
+    EntityType, ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType,
+    ImportSection, MemorySection, MemoryType, Module, RefType, StartSection, TableSection,
+    TableType, TypeSection, ValType,
 };
 
 mod function_bodies;
@@ -123,12 +123,24 @@ pub fn compile(
 
     let mut function_id_to_fn_idx = HashMap::new();
     let mut function_id_to_ty_idx = HashMap::new();
+    // Imports
     let linear_function_to_id = runtime::add_runtime_imports(&mut import_section, &mut ty_section);
+    for (name, fn_id) in declarations.extern_functions.iter() {
+        function_id_to_fn_idx.insert(*fn_id, fn_section.len() + import_section.len());
+        function_id_to_ty_idx.insert(*fn_id, ty_section.len());
+        import_section.import("bindings", name, EntityType::Function(ty_section.len()));
+        let function = &declarations.id_to_func[fn_id];
+        function_headers::encode_func_ty(&type_layouts, function, &mut ty_section);
+    }
     let runtime_init_idx = fn_section.len() + import_section.len();
     runtime::add_init_import(&mut import_section, &mut ty_section);
+
+    // Function headers
     let main_index = ty_section.len();
-    let functions_with_bodies: HashSet<_> = functions.iter().map(|func| func.id).collect();
     for function in functions.iter() {
+        if function_id_to_ty_idx.contains_key(&function.id) {
+            continue;
+        }
         function_id_to_fn_idx.insert(function.id, fn_section.len() + import_section.len());
         fn_section.function(ty_section.len());
         function_id_to_ty_idx.insert(function.id, ty_section.len());
@@ -136,7 +148,7 @@ pub fn compile(
     }
     for function in declarations.id_to_func.values() {
         // Skip intrinsics with generics
-        if function.type_param_count > 0 || functions_with_bodies.contains(&function.id) {
+        if function.type_param_count > 0 || function_id_to_ty_idx.contains_key(&function.id) {
             continue;
         }
         function_id_to_ty_idx.insert(function.id, ty_section.len());
@@ -152,6 +164,8 @@ pub fn compile(
             function,
         );
     }
+
+    // Function pointers
     let indirect_call_table = table_section.len();
     table_section.table(TableType {
         element_type: RefType::FUNCREF,
@@ -163,6 +177,8 @@ pub fn compile(
         &ConstExpr::i32_const(0),
         Elements::Functions(&indirect_functions_for_table[..]),
     );
+
+    // Function bodies
     let context = FunctionEncoder {
         function_id_to_fn_idx: &function_id_to_fn_idx,
         function_id_to_ty_idx: &function_id_to_ty_idx,
@@ -178,6 +194,8 @@ pub fn compile(
     for function in functions.iter() {
         codes.function(&context.encode(function));
     }
+
+    // Start section
     let start_index = import_section.len() + fn_section.len();
     fn_section.function(ty_section.len());
     ty_section.function([], main_fn_results);

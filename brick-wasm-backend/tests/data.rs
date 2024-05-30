@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use anyhow::{bail, Context};
 use brick_wasm_backend::compile;
 use data_test_driver::TestValue;
@@ -15,6 +17,8 @@ fn data() {
             Ok(())
         },
         |contents, expected| -> anyhow::Result<TestValue> {
+            let counter = Arc::new(Mutex::new(0));
+
             let binary = compile("main", "main.brick", contents.to_string(), false)?.finish();
             let engine = Engine::default();
             let module = Module::from_binary(&engine, binary.as_slice())?;
@@ -110,6 +114,12 @@ fn data() {
                     }
                 },
             )?;
+
+            let fn_counter = counter.clone();
+            linker.func_wrap("bindings", "incr_test_counter", move || {
+                *fn_counter.lock().unwrap() += 1;
+            })?;
+
             let instance = linker.instantiate(&mut store, &module)?;
             let func = instance
                 .get_func(&mut store, "main")
@@ -118,7 +128,7 @@ fn data() {
                 .get_memory(&mut store, "memory")
                 .context("failed to find memory")?;
 
-            look_for_value(store, memory, func, expected)
+            look_for_value(store, memory, func, expected, counter)
         },
         [
             // Mysterious array issue
@@ -168,6 +178,7 @@ fn look_for_value(
     memory: Memory,
     func: Func,
     expected: &TestValue,
+    counter: Arc<Mutex<u32>>,
 ) -> anyhow::Result<TestValue> {
     match expected {
         TestValue::Void => {
@@ -237,6 +248,11 @@ fn look_for_value(
             let slice = &memory.data(&store)[ptr..(ptr + len)];
             let string = std::str::from_utf8(slice)?;
             Ok(TestValue::String(string.to_string()))
+        }
+        TestValue::Counter(_) => {
+            func.call(&mut store, &[], &mut [])?;
+            let counter = *counter.lock().unwrap();
+            Ok(TestValue::Counter(counter))
         }
     }
 }
