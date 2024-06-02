@@ -1,0 +1,13 @@
+// Counter | 2
+
+extern fn incr_test_counter();
+
+struct Data {
+    fn drop(self: unique Data) {
+        incr_test_counter();
+    }
+}
+
+let value = Data {};
+let val2 = value;
+

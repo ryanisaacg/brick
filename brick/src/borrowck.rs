@@ -14,7 +14,7 @@ use crate::{
     id::{AnyID, NodeID, VariableID},
     multi_error::{merge_results, print_multi_errors, MultiError},
     typecheck::{ExpressionType, PointerKind},
-    HirNodeValue, SourceRange, TypeDeclaration,
+    DeclarationContext, HirNodeValue, SourceRange, TypeDeclaration,
 };
 
 use self::control_flow_graph::{CfgEdge, CfgNode, ControlFlowGraph, FunctionCFG};
@@ -75,8 +75,8 @@ fn maybe_range(range: &Option<SourceRange>) -> String {
 }
 
 pub fn borrow_check(
+    declarations: &DeclarationContext,
     module: &mut HirModule,
-    declarations: &HashMap<TypeID, TypeDeclaration>,
 ) -> Result<(), LifetimeError> {
     let mut result = Ok(());
 
@@ -92,7 +92,7 @@ pub fn borrow_check(
 }
 
 fn borrow_check_body(
-    declarations: &HashMap<TypeID, TypeDeclaration>,
+    declarations: &DeclarationContext,
     node: &mut HirNode,
 ) -> Result<(), LifetimeError> {
     let FunctionCFG {
@@ -103,7 +103,7 @@ fn borrow_check_body(
     let mut block_queue = VecDeque::new();
     block_queue.push_front(start);
     let mut context = Context {
-        declarations,
+        declarations: &declarations.id_to_decl,
         block_queue,
         loops_visited: HashSet::new(),
     };
@@ -118,7 +118,7 @@ fn borrow_check_body(
     }
 
     let drop_points = drop_points::calculate_drop_points(&cfg, end);
-    drop_points::insert_drops(node, drop_points);
+    drop_points::insert_drops(declarations, node, drop_points);
 
     result
 }

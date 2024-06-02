@@ -1,10 +1,16 @@
 borrow checker and lifetimes:
 - allow disjoint borrows of struct fields, collection indices
 - clone support
-- detect drops when a value is partially moved
-- generalize drop support to all types
 - must-use-type support
 - can't dereference pointers to Move types
+- drop:
+    - detect drops when a value is conditionally moved
+    - validate the drop method has the correct arguments and no return value
+    - drop dicts
+    - drop strings
+    - drop generators
+    - drop nullables
+    - drop RCs
 
 misc:
 - automatically discard unused expression values

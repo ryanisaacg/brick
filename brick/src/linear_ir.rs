@@ -1189,16 +1189,14 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let arr = args.pop().unwrap();
             let array = lower_expression(ctx, arr);
 
-            let array_reg = RegisterID::new();
-
-            LinearNodeValue::Sequence(vec![
-                LinearNode::write_multi_register(array, vec![Some(array_reg), None, None]),
-                LinearNode::call_runtime(
-                    RuntimeFunction::Dealloc,
-                    vec![LinearNode::read_register(array_reg)],
-                ),
-                LinearNode::kill_register(array_reg),
-            ])
+            LinearNodeValue::Sequence(vec![LinearNode::call_runtime(
+                RuntimeFunction::Dealloc,
+                vec![LinearNode::read_memory(
+                    array,
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                )],
+            )])
         }
         HirNodeValue::IntrinsicCall(IntrinsicFunction::DictionaryInsert, mut args) => {
             let value = args.pop().unwrap();

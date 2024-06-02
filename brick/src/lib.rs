@@ -254,7 +254,7 @@ pub fn typecheck_module(
     for module in modules.values_mut() {
         multi_error::merge_results(
             &mut lifetime_errors,
-            borrowck::borrow_check(module, &declarations.id_to_decl),
+            borrowck::borrow_check(&declarations, module),
         );
     }
     lifetime_errors?;
