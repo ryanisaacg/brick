@@ -4,6 +4,7 @@ borrow checker and lifetimes:
 - detect drops when a value is partially moved
 - generalize drop support to all types
 - must-use-type support
+- can't dereference pointers to Move types
 
 misc:
 - automatically discard unused expression values
