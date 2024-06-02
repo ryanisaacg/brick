@@ -131,8 +131,6 @@ fn data() {
             look_for_value(store, memory, func, expected, counter)
         },
         [
-            // Mysterious array issue
-            "collections/append_to_array.brick",
             // Dictionaries don't compile correctly
             "collections/basic_dict_keys.brick",
             "collections/dict_contains.brick",

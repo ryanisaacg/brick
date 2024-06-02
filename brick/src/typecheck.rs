@@ -90,12 +90,53 @@ impl ExpressionType {
             ExpressionType::Nullable(inner) => inner.is_reference(),
         }
     }
+
+    fn resolve_generics(&mut self, bindings: &[ExpressionType]) {
+        match self {
+            ExpressionType::Void
+            | ExpressionType::Unreachable
+            | ExpressionType::Primitive(_)
+            | ExpressionType::InstanceOf(_)
+            | ExpressionType::ReferenceToType(_)
+            | ExpressionType::ReferenceToFunction(_)
+            | ExpressionType::Null
+            | ExpressionType::Collection(CollectionType::String) => {}
+            ExpressionType::Nullable(child)
+            | ExpressionType::Pointer(_, child)
+            | ExpressionType::Collection(
+                CollectionType::Array(child) | CollectionType::ReferenceCounter(child),
+            ) => {
+                child.resolve_generics(bindings);
+            }
+            ExpressionType::Collection(CollectionType::Dict(key, value)) => {
+                key.resolve_generics(bindings);
+                value.resolve_generics(bindings);
+            }
+            ExpressionType::TypeParameterReference(idx) => {
+                *self = bindings[*idx].clone();
+            }
+            ExpressionType::Generator { yield_ty, param_ty } => {
+                yield_ty.resolve_generics(bindings);
+                param_ty.resolve_generics(bindings);
+            }
+            ExpressionType::FunctionReference {
+                parameters,
+                returns,
+            } => {
+                for param in parameters.iter_mut() {
+                    param.resolve_generics(bindings);
+                }
+                returns.resolve_generics(bindings);
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum CollectionType {
     Array(Box<ExpressionType>),
     Dict(Box<ExpressionType>, Box<ExpressionType>),
+    ReferenceCounter(Box<ExpressionType>),
     String,
 }
 
@@ -559,6 +600,7 @@ fn typecheck_expression<'a>(
         | AstNodeValue::VoidType
         | AstNodeValue::SharedType(_)
         | AstNodeValue::ArrayType(_)
+        | AstNodeValue::RcType(_)
         | AstNodeValue::DictType(_, _)
         | AstNodeValue::NullableType(_)
         | AstNodeValue::GeneratorType { .. } => {
@@ -762,6 +804,13 @@ fn typecheck_expression<'a>(
                         ExpressionType::ReferenceToFunction(ty.fn_id)
                     } else {
                         todo!("dict methods")
+                    }
+                }
+                ExpressionType::Collection(CollectionType::ReferenceCounter(_)) => {
+                    if let Some(ty) = context.declarations.rc_intrinsics.get(name.as_str()) {
+                        ExpressionType::ReferenceToFunction(ty.fn_id)
+                    } else {
+                        todo!("rc methods")
                     }
                 }
                 _ => {
@@ -1333,17 +1382,29 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?) {
-                ExpressionType::ReferenceToFunction(func) => {
-                    let func = &context.declarations.id_to_func[func];
-                    let params = if func.is_associated {
-                        &func.params[1..]
+                ExpressionType::ReferenceToFunction(func_ty) => {
+                    let func_ty = &context.declarations.id_to_func[func_ty];
+                    let mut generic_args =
+                        vec![ExpressionType::Unreachable; func_ty.type_param_count];
+
+                    let params = if func_ty.is_associated {
+                        if let AstNodeValue::BinExpr(BinOp::NullChaining | BinOp::Dot, lhs, _) =
+                            &func.value
+                        {
+                            find_generic_bindings(
+                                &mut generic_args[..],
+                                &func_ty.params[0],
+                                lhs.ty.get().expect("type info to be filled in"),
+                            );
+                        }
+
+                        &func_ty.params[1..]
                     } else {
-                        &func.params[..]
+                        &func_ty.params[..]
                     };
                     if params.len() != args.len() {
                         return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
                     }
-                    let mut generic_args = vec![ExpressionType::Unreachable; func.type_param_count];
 
                     for (arg, param) in args.iter().zip(params.iter()) {
                         let arg = typecheck_expression(
@@ -1363,7 +1424,9 @@ fn typecheck_expression<'a>(
                         }
                     }
 
-                    func.returns.clone()
+                    let mut returns = func_ty.returns.clone();
+                    returns.resolve_generics(&generic_args[..]);
+                    returns
                 }
                 ExpressionType::Generator { yield_ty, param_ty } => {
                     // TODO: allow more than one parameter
@@ -1508,6 +1571,16 @@ fn typecheck_expression<'a>(
                 Box::new(result_value_ty.unwrap().clone()),
             ))
         }
+        AstNodeValue::ReferenceCountLiteral(inner) => {
+            let inner_ty = typecheck_expression(
+                inner,
+                outer_scopes,
+                current_scope,
+                context,
+                generator_input_ty,
+            )?;
+            ExpressionType::Collection(CollectionType::ReferenceCounter(Box::new(inner_ty.clone())))
+        }
         AstNodeValue::TakeUnique(inner) => ExpressionType::Pointer(
             PointerKind::Unique,
             Box::new(
@@ -1542,7 +1615,9 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            let ExpressionType::Pointer(_, ty) = ty else {
+            let (ExpressionType::Pointer(_, ty)
+            | ExpressionType::Collection(CollectionType::ReferenceCounter(ty))) = ty
+            else {
                 return Err(TypecheckError::DereferenceNonPointer(
                     inner.provenance.clone(),
                 ));
@@ -1722,11 +1797,13 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::VoidType
         | AstNodeValue::SharedType(_)
         | AstNodeValue::ArrayType(_)
+        | AstNodeValue::RcType(_)
         | AstNodeValue::DictType(_, _)
         | AstNodeValue::UnaryExpr(_, _)
         | AstNodeValue::NullableType(_)
         | AstNodeValue::GeneratorType { .. }
-        | AstNodeValue::BorrowDeclaration(..) => false,
+        | AstNodeValue::BorrowDeclaration(..)
+        | AstNodeValue::ReferenceCountLiteral(_) => false,
     }
 }
 
@@ -1771,6 +1848,10 @@ fn find_generic_bindings(
             ExpressionType::Collection(CollectionType::Array(left)),
             ExpressionType::Collection(CollectionType::Array(right)),
         )
+        | (
+            ExpressionType::Collection(CollectionType::ReferenceCounter(left)),
+            ExpressionType::Collection(CollectionType::ReferenceCounter(right)),
+        )
         | (ExpressionType::Nullable(left), ExpressionType::Nullable(right)) => {
             find_generic_bindings(generic_args, left, right);
         }
@@ -1808,8 +1889,17 @@ fn find_generic_bindings(
         | (_, ExpressionType::ReferenceToFunction(_)) => {
             todo!("first class functions")
         }
-        (ExpressionType::Collection(CollectionType::Dict(..) | CollectionType::Array(_)), _)
-        | (ExpressionType::Pointer(_, _), _)
+        (ExpressionType::Pointer(_, inner), rhs) => {
+            find_generic_bindings(generic_args, inner, rhs);
+        }
+        (
+            ExpressionType::Collection(
+                CollectionType::Dict(..)
+                | CollectionType::Array(_)
+                | CollectionType::ReferenceCounter(_),
+            ),
+            _,
+        )
         | (ExpressionType::Generator { .. }, _) => {}
     }
 }
@@ -1927,9 +2017,11 @@ pub fn is_assignable_to(
         | (Collection(_), Primitive(_))
         | (Collection(_), InstanceOf(_)) => false,
 
-        (Collection(CollectionType::Array(left)), Collection(CollectionType::Array(right))) => {
-            left == right
-        }
+        (Collection(CollectionType::Array(left)), Collection(CollectionType::Array(right)))
+        | (
+            Collection(CollectionType::ReferenceCounter(left)),
+            Collection(CollectionType::ReferenceCounter(right)),
+        ) => left == right,
         (
             Collection(CollectionType::Dict(left_key, left_value)),
             Collection(CollectionType::Dict(right_key, right_value)),

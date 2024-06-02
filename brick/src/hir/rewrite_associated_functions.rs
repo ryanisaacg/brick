@@ -84,6 +84,7 @@ pub fn rewrite(declarations: &DeclarationContext, root: &mut HirNode) {
             let runtime_fns = match col_ty {
                 CollectionType::Array(_) => &declarations.array_intrinsics,
                 CollectionType::Dict(_, _) => &declarations.dict_intrinsics,
+                CollectionType::ReferenceCounter(_) => &declarations.rc_intrinsics,
                 CollectionType::String => todo!(),
             };
 

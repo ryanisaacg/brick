@@ -1084,6 +1084,39 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
 
             LinearNodeValue::Sequence(instrs)
         }
+        HirNodeValue::ReferenceCountLiteral(inner) => {
+            let inner_ty = expr_ty_to_physical(&inner.ty);
+            let inner_size = inner_ty.size(ctx);
+            let alloc_size = inner_size + 4;
+            let alloc_register = RegisterID::new();
+
+            LinearNodeValue::Sequence(vec![
+                LinearNode::write_register(
+                    alloc_register,
+                    LinearNode::heap_alloc_const(alloc_size),
+                ),
+                LinearNode::write_memory(
+                    LinearNode::read_register(alloc_register),
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::Int32),
+                    LinearNode::new(LinearNodeValue::Int(0)),
+                ),
+                LinearNode::write_memory(
+                    LinearNode::read_register(alloc_register),
+                    4,
+                    inner_ty,
+                    lower_expression(ctx, *inner),
+                ),
+                // Point the returned pointer at the actual value, rather than
+                // the reference count
+                LinearNode::ptr_arithmetic(
+                    ArithmeticOp::Add,
+                    LinearNode::read_register(alloc_register),
+                    LinearNode::size(4),
+                ),
+                LinearNode::kill_register(alloc_register),
+            ])
+        }
         HirNodeValue::UnionLiteral(ty, variant, value) => {
             let union_ty = &ctx.layouts[&ty];
             let TypeLayoutValue::Union(ty) = &union_ty.value else {
@@ -1290,6 +1323,105 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 LinearNode::kill_register(entry_pointer_output),
             ])
         }
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::RcClone, mut args) => {
+            let HirNodeValue::TakeShared(rc) = args.remove(0).value else {
+                unreachable!()
+            };
+            let ptr_register = RegisterID::new();
+            let reference_count_location = RegisterID::new();
+            LinearNodeValue::Sequence(vec![
+                LinearNode::write_register(ptr_register, lower_expression(ctx, *rc)),
+                LinearNode::write_register(
+                    reference_count_location,
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Subtract,
+                        LinearNode::read_register(ptr_register),
+                        LinearNode::size(4),
+                    ),
+                ),
+                // Increment the rc count
+                LinearNode::write_memory(
+                    LinearNode::read_register(reference_count_location),
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::Int32),
+                    LinearNode::new(LinearNodeValue::Arithmetic(
+                        ArithmeticOp::Add,
+                        PhysicalPrimitive::Int32,
+                        Box::new(LinearNode::read_memory(
+                            LinearNode::read_register(reference_count_location),
+                            0,
+                            PhysicalType::Primitive(PhysicalPrimitive::Int32),
+                        )),
+                        Box::new(LinearNode::new(LinearNodeValue::Int(1))),
+                    )),
+                ),
+                LinearNode::read_register(ptr_register),
+                LinearNode::kill_register(ptr_register),
+                LinearNode::kill_register(reference_count_location),
+            ])
+        }
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::RcDecrement, mut args) => {
+            // Decrement the rc count and return if it's = 0
+            let rc = args.remove(0);
+            let ptr_register = RegisterID::new();
+            let reference_count = RegisterID::new();
+            LinearNodeValue::Sequence(vec![
+                LinearNode::write_register(
+                    ptr_register,
+                    LinearNode::ptr_arithmetic(
+                        ArithmeticOp::Subtract,
+                        lower_expression(ctx, rc),
+                        LinearNode::size(4),
+                    ),
+                ),
+                LinearNode::write_register(
+                    reference_count,
+                    LinearNode::new(LinearNodeValue::Cast {
+                        to: PhysicalPrimitive::PointerSize,
+                        from: PhysicalPrimitive::Int32,
+                        value: Box::new(LinearNode::new(LinearNodeValue::Arithmetic(
+                            ArithmeticOp::Subtract,
+                            PhysicalPrimitive::Int32,
+                            Box::new(LinearNode::read_memory(
+                                LinearNode::read_register(ptr_register),
+                                0,
+                                PhysicalType::Primitive(PhysicalPrimitive::Int32),
+                            )),
+                            Box::new(LinearNode::new(LinearNodeValue::Int(1))),
+                        ))),
+                    }),
+                ),
+                LinearNode::write_memory(
+                    LinearNode::read_register(ptr_register),
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::Int32),
+                    LinearNode::new(LinearNodeValue::Cast {
+                        to: PhysicalPrimitive::Int32,
+                        from: PhysicalPrimitive::PointerSize,
+                        value: Box::new(LinearNode::read_register(reference_count)),
+                    }),
+                ),
+                LinearNode::ptr_comparison(
+                    ComparisonOp::EqualTo,
+                    LinearNode::read_register(reference_count),
+                    LinearNode::new(LinearNodeValue::Size(0)),
+                ),
+                LinearNode::kill_register(ptr_register),
+                LinearNode::kill_register(reference_count),
+            ])
+        }
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::RcFree, mut args) => {
+            let rc = args.remove(0);
+            // delete the RC memory
+            LinearNodeValue::RuntimeCall(
+                RuntimeFunction::Dealloc,
+                vec![LinearNode::ptr_arithmetic(
+                    ArithmeticOp::Subtract,
+                    lower_expression(ctx, rc),
+                    LinearNode::size(4),
+                )],
+            )
+        }
         HirNodeValue::GeneratorSuspend(generator, label) => {
             let location = lower_expression(ctx, *generator);
             LinearNodeValue::WriteMemory {
@@ -1419,6 +1551,7 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
         HirNodeValue::StringConcat(_, _) => todo!(),
         HirNodeValue::Switch { value: _, cases: _ } => todo!(),
         HirNodeValue::UnionTag(_value) => todo!(),
+        HirNodeValue::ReferenceCountLiteral(_) => todo!(),
     }
 }
 
@@ -1969,10 +2102,6 @@ fn layout_type(
 ) -> PhysicalType {
     match ty {
         ExpressionType::Void | ExpressionType::Unreachable | ExpressionType::Null => unreachable!(),
-        ExpressionType::Primitive(p) => {
-            let p = primitive_to_physical(*p);
-            PhysicalType::Primitive(p)
-        }
         ExpressionType::InstanceOf(id) => {
             layout_static_decl(
                 declarations,
@@ -1983,27 +2112,7 @@ fn layout_type(
             );
             PhysicalType::Referenced(*id)
         }
-        ExpressionType::Pointer(_, _) => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
-        ExpressionType::Collection(CollectionType::Array(_)) => {
-            PhysicalType::Collection(PhysicalCollection::Array)
-        }
-        ExpressionType::Collection(CollectionType::Dict(_, _)) => {
-            PhysicalType::Collection(PhysicalCollection::Dict)
-        }
-        ExpressionType::Collection(CollectionType::String) => {
-            PhysicalType::Collection(PhysicalCollection::String)
-        }
-        ExpressionType::Nullable(inner) => {
-            let inner = layout_type(declarations, layouts, inner, byte_size, pointer_size);
-            PhysicalType::Nullable(Box::new(inner))
-        }
-        ExpressionType::ReferenceToType(_) => todo!(),
-        ExpressionType::ReferenceToFunction(_) => todo!(),
-        ExpressionType::TypeParameterReference(_) => todo!(),
-        ExpressionType::Generator { .. } => PhysicalType::Generator,
-        ExpressionType::FunctionReference { .. } => {
-            PhysicalType::Primitive(PhysicalPrimitive::FunctionPointer)
-        }
+        _ => expr_ty_to_physical(ty),
     }
 }
 
@@ -2018,6 +2127,9 @@ pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
             CollectionType::Array(_) => PhysicalCollection::Array,
             CollectionType::Dict(_, _) => PhysicalCollection::Dict,
             CollectionType::String => PhysicalCollection::String,
+            CollectionType::ReferenceCounter(_) => {
+                return PhysicalType::Primitive(PhysicalPrimitive::PointerSize);
+            }
         }),
         ExpressionType::Pointer(_, _) => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
         ExpressionType::Nullable(inner) => {

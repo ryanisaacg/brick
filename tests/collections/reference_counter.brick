@@ -1,0 +1,6 @@
+// Int | 24
+fn value(x: rc[i32]): i32 {
+    *x
+}
+let val = rc { 12 };
+value(val.clone()) + value(val.clone())

@@ -45,11 +45,13 @@ impl<'a> AstNode<'a> {
             | UniqueType(child)
             | SharedType(child)
             | NullableType(child)
+            | RcType(child)
             | Statement(child)
             | Deref(child)
             | UnaryExpr(_, child)
             | ArrayType(child)
             | Loop(child)
+            | ReferenceCountLiteral(child)
             | BorrowDeclaration(_, child, _) => {
                 callback(child);
             }
@@ -306,6 +308,7 @@ pub enum AstNodeValue<'a> {
     DictLiteral(Vec<(AstNode<'a>, AstNode<'a>)>),
     ArrayLiteral(Vec<AstNode<'a>>),
     ArrayLiteralLength(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
+    ReferenceCountLiteral(&'a mut AstNode<'a>),
     Block(Vec<AstNode<'a>>),
     Deref(&'a mut AstNode<'a>),
     Match(MatchDeclaration<'a>),
@@ -317,6 +320,7 @@ pub enum AstNodeValue<'a> {
     SharedType(&'a mut AstNode<'a>),
     ArrayType(&'a mut AstNode<'a>),
     DictType(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
+    RcType(&'a mut AstNode<'a>),
     NullableType(&'a mut AstNode<'a>),
     GeneratorType {
         yield_ty: &'a mut AstNode<'a>,
@@ -1122,6 +1126,30 @@ fn type_expression<'a>(
                 SourceRange::new(next.range.start(), token.range.end()),
             )
         }
+        TokenValue::Rc => {
+            let token = assert_next_lexeme_eq(
+                source,
+                TokenValue::OpenSquare,
+                next.range.end(),
+                "expected [ after rc type",
+            )?;
+
+            let value = type_expression(source, context, token.range.end())?;
+            let end = value.provenance.end();
+            let value = add_node(context, value);
+
+            let token = assert_next_lexeme_eq(
+                source,
+                TokenValue::CloseSquare,
+                end,
+                "expected ] after rc type",
+            )?;
+
+            AstNode::new(
+                AstNodeValue::RcType(value),
+                SourceRange::new(next.range.start(), token.range.end()),
+            )
+        }
         TokenValue::Word(name) => {
             if name == "generator" {
                 let token = assert_next_lexeme_eq(
@@ -1225,6 +1253,7 @@ fn expression_pratt<'a>(
         }
         TokenValue::Dict => dict_literal(source, context, cursor)?,
         TokenValue::List => array_literal(source, context, cursor, can_be_struct)?,
+        TokenValue::Rc => rc_literal(source, context, cursor)?,
         token @ (TokenValue::If | TokenValue::While) => {
             if_or_while(source, context, token, cursor)?
         }
@@ -1609,6 +1638,34 @@ fn array_literal<'a>(
             "expected comma, semicolon or ]",
         )),
     }
+}
+
+fn rc_literal<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    start: SourceMarker,
+) -> Result<AstNode<'a>, ParseError> {
+    let token = assert_next_lexeme_eq(
+        source,
+        TokenValue::OpenBracket,
+        start,
+        "expected { to start rc literal",
+    )?;
+    let mut cursor = token.range.end();
+    let inner = expression(source, context, cursor, true)?;
+    cursor = inner.provenance.end();
+    let token = assert_next_lexeme_eq(
+        source,
+        TokenValue::CloseBracket,
+        cursor,
+        "expected } to end rc literal",
+    )?;
+    cursor = token.range.end();
+    let inner = context.alloc(inner);
+    Ok(AstNode::new(
+        AstNodeValue::ReferenceCountLiteral(inner),
+        SourceRange::new(start, cursor),
+    ))
 }
 
 fn dict_literal<'a>(

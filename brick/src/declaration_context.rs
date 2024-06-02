@@ -26,6 +26,7 @@ pub struct DeclarationContext {
     pub intrinsic_to_id: HashMap<IntrinsicFunction, FunctionID>,
     pub array_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
     pub dict_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
+    pub rc_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
     pub extern_functions: Vec<(String, FunctionID)>,
 }
 
@@ -45,6 +46,7 @@ impl DeclarationContext {
             intrinsic_to_id: HashMap::new(),
             array_intrinsics: HashMap::new(),
             dict_intrinsics: HashMap::new(),
+            rc_intrinsics: HashMap::new(),
             extern_functions: Vec::new(),
         };
         add_intrinsics(&mut ctx);
@@ -477,6 +479,9 @@ pub fn resolve_type_expr(
         AstNodeValue::ArrayType(inner) => ExpressionType::Collection(CollectionType::Array(
             Box::new(resolve_type_expr(name_to_type_id, inner)?),
         )),
+        AstNodeValue::RcType(inner) => ExpressionType::Collection(
+            CollectionType::ReferenceCounter(Box::new(resolve_type_expr(name_to_type_id, inner)?)),
+        ),
         AstNodeValue::DictType(key, value) => ExpressionType::Collection(CollectionType::Dict(
             Box::new(resolve_type_expr(name_to_type_id, key)?),
             Box::new(resolve_type_expr(name_to_type_id, value)?),
@@ -520,7 +525,8 @@ pub fn resolve_type_expr(
         | AstNodeValue::UnaryExpr(_, _)
         | AstNodeValue::DictLiteral(_)
         | AstNodeValue::Match(_)
-        | AstNodeValue::BorrowDeclaration(..) => {
+        | AstNodeValue::BorrowDeclaration(..)
+        | AstNodeValue::ReferenceCountLiteral(_) => {
             panic!("ICE: Illegal node in type name: {:?}", node.value);
         }
     })
@@ -531,8 +537,13 @@ pub enum IntrinsicFunction {
     ArrayLength,
     ArrayPush,
     ArrayFree,
+
     DictionaryInsert,
     DictionaryContains,
+
+    RcClone,
+    RcDecrement,
+    RcFree,
 }
 
 pub struct CollectionIntrinsic {
@@ -619,8 +630,29 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         ExpressionType::Void,
         PointerKind::Unique,
     );
-
     ctx.dict_intrinsics = dict_intrinsics;
+
+    let mut rc_intrinsics = HashMap::new();
+    add_intrinsic(
+        ctx,
+        &mut rc_intrinsics,
+        "clone",
+        IntrinsicFunction::RcClone,
+        1,
+        vec![ExpressionType::Pointer(
+            PointerKind::Shared,
+            Box::new(ExpressionType::Collection(
+                CollectionType::ReferenceCounter(Box::new(ExpressionType::TypeParameterReference(
+                    0,
+                ))),
+            )),
+        )],
+        ExpressionType::Collection(CollectionType::ReferenceCounter(Box::new(
+            ExpressionType::TypeParameterReference(0),
+        ))),
+        PointerKind::Shared,
+    );
+    ctx.rc_intrinsics = rc_intrinsics;
 }
 
 #[allow(clippy::too_many_arguments)]

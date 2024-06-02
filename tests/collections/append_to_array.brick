@@ -1,6 +1,8 @@
 // Int | 9
 let array = list[0];
+let i = 1;
 while array.len() < 10 {
-    array.push(array.len());
+    array.push(i);
+    i += 1;
 }
 array[9]
