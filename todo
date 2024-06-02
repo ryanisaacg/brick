@@ -21,11 +21,10 @@ collections:
     - allow empty dicts to type check (requires generic type syntax)
     - should set syntax auto-insert if necessary?
 - rc's:
-    - basic RCs
     - can take RC'ed references to collections? maybe even RC'ed subreferences to user-defined collections?
+    - can get a ref from within an RC
 - cells
 - slices
-- boxes (maybe not - maybe just RC?)
 - automatically convert types when assigning collections?
 
 wasm backend:
