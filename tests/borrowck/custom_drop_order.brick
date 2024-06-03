@@ -1,0 +1,13 @@
+// Int | 1234
+
+struct Data {
+    value: i32,
+
+    fn drop(self: unique Data) {
+        self.value = 5678;
+    }
+}
+
+let instance = Data { value: 1234 };
+let return_value = instance.value;
+return_value

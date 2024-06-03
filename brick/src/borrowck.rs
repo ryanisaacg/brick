@@ -270,40 +270,10 @@ fn borrow_check_node(
                 return Ok(());
             };
             if let Some(existing_borrow_state) = borrow_state.get_mut(var_id) {
-                match &mut existing_borrow_state.state {
-                    BorrowLifeState::Initialized => {}
-                    BorrowLifeState::Assigned(_var_id, id, provenance) => {
-                        *id = node.id;
-                        *provenance = node.provenance.clone();
-                    }
-                    BorrowLifeState::ValueMoved(_id, move_point) => {
-                        merge_results(
-                            &mut results,
-                            Err(LifetimeError::BorrowUseAfterMove {
-                                use_point: node.provenance.clone(),
-                                move_point: move_point.clone(),
-                            }),
-                        );
-                    }
-                    BorrowLifeState::ValueReassigned(_id, move_point) => {
-                        merge_results(
-                            &mut results,
-                            Err(LifetimeError::BorrowUseAfterReassignment {
-                                use_point: node.provenance.clone(),
-                                reassign_point: move_point.clone(),
-                            }),
-                        );
-                    }
-                    BorrowLifeState::MutableRefTaken(_id, ref_point) => {
-                        merge_results(
-                            &mut results,
-                            Err(LifetimeError::BorrowUseAfterMutableRefTaken {
-                                use_point: node.provenance.clone(),
-                                ref_point: ref_point.clone(),
-                            }),
-                        );
-                    }
-                }
+                merge_results(
+                    &mut results,
+                    update_borrow_state(existing_borrow_state, node),
+                );
             } else {
                 // We can ignore copy types
                 if is_copy(ctx.declarations, &node.ty) {
@@ -410,7 +380,10 @@ fn borrow_check_node(
                     borrow_check_node(ctx, variable_state, borrow_state, lhs),
                 );
             } else {
-                // TODO: mark used
+                merge_results(
+                    &mut results,
+                    mark_node_used(variable_state, borrow_state, lhs),
+                );
             }
         }
         HirNodeValue::UnionVariant(lhs, _)
@@ -422,7 +395,10 @@ fn borrow_check_node(
                     borrow_check_node(ctx, variable_state, borrow_state, lhs),
                 );
             } else {
-                // TODO: mark used
+                merge_results(
+                    &mut results,
+                    mark_node_used(variable_state, borrow_state, lhs),
+                );
             }
         }
         HirNodeValue::Call(_, params)
@@ -536,6 +512,80 @@ fn borrow_check_node(
     }
 
     results
+}
+
+fn mark_node_used(
+    variable_state: &mut HashMap<VariableID, VariableState>,
+    borrow_state: &mut HashMap<VariableID, BorrowState>,
+    node: &HirNode,
+) -> Result<(), LifetimeError> {
+    let mut results = Ok(());
+    match &node.value {
+        HirNodeValue::VariableReference(var_id) => {
+            let AnyID::Variable(var_id) = var_id else {
+                return Ok(());
+            };
+            if let Some(var_state) = variable_state.get_mut(var_id) {
+                match &mut var_state.state {
+                    VariableLifeState::Used(node_id, provenance) => {
+                        *node_id = node.id;
+                        *provenance = node.provenance.clone();
+                    }
+                    VariableLifeState::Moved(_, range) => {
+                        merge_results(
+                            &mut results,
+                            Err(LifetimeError::UseAfterMove {
+                                move_point: range.clone(),
+                                use_point: node.provenance.clone(),
+                            }),
+                        );
+                    }
+                }
+            } else if let Some(borrow_state) = borrow_state.get_mut(var_id) {
+                merge_results(&mut results, update_borrow_state(borrow_state, node));
+            }
+        }
+        _ => {
+            node.children(|child| {
+                merge_results(
+                    &mut results,
+                    mark_node_used(variable_state, borrow_state, child),
+                )
+            });
+        }
+    }
+
+    results
+}
+
+fn update_borrow_state(
+    borrow_state: &mut BorrowState,
+    node: &HirNode,
+) -> Result<(), LifetimeError> {
+    match &mut borrow_state.state {
+        BorrowLifeState::Initialized => Ok(()),
+        BorrowLifeState::Assigned(_var_id, id, provenance) => {
+            *id = node.id;
+            *provenance = node.provenance.clone();
+            Ok(())
+        }
+        BorrowLifeState::ValueMoved(_id, move_point) => Err(LifetimeError::BorrowUseAfterMove {
+            use_point: node.provenance.clone(),
+            move_point: move_point.clone(),
+        }),
+        BorrowLifeState::ValueReassigned(_id, move_point) => {
+            Err(LifetimeError::BorrowUseAfterReassignment {
+                use_point: node.provenance.clone(),
+                reassign_point: move_point.clone(),
+            })
+        }
+        BorrowLifeState::MutableRefTaken(_id, ref_point) => {
+            Err(LifetimeError::BorrowUseAfterMutableRefTaken {
+                use_point: node.provenance.clone(),
+                ref_point: ref_point.clone(),
+            })
+        }
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

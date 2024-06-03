@@ -1,0 +1,18 @@
+// Counter | 1
+
+extern fn incr_test_counter();
+
+struct Data {
+    value: i32,
+
+    fn drop(self: unique Data) {
+        incr_test_counter();
+    }
+}
+
+fn create_instance(): i32 {
+    let val = Data { value: 1234 };
+    val.value
+}
+
+let _ = create_instance();
