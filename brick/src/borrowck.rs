@@ -493,10 +493,13 @@ fn borrow_check_node(
             }
         }
 
-        // Ignore children - they're marked as borrowed in function call or
-        // in borrow assignment
-        HirNodeValue::TakeUnique(_) => {}
-        HirNodeValue::TakeShared(_) => {}
+        // Only mark as used, don't mark as moved
+        HirNodeValue::TakeUnique(inner) | HirNodeValue::TakeShared(inner) => {
+            merge_results(
+                &mut results,
+                mark_node_used(variable_state, borrow_state, inner),
+            );
+        }
 
         // Union tags are always safe to retrieve
         HirNodeValue::UnionTag(_) => {}
