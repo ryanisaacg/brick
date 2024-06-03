@@ -214,7 +214,8 @@ impl HirNode {
                 // TODO: expect dictionary keys
                 callback(None, rhs);
             }
-            HirNodeValue::ArrayIndex(_, idx) => {
+            HirNodeValue::ArrayIndex(lhs, idx) => {
+                callback(None, lhs);
                 callback(
                     Some(&ExpressionType::Primitive(PrimitiveType::PointerSize)),
                     idx,
@@ -420,7 +421,8 @@ impl HirNode {
                 // TODO: expect dictionary keys
                 callback(None, rhs);
             }
-            HirNodeValue::ArrayIndex(_, idx) => {
+            HirNodeValue::ArrayIndex(lhs, idx) => {
+                callback(None, lhs);
                 callback(
                     Some(&ExpressionType::Primitive(PrimitiveType::PointerSize)),
                     idx,
