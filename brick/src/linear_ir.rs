@@ -1099,7 +1099,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                     LinearNode::read_register(alloc_register),
                     0,
                     PhysicalType::Primitive(PhysicalPrimitive::Int32),
-                    LinearNode::new(LinearNodeValue::Int(0)),
+                    LinearNode::new(LinearNodeValue::Int(1)),
                 ),
                 LinearNode::write_memory(
                     LinearNode::read_register(alloc_register),

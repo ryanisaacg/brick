@@ -547,7 +547,15 @@ impl<'a> VM<'a> {
                     Value::FunctionID(_) => {
                         unreachable!()
                     }
-                    Value::Size(_) => todo!(),
+                    Value::Size(val) => match to {
+                        PhysicalPrimitive::Byte => Value::Byte(val as u8),
+                        PhysicalPrimitive::Int32 => Value::Int32(val as i32),
+                        PhysicalPrimitive::Int64 => Value::Int64(val as i64),
+                        PhysicalPrimitive::Float32 => Value::Float32(val as f32),
+                        PhysicalPrimitive::Float64 => Value::Float64(val as f64),
+                        PhysicalPrimitive::PointerSize => Value::Size(val),
+                        PhysicalPrimitive::FunctionPointer => unreachable!(),
+                    },
                     Value::Byte(val) => match to {
                         PhysicalPrimitive::Byte => Value::Byte(val),
                         PhysicalPrimitive::Int32 => Value::Int32(val as i32),

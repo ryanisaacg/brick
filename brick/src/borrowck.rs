@@ -144,7 +144,6 @@ struct VariableState {
 
 #[derive(Clone, Debug)]
 enum VariableLifeState {
-    #[allow(dead_code)] // for future drop insertion
     Used(NodeID, Option<SourceRange>),
     Moved(NodeID, Option<SourceRange>),
     //MovedInParents(HashSet<NodeIndex>),

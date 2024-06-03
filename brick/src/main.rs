@@ -48,6 +48,13 @@ fn main() {
             None
         }),
     );
+    bindings.insert(
+        "print".to_string(),
+        Box::new(|_vm, values| {
+            println!("{:?}", values);
+            None
+        }),
+    );
 
     println!(
         "{:?}",
