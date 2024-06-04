@@ -9,6 +9,6 @@ struct Data {
 }
 
 let value = rc { Data {} };
-let val1 = value.clone();
-let val2 = value.clone();
+value.clone();
+value.clone();
 

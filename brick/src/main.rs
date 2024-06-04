@@ -56,13 +56,10 @@ fn main() {
         }),
     );
 
-    println!(
-        "{:?}",
-        interpret_code(
-            "example.brick",
-            read_to_string("example.brick").expect("file should be readable"),
-            bindings
-        )
-        .unwrap()
-    );
+    interpret_code(
+        "example.brick",
+        read_to_string("example.brick").expect("file should be readable"),
+        bindings,
+    )
+    .unwrap();
 }

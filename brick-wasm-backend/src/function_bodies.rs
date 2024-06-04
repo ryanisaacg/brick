@@ -747,6 +747,18 @@ fn encode_node(
                 }
             }
         }
+        LinearNodeValue::Discard(value, _ty) => {
+            encode_node(
+                ctx,
+                value,
+                Some(&Callbacks::new(
+                    None,
+                    Some(&|ctx, _val, _idx| {
+                        ctx.instructions.push(Instruction::Drop);
+                    }),
+                )),
+            );
+        }
     }
     if let Some(PhysicalType::Primitive(prim)) = node_ty {
         if let Some(callbacks) = callbacks {

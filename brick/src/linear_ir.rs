@@ -206,6 +206,7 @@ impl LinearNode {
             | LinearNodeValue::WriteRegistersSplitting(_, _)
             | LinearNodeValue::Sequence(_)
             | LinearNodeValue::If(_, _, _)
+            | LinearNodeValue::Discard(_, _)
             | LinearNodeValue::KillRegister(_) => None,
             LinearNodeValue::Parameter(ty, _) | LinearNodeValue::ReadMemory { ty, .. } => {
                 Some(ty.clone())
@@ -267,6 +268,7 @@ pub enum LinearNodeValue {
         value: Box<LinearNode>,
     },
     ConstantDataAddress(usize),
+    Discard(Box<LinearNode>, PhysicalType),
 
     // Control flow
     Call(FunctionID, Vec<LinearNode>),
@@ -352,6 +354,7 @@ impl LinearNode {
         match &self.value {
             LinearNodeValue::WriteRegistersSplitting(child, _)
             | LinearNodeValue::Debug(child)
+            | LinearNodeValue::Discard(child, _)
             | LinearNodeValue::ReadMemory {
                 location: child, ..
             }
@@ -429,6 +432,7 @@ impl LinearNode {
         match &mut self.value {
             LinearNodeValue::WriteRegistersSplitting(child, _)
             | LinearNodeValue::Debug(child)
+            | LinearNodeValue::Discard(child, _)
             | LinearNodeValue::ReadMemory {
                 location: child, ..
             }
@@ -493,8 +497,6 @@ impl LinearNode {
         }
     }
 }
-
-// TODO: produce a more CFG shaped result?
 
 pub struct LinearContext<'a> {
     pub layouts: &'a HashMap<TypeID, DeclaredTypeLayout>,
@@ -1489,6 +1491,10 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 ty: variant_ty.clone().unwrap(),
             }
         }
+        HirNodeValue::Discard(val) => {
+            let ty = expr_ty_to_physical(&val.ty);
+            LinearNodeValue::Discard(Box::new(lower_expression(ctx, *val)), ty)
+        }
     };
 
     LinearNode { value, provenance }
@@ -1550,6 +1556,7 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
         HirNodeValue::Switch { value: _, cases: _ } => todo!(),
         HirNodeValue::UnionTag(_value) => todo!(),
         HirNodeValue::ReferenceCountLiteral(_) => todo!(),
+        HirNodeValue::Discard(_) => todo!(),
     }
 }
 

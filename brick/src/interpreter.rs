@@ -729,6 +729,12 @@ impl<'a> VM<'a> {
                     }
                 }
             }
+            LinearNodeValue::Discard(value, ty) => {
+                self.evaluate_node(params, value)?;
+                // Write the value out to get it off the stack and discard it
+                let mut temp_buffer = vec![0; ty.size_from_decls(&self.layouts, 1, USIZE)];
+                write(&mut self.op_stack, &self.layouts, &mut temp_buffer, 0, ty);
+            }
         }
 
         Ok(())

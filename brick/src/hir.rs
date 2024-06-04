@@ -16,6 +16,7 @@ mod auto_deref_dot;
 mod auto_numeric_cast;
 mod coroutines;
 mod create_temp_vars_for_lvalues;
+mod discard_unused_values;
 mod interface_conversion_pass;
 mod lower;
 mod rewrite_associated_functions;
@@ -41,10 +42,13 @@ pub fn lower_module(module: TypecheckedFile<'_>, declarations: &DeclarationConte
     widen_null::widen_null(&mut module, declarations);
     create_temp_vars_for_lvalues::create_temp_vars_for_lvalues(&mut module);
 
-    // These should go last, to clean up any sequences that are created by earlier passes
+    // These should go after desugaring, to clean up any sequences that are created by earlier passes
     simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
     simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
     simplify_sequence_expressions::simplify_trailing_if(&mut module);
+
+    // This should go last, to clean up any expressions that are returning an unused value
+    discard_unused_values::discard_unused_values(&mut module, declarations);
 
     module
 }
@@ -410,6 +414,7 @@ impl HirNode {
             HirNodeValue::ReferenceCountLiteral(inner) => {
                 callback(None, inner);
             }
+            HirNodeValue::Discard(inner) => callback(None, inner),
         }
     }
 
@@ -620,6 +625,7 @@ impl HirNode {
             HirNodeValue::ReferenceCountLiteral(inner) => {
                 callback(None, inner);
             }
+            HirNodeValue::Discard(inner) => callback(None, inner),
         }
     }
 
@@ -706,6 +712,9 @@ pub enum HirNodeValue {
         vtable: HashMap<FunctionID, FunctionID>,
     },
     MakeNullable(Box<HirNode>),
+
+    Discard(Box<HirNode>),
+
     // Generator instructions, all created during HIR
     GeneratorSuspend(Box<HirNode>, usize),
     GotoLabel(usize),
@@ -714,6 +723,7 @@ pub enum HirNodeValue {
         generator_function: FunctionID,
         args: Vec<HirNode>,
     },
+
     Switch {
         value: Box<HirNode>,
         cases: Vec<HirNode>,

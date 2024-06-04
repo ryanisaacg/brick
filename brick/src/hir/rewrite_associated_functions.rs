@@ -13,6 +13,7 @@ pub fn rewrite(declarations: &DeclarationContext, root: &mut HirNode) {
     let HirNodeValue::Call(call_lhs, args) = &mut root.value else {
         return;
     };
+    let root_ty = &root.ty;
     let HirNodeValue::Access(lhs, func_name) = &mut call_lhs.value else {
         return;
     };
@@ -106,13 +107,12 @@ pub fn rewrite(declarations: &DeclarationContext, root: &mut HirNode) {
             std::mem::swap(args, &mut runtime_args);
             runtime_args.insert(0, temp_lhs);
 
-            let fn_ty = &declarations.id_to_func[&runtime_fn.fn_id];
             std::mem::swap(
                 root,
                 &mut HirNode::generated_with_id(
                     root.id,
                     HirNodeValue::IntrinsicCall(runtime_fn.intrinsic_fn, runtime_args),
-                    fn_ty.returns.clone(),
+                    root_ty.clone(),
                 ),
             );
         }

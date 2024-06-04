@@ -8,13 +8,13 @@ borrow checker and lifetimes:
     - detect drops when a value is conditionally moved
     - validate the drop method has the correct arguments and no return value
     - drop dicts
-    - drop strings
+    - drop strings (may require string buffer vs string view types?)
     - drop generators
     - drop nullables
     - automatically run the drop of all children when dropping
+    - drop values when the variable is assigned
 
 misc:
-- automatically discard unused expression values
 - short-circuiting boolean evaluation
 - disallow top-level return
 
@@ -134,8 +134,7 @@ tooling:
 - pretty-printer
 
 allocator:
-- support dealloc
-- intrinsic-based bump deallocator
+- intrinsic bump allocator?
 
 unions:
 - optional non-exhaustive cases?
@@ -205,6 +204,5 @@ syntax:
 - keyword arguments
 - maybe separate syntax for i64 / f64 literals
 - there's an ambiguity between dereference / multiplication in if { body } * a += 1;
-- there's an ambiguity in 
 - decide on whether variables can shadow
 

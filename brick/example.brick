@@ -1,17 +1,5 @@
-// Counter | 1
-
-extern fn print(x: i32);
-
-struct Data {
-    fn drop(self: unique Data) {
-    }
+fn plus_one(x: i32): i32 {
+    x + 1
 }
 
-print(0);
-let value = rc { Data {} };
-print(1);
-let val1 = value.clone();
-print(2);
-let val2 = value.clone();
-print(3);
-
+plus_one({ 1 + 2 })
