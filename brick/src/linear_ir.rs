@@ -1160,27 +1160,21 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         }
         HirNodeValue::IntrinsicCall(IntrinsicFunction::ArrayPush, mut args) => {
             let inserted = args.pop().unwrap();
-            let HirNodeValue::TakeUnique(arr) = args.pop().unwrap().value else {
-                unreachable!()
-            };
-            let ExpressionType::Collection(CollectionType::Array(array_inner_ty)) = &arr.ty else {
-                unreachable!()
-            };
-            let array_inner_ty = expr_ty_to_physical(array_inner_ty);
-            let (location, offset) = lower_lvalue(ctx, *arr);
+            let inner_ty = expr_ty_to_physical(&inserted.ty);
 
+            let arr = lower_expression(ctx, args.pop().unwrap());
             let inserted = lower_expression(ctx, inserted);
 
             LinearNodeValue::WriteMemory {
                 location: Box::new(LinearNode::new(array_alloc_space_to_push(
-                    location,
-                    offset,
-                    array_inner_ty.size(ctx),
+                    arr,
+                    0,
+                    inner_ty.size(ctx),
                     provenance.clone(),
                     ctx.pointer_size,
                 ))),
                 offset: 0,
-                ty: array_inner_ty,
+                ty: inner_ty,
                 value: Box::new(inserted),
             }
         }
@@ -1200,10 +1194,13 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         HirNodeValue::IntrinsicCall(IntrinsicFunction::DictionaryInsert, mut args) => {
             let value = args.pop().unwrap();
             let key = args.pop().unwrap();
-            let HirNodeValue::TakeUnique(dict) = args.pop().unwrap().value else {
+            let dict = args.pop().unwrap();
+
+            let ExpressionType::Pointer(_, dict_ty) = &dict.ty else {
                 unreachable!()
             };
-            let ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) = &dict.ty
+            let ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) =
+                dict_ty.as_ref()
             else {
                 unreachable!()
             };
@@ -1216,7 +1213,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 unreachable!()
             };
 
-            let (dict_location, dict_offset) = lower_lvalue(ctx, dict.as_ref().clone());
+            let dict_location = lower_expression(ctx, dict);
 
             let key = lower_expression(ctx, key);
             let value = lower_expression(ctx, value);
@@ -1243,7 +1240,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                     dict_get_entry_for_key(
                         LinearNode::read_memory(
                             LinearNode::read_register(ptr),
-                            dict_offset,
+                            0,
                             PhysicalType::Collection(PhysicalCollection::Dict),
                         ),
                         LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
@@ -1267,7 +1264,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                             entry_register,
                             LinearNode::new(array_alloc_space_to_push(
                                 LinearNode::read_register(ptr),
-                                dict_offset,
+                                0,
                                 entry_size,
                                 None,
                                 ctx.pointer_size,
@@ -1295,10 +1292,12 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         }
         HirNodeValue::IntrinsicCall(IntrinsicFunction::DictionaryContains, mut args) => {
             let key = args.pop().unwrap();
-            let HirNodeValue::TakeShared(dict) = args.pop().unwrap().value else {
+            let dict = args.pop().unwrap();
+            let ExpressionType::Pointer(_, dict_ty) = &dict.ty else {
                 unreachable!()
             };
-            let ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) = &dict.ty
+            let ExpressionType::Collection(CollectionType::Dict(key_ty, value_ty)) =
+                dict_ty.as_ref()
             else {
                 unreachable!()
             };
@@ -1310,24 +1309,40 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 unreachable!()
             };
 
-            let dict = lower_expression(ctx, *dict);
+            let dict = lower_expression(ctx, dict);
             let key = lower_expression(ctx, key);
 
             let entry_pointer_output = RegisterID::new();
 
             LinearNodeValue::Sequence(vec![
-                dict_get_entry_for_key(dict, key, 0, key_ty, entry_size, entry_pointer_output),
+                dict_get_entry_for_key(
+                    LinearNode::read_memory(
+                        dict,
+                        0,
+                        PhysicalType::Collection(PhysicalCollection::Dict),
+                    ),
+                    key,
+                    0,
+                    key_ty,
+                    entry_size,
+                    entry_pointer_output,
+                ),
                 LinearNode::kill_register(entry_pointer_output),
             ])
         }
         HirNodeValue::IntrinsicCall(IntrinsicFunction::RcClone, mut args) => {
-            let HirNodeValue::TakeShared(rc) = args.remove(0).value else {
-                unreachable!()
-            };
+            let rc = args.remove(0);
             let ptr_register = RegisterID::new();
             let reference_count_location = RegisterID::new();
             LinearNodeValue::Sequence(vec![
-                LinearNode::write_register(ptr_register, lower_expression(ctx, *rc)),
+                LinearNode::write_register(
+                    ptr_register,
+                    LinearNode::read_memory(
+                        lower_expression(ctx, rc),
+                        0,
+                        PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                    ),
+                ),
                 LinearNode::write_register(
                     reference_count_location,
                     LinearNode::ptr_arithmetic(
