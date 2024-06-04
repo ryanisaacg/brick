@@ -4,7 +4,7 @@ use super::HirModule;
 
 pub fn convert_calls_to_union_literals(module: &mut HirModule, declarations: &DeclarationContext) {
     // Rewrite union variants with values
-    module.visit_mut(|node| {
+    module.par_visit_mut(|node| {
         let HirNodeValue::Call(func, _args) = &node.value else {
             return;
         };
@@ -33,7 +33,7 @@ pub fn convert_calls_to_union_literals(module: &mut HirModule, declarations: &De
         node.value = HirNodeValue::UnionLiteral(ty_id, variant, Some(Box::new(args.remove(0))));
     });
     // Rewrite union variants without values
-    module.visit_mut(|node| {
+    module.par_visit_mut(|node| {
         // Determine if the "access" is actually a union variant
         let HirNodeValue::Access(lhs, _) = &node.value else {
             return;

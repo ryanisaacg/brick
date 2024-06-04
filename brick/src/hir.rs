@@ -33,7 +33,7 @@ pub fn lower_module(module: TypecheckedFile<'_>, declarations: &DeclarationConte
     // This should come before anyone looks too hard at dot operators and function calls
     unions::convert_calls_to_union_literals(&mut module, declarations);
     // Associated function rewriting needs to come before auto_deref
-    module.visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
+    module.par_visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
     interface_conversion_pass::rewrite(&mut module, declarations);
     // These passes can be in any order
     coroutines::rewrite_yields(&mut module);
@@ -73,6 +73,22 @@ impl HirModule {
         for func in self.functions.iter() {
             func.body.visit_recursive(None, &mut callback);
         }
+    }
+
+    pub fn par_visit_mut(&mut self, mut callback: impl Fn(&mut HirNode) + Send + Sync) {
+        use rayon::prelude::*;
+        self.top_level_statements.visit_mut_recursive(&mut callback);
+        self.functions
+            .par_iter_mut()
+            .for_each(|func| func.body.visit_mut(&callback));
+    }
+
+    pub fn par_visit(&self, callback: impl Fn(Option<&HirNode>, &HirNode) + Sync) {
+        use rayon::prelude::*;
+        self.top_level_statements.visit(&callback);
+        self.functions
+            .par_iter()
+            .for_each(|func| func.body.visit(&callback));
     }
 }
 

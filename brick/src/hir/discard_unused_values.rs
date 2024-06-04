@@ -6,7 +6,7 @@ use crate::{
 use super::{HirModule, HirNode};
 
 pub fn discard_unused_values(module: &mut HirModule, declarations: &DeclarationContext) {
-    module.visit_mut(|node| {
+    module.par_visit_mut(|node| {
         let does_return_value =
             node.ty != ExpressionType::Void && node.ty != ExpressionType::Unreachable;
         let HirNodeValue::Sequence(children) = &mut node.value else {

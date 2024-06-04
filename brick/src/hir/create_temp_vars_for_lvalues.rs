@@ -3,7 +3,7 @@ use crate::{id::VariableID, typecheck::ExpressionType, HirNodeValue};
 use super::{HirModule, HirNode};
 
 pub fn create_temp_vars_for_lvalues(module: &mut HirModule) {
-    module.visit_mut(|node| {
+    module.par_visit_mut(|node| {
         let Some(lvalue) = node.value.lvalue_mut() else {
             return;
         };

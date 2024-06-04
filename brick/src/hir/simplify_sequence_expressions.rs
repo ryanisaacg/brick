@@ -13,7 +13,7 @@ use super::{HirModule, HirNode, HirNodeValue};
  * 1 } else { x = 2 })
  */
 pub fn simplify_sequence_assignments(module: &mut HirModule) {
-    module.visit_mut(|node| {
+    module.par_visit_mut(|node| {
         let HirNodeValue::Assignment(lhs, rhs) = &mut node.value else {
             return;
         };
@@ -81,7 +81,7 @@ fn replace_last_with_assignment(
 }
 
 pub fn simplify_sequence_uses(module: &mut HirModule, declarations: &DeclarationContext) {
-    module.visit_mut(|node| {
+    module.par_visit_mut(|node| {
         let mut temporaries = Vec::new();
         node.walk_expected_types_for_children_mut(declarations, |ty, child| {
             if !matches!(
@@ -148,7 +148,7 @@ pub fn simplify_sequence_uses(module: &mut HirModule, declarations: &Declaration
 }
 
 pub fn simplify_trailing_if(module: &mut HirModule) {
-    module.visit_mut(|node| {
+    module.par_visit_mut(|node| {
         let HirNodeValue::Sequence(children) = &mut node.value else {
             return;
         };

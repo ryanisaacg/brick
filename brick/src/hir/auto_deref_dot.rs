@@ -3,7 +3,7 @@ use crate::typecheck::ExpressionType;
 use super::{HirModule, HirNode, HirNodeValue};
 
 pub fn auto_deref_dot(module: &mut HirModule) {
-    module.visit_mut(|node| {
+    module.par_visit_mut(|node| {
         let HirNodeValue::Access(lhs, _) = &mut node.value else {
             return;
         };
