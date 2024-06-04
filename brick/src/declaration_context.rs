@@ -27,6 +27,7 @@ pub struct DeclarationContext {
     pub array_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
     pub dict_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
     pub rc_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
+    pub cell_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
     pub extern_functions: Vec<(String, FunctionID)>,
 }
 
@@ -47,6 +48,7 @@ impl DeclarationContext {
             array_intrinsics: HashMap::new(),
             dict_intrinsics: HashMap::new(),
             rc_intrinsics: HashMap::new(),
+            cell_intrinsics: HashMap::new(),
             extern_functions: Vec::new(),
         };
         add_intrinsics(&mut ctx);
@@ -494,6 +496,9 @@ pub fn resolve_type_expr(
             yield_ty: Box::new(resolve_type_expr(name_to_type_id, yield_ty)?),
             param_ty: Box::new(resolve_type_expr(name_to_type_id, param_ty)?),
         },
+        AstNodeValue::CellType(inner_ty) => ExpressionType::Collection(CollectionType::Cell(
+            Box::new(resolve_type_expr(name_to_type_id, inner_ty)?),
+        )),
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::RequiredFunction(_)
         | AstNodeValue::ExternFunctionBinding(_)
@@ -527,7 +532,8 @@ pub fn resolve_type_expr(
         | AstNodeValue::DictLiteral(_)
         | AstNodeValue::Match(_)
         | AstNodeValue::BorrowDeclaration(..)
-        | AstNodeValue::ReferenceCountLiteral(_) => {
+        | AstNodeValue::ReferenceCountLiteral(_)
+        | AstNodeValue::CellLiteral(_) => {
             panic!("ICE: Illegal node in type name: {:?}", node.value);
         }
     })
@@ -545,6 +551,9 @@ pub enum IntrinsicFunction {
     RcClone,
     RcDecrement,
     RcFree,
+
+    CellGet,
+    CellSet,
 }
 
 pub struct CollectionIntrinsic {
@@ -654,6 +663,48 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         PointerKind::Shared,
     );
     ctx.rc_intrinsics = rc_intrinsics;
+
+    let mut cell_intrinsics = HashMap::new();
+    add_intrinsic(
+        ctx,
+        &mut cell_intrinsics,
+        "get",
+        IntrinsicFunction::CellGet,
+        1,
+        vec![
+            ExpressionType::Pointer(
+                PointerKind::Shared,
+                Box::new(ExpressionType::Collection(CollectionType::Cell(Box::new(
+                    ExpressionType::TypeParameterReference(0),
+                )))),
+            ),
+            ExpressionType::Pointer(
+                PointerKind::Unique,
+                Box::new(ExpressionType::TypeParameterReference(0)),
+            ),
+        ],
+        ExpressionType::Void,
+        PointerKind::Shared,
+    );
+    add_intrinsic(
+        ctx,
+        &mut cell_intrinsics,
+        "set",
+        IntrinsicFunction::CellSet,
+        1,
+        vec![
+            ExpressionType::Pointer(
+                PointerKind::Shared,
+                Box::new(ExpressionType::Collection(CollectionType::Cell(Box::new(
+                    ExpressionType::TypeParameterReference(0),
+                )))),
+            ),
+            ExpressionType::TypeParameterReference(0),
+        ],
+        ExpressionType::Void,
+        PointerKind::Shared,
+    );
+    ctx.cell_intrinsics = cell_intrinsics;
 }
 
 #[allow(clippy::too_many_arguments)]

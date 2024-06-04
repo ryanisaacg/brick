@@ -104,7 +104,9 @@ impl ExpressionType {
             ExpressionType::Nullable(child)
             | ExpressionType::Pointer(_, child)
             | ExpressionType::Collection(
-                CollectionType::Array(child) | CollectionType::ReferenceCounter(child),
+                CollectionType::Array(child)
+                | CollectionType::ReferenceCounter(child)
+                | CollectionType::Cell(child),
             ) => {
                 child.resolve_generics(bindings);
             }
@@ -137,6 +139,7 @@ pub enum CollectionType {
     Array(Box<ExpressionType>),
     Dict(Box<ExpressionType>, Box<ExpressionType>),
     ReferenceCounter(Box<ExpressionType>),
+    Cell(Box<ExpressionType>),
     String,
 }
 
@@ -600,6 +603,7 @@ fn typecheck_expression<'a>(
         | AstNodeValue::VoidType
         | AstNodeValue::SharedType(_)
         | AstNodeValue::ArrayType(_)
+        | AstNodeValue::CellType(_)
         | AstNodeValue::RcType(_)
         | AstNodeValue::DictType(_, _)
         | AstNodeValue::NullableType(_)
@@ -808,6 +812,13 @@ fn typecheck_expression<'a>(
                 }
                 ExpressionType::Collection(CollectionType::ReferenceCounter(_)) => {
                     if let Some(ty) = context.declarations.rc_intrinsics.get(name.as_str()) {
+                        ExpressionType::ReferenceToFunction(ty.fn_id)
+                    } else {
+                        todo!("rc methods")
+                    }
+                }
+                ExpressionType::Collection(CollectionType::Cell(_)) => {
+                    if let Some(ty) = context.declarations.cell_intrinsics.get(name.as_str()) {
                         ExpressionType::ReferenceToFunction(ty.fn_id)
                     } else {
                         todo!("rc methods")
@@ -1581,6 +1592,16 @@ fn typecheck_expression<'a>(
             )?;
             ExpressionType::Collection(CollectionType::ReferenceCounter(Box::new(inner_ty.clone())))
         }
+        AstNodeValue::CellLiteral(inner) => {
+            let inner_ty = typecheck_expression(
+                inner,
+                outer_scopes,
+                current_scope,
+                context,
+                generator_input_ty,
+            )?;
+            ExpressionType::Collection(CollectionType::Cell(Box::new(inner_ty.clone())))
+        }
         AstNodeValue::TakeUnique(inner) => ExpressionType::Pointer(
             PointerKind::Unique,
             Box::new(
@@ -1803,7 +1824,9 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::NullableType(_)
         | AstNodeValue::GeneratorType { .. }
         | AstNodeValue::BorrowDeclaration(..)
-        | AstNodeValue::ReferenceCountLiteral(_) => false,
+        | AstNodeValue::ReferenceCountLiteral(_)
+        | AstNodeValue::CellType(_)
+        | AstNodeValue::CellLiteral(_) => false,
     }
 }
 
@@ -1852,6 +1875,10 @@ fn find_generic_bindings(
             ExpressionType::Collection(CollectionType::ReferenceCounter(left)),
             ExpressionType::Collection(CollectionType::ReferenceCounter(right)),
         )
+        | (
+            ExpressionType::Collection(CollectionType::Cell(left)),
+            ExpressionType::Collection(CollectionType::Cell(right)),
+        )
         | (ExpressionType::Nullable(left), ExpressionType::Nullable(right)) => {
             find_generic_bindings(generic_args, left, right);
         }
@@ -1896,7 +1923,8 @@ fn find_generic_bindings(
             ExpressionType::Collection(
                 CollectionType::Dict(..)
                 | CollectionType::Array(_)
-                | CollectionType::ReferenceCounter(_),
+                | CollectionType::ReferenceCounter(_)
+                | CollectionType::Cell(_),
             ),
             _,
         )
@@ -2021,7 +2049,10 @@ pub fn is_assignable_to(
         | (
             Collection(CollectionType::ReferenceCounter(left)),
             Collection(CollectionType::ReferenceCounter(right)),
-        ) => left == right,
+        )
+        | (Collection(CollectionType::Cell(left)), Collection(CollectionType::Cell(right))) => {
+            left == right
+        }
         (
             Collection(CollectionType::Dict(left_key, left_value)),
             Collection(CollectionType::Dict(right_key, right_value)),

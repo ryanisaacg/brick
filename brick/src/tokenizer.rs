@@ -90,6 +90,7 @@ pub enum TokenValue {
     Dict,
     List,
     Rc,
+    Cell,
     Interface,
     Yield,
     Void,
@@ -117,6 +118,7 @@ impl TokenValue {
             | TokenValue::Loop
             | TokenValue::Dict
             | TokenValue::Rc
+            | TokenValue::Cell
             | TokenValue::List
             | TokenValue::True
             | TokenValue::False
@@ -234,6 +236,7 @@ impl fmt::Display for TokenValue {
             Null => write!(f, "keyword null"),
             Dict => write!(f, "keyword dict"),
             Rc => write!(f, "keyword rc"),
+            Cell => write!(f, "keyword cell"),
             List => write!(f, "keyword list"),
             Interface => write!(f, "keyword interface"),
             Yield => write!(f, "keyword yield"),
@@ -370,6 +373,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "dict" => TokenValue::Dict,
                         "list" => TokenValue::List,
                         "rc" => TokenValue::Rc,
+                        "cell" => TokenValue::Cell,
                         "interface" => TokenValue::Interface,
                         "and" => TokenValue::BooleanAnd,
                         "or" => TokenValue::BooleanOr,

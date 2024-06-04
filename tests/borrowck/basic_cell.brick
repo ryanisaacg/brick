@@ -1,0 +1,10 @@
+// Int | 5678
+
+fn modify(val: ref cell[i32]) {
+    val.set(5678);
+}
+let value = cell { 1234 };
+modify(ref value);
+let cell_stored_value = 0;
+value.get(unique cell_stored_value);
+cell_stored_value

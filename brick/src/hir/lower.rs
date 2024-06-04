@@ -279,6 +279,7 @@ fn lower_node(decls: &DeclarationContext, node: &AstNode<'_>) -> HirNode {
                     CollectionType::Array(_) => HirNodeValue::ArrayIndex(left, right),
                     CollectionType::String => todo!(),
                     CollectionType::ReferenceCounter(_) => unreachable!(),
+                    CollectionType::Cell(_) => unreachable!(),
                 },
                 _ => unreachable!(),
             }
@@ -383,6 +384,9 @@ fn lower_node(decls: &DeclarationContext, node: &AstNode<'_>) -> HirNode {
         }
         AstNodeValue::ReferenceCountLiteral(inner) => {
             HirNodeValue::ReferenceCountLiteral(lower_node_alloc(decls, inner))
+        }
+        AstNodeValue::CellLiteral(inner) => {
+            HirNodeValue::CellLiteral(lower_node_alloc(decls, inner))
         }
         AstNodeValue::DictLiteral(elements) => HirNodeValue::DictLiteral(
             elements
@@ -576,6 +580,7 @@ fn lower_node(decls: &DeclarationContext, node: &AstNode<'_>) -> HirNode {
         | AstNodeValue::RequiredFunction(_)
         | AstNodeValue::DictType(_, _)
         | AstNodeValue::ArrayType(_)
+        | AstNodeValue::CellType(_)
         | AstNodeValue::RcType(_)
         | AstNodeValue::GeneratorType { .. } => unreachable!("Can't have these in a function body"),
     };

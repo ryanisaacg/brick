@@ -1434,6 +1434,47 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 )],
             )
         }
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::CellGet, mut args) => {
+            let rc = args.remove(0);
+            let ExpressionType::Pointer(_, cell_ty) = &rc.ty else {
+                unreachable!()
+            };
+            let ExpressionType::Collection(CollectionType::Cell(inner_ty)) = cell_ty.as_ref()
+            else {
+                unreachable!()
+            };
+            let target = args.remove(0);
+
+            let ty = expr_ty_to_physical(inner_ty);
+            let rc = lower_expression(ctx, rc);
+            let target = lower_expression(ctx, target);
+
+            LinearNodeValue::WriteMemory {
+                location: Box::new(target),
+                offset: 0,
+                ty: ty.clone(),
+                value: Box::new(LinearNode::read_memory(rc, 0, ty)),
+            }
+        }
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::CellSet, mut args) => {
+            let rc = args.remove(0);
+            let ExpressionType::Pointer(_, cell_ty) = &rc.ty else {
+                unreachable!()
+            };
+            let ExpressionType::Collection(CollectionType::Cell(inner_ty)) = cell_ty.as_ref()
+            else {
+                unreachable!()
+            };
+            let ty = expr_ty_to_physical(inner_ty);
+            let rc = lower_expression(ctx, rc);
+            let argument = lower_expression(ctx, args.remove(0));
+            LinearNodeValue::WriteMemory {
+                location: Box::new(rc),
+                offset: 0,
+                ty,
+                value: Box::new(argument),
+            }
+        }
         HirNodeValue::GeneratorSuspend(generator, label) => {
             let location = lower_expression(ctx, *generator);
             LinearNodeValue::WriteMemory {
@@ -1507,6 +1548,9 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             let ty = expr_ty_to_physical(&val.ty);
             LinearNodeValue::Discard(Box::new(lower_expression(ctx, *val)), ty)
         }
+        HirNodeValue::CellLiteral(inner) => {
+            return lower_expression(ctx, *inner);
+        }
     };
 
     LinearNode { value, provenance }
@@ -1569,6 +1613,7 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
         HirNodeValue::UnionTag(_value) => todo!(),
         HirNodeValue::ReferenceCountLiteral(_) => todo!(),
         HirNodeValue::Discard(_) => todo!(),
+        HirNodeValue::CellLiteral(_) => todo!(),
     }
 }
 
@@ -2147,6 +2192,7 @@ pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
             CollectionType::ReferenceCounter(_) => {
                 return PhysicalType::Primitive(PhysicalPrimitive::PointerSize);
             }
+            CollectionType::Cell(inner) => return expr_ty_to_physical(inner.as_ref()),
         }),
         ExpressionType::Pointer(_, _) => PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
         ExpressionType::Nullable(inner) => {

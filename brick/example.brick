@@ -1,5 +1,9 @@
-fn plus_one(x: i32): i32 {
-    x + 1
-}
+// Int | 5678
 
-plus_one({ 1 + 2 })
+fn modify(val: ref cell[i32]) {
+    val.set(5678);
+}
+let value = cell { 1234 };
+borrow val1 = ref value;
+modify(val1);
+value.get()

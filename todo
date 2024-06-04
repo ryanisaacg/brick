@@ -18,6 +18,7 @@ borrow checker and lifetimes:
 misc:
 - short-circuiting boolean evaluation
 - disallow top-level return
+- bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
 
 collections:
 - prevent references being stored in collections
@@ -32,7 +33,10 @@ collections:
 - rc's:
     - can take RC'ed references to collections? maybe even RC'ed subreferences to user-defined collections?
     - can get a ref from within an RC
-- cells
+    - atomic decrement?
+- cells:
+    - mark as !Sync or equivalent
+    - (requires monomorphization) don't take a mutable parameter to get(), return an actual value
 - slices
 - automatically convert types when assigning collections?
 
@@ -114,6 +118,10 @@ compilation resume and reload:
     - evaluate
     - print
     - loop
+
+generic types:
+- syntax
+- metamorphizing
 
 anonymous types:
 - anonymous struct

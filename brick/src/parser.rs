@@ -50,8 +50,10 @@ impl<'a> AstNode<'a> {
             | Deref(child)
             | UnaryExpr(_, child)
             | ArrayType(child)
+            | CellType(child)
             | Loop(child)
             | ReferenceCountLiteral(child)
+            | CellLiteral(child)
             | BorrowDeclaration(_, child, _) => {
                 callback(child);
             }
@@ -309,6 +311,7 @@ pub enum AstNodeValue<'a> {
     ArrayLiteral(Vec<AstNode<'a>>),
     ArrayLiteralLength(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
     ReferenceCountLiteral(&'a mut AstNode<'a>),
+    CellLiteral(&'a mut AstNode<'a>),
     Block(Vec<AstNode<'a>>),
     Deref(&'a mut AstNode<'a>),
     Match(MatchDeclaration<'a>),
@@ -322,6 +325,7 @@ pub enum AstNodeValue<'a> {
     DictType(&'a mut AstNode<'a>, &'a mut AstNode<'a>),
     RcType(&'a mut AstNode<'a>),
     NullableType(&'a mut AstNode<'a>),
+    CellType(&'a mut AstNode<'a>),
     GeneratorType {
         yield_ty: &'a mut AstNode<'a>,
         param_ty: &'a mut AstNode<'a>,
@@ -1150,8 +1154,28 @@ fn type_expression<'a>(
                 SourceRange::new(next.range.start(), token.range.end()),
             )
         }
-        TokenValue::Word(name) => {
-            if name == "generator" {
+        TokenValue::Cell => {
+            let token = assert_next_lexeme_eq(
+                source,
+                TokenValue::OpenSquare,
+                next.range.end(),
+                "expected [ after cell type",
+            )?;
+            let inner_ty = type_expression(source, context, token.range.end())?;
+            let token = assert_next_lexeme_eq(
+                source,
+                TokenValue::CloseSquare,
+                inner_ty.provenance.end(),
+                "expected ] after cell type",
+            )?;
+
+            AstNode::new(
+                AstNodeValue::CellType(context.alloc(inner_ty)),
+                SourceRange::new(next.range.start(), token.range.end()),
+            )
+        }
+        TokenValue::Word(name) => match name.as_str() {
+            "generator" => {
                 let token = assert_next_lexeme_eq(
                     source,
                     TokenValue::OpenSquare,
@@ -1185,10 +1209,9 @@ fn type_expression<'a>(
                     AstNodeValue::GeneratorType { yield_ty, param_ty },
                     SourceRange::new(next.range.start(), token.range.end()),
                 )
-            } else {
-                AstNode::new(AstNodeValue::name(name), next.range)
             }
-        }
+            _ => AstNode::new(AstNodeValue::name(name), next.range),
+        },
         _ => {
             return Err(ParseError::UnexpectedToken(
                 Box::new(next),
@@ -1254,6 +1277,7 @@ fn expression_pratt<'a>(
         TokenValue::Dict => dict_literal(source, context, cursor)?,
         TokenValue::List => array_literal(source, context, cursor, can_be_struct)?,
         TokenValue::Rc => rc_literal(source, context, cursor)?,
+        TokenValue::Cell => cell_literal(source, context, cursor)?,
         token @ (TokenValue::If | TokenValue::While) => {
             if_or_while(source, context, token, cursor)?
         }
@@ -1664,6 +1688,34 @@ fn rc_literal<'a>(
     let inner = context.alloc(inner);
     Ok(AstNode::new(
         AstNodeValue::ReferenceCountLiteral(inner),
+        SourceRange::new(start, cursor),
+    ))
+}
+
+fn cell_literal<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    start: SourceMarker,
+) -> Result<AstNode<'a>, ParseError> {
+    let token = assert_next_lexeme_eq(
+        source,
+        TokenValue::OpenBracket,
+        start,
+        "expected { to start cell literal",
+    )?;
+    let mut cursor = token.range.end();
+    let inner = expression(source, context, cursor, true)?;
+    cursor = inner.provenance.end();
+    let token = assert_next_lexeme_eq(
+        source,
+        TokenValue::CloseBracket,
+        cursor,
+        "expected } to end cell literal",
+    )?;
+    cursor = token.range.end();
+    let inner = context.alloc(inner);
+    Ok(AstNode::new(
+        AstNodeValue::CellLiteral(inner),
         SourceRange::new(start, cursor),
     ))
 }

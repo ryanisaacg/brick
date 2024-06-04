@@ -86,6 +86,7 @@ pub fn rewrite(declarations: &DeclarationContext, root: &mut HirNode) {
                 CollectionType::Array(_) => &declarations.array_intrinsics,
                 CollectionType::Dict(_, _) => &declarations.dict_intrinsics,
                 CollectionType::ReferenceCounter(_) => &declarations.rc_intrinsics,
+                CollectionType::Cell(_) => &declarations.cell_intrinsics,
                 CollectionType::String => todo!(),
             };
 
