@@ -13,6 +13,7 @@ borrow checker and lifetimes:
     - drop nullables
     - automatically run the drop of all children when dropping
     - drop values when the variable is assigned
+    - non-affine types may not define a drop
 
 misc:
 - short-circuiting boolean evaluation
