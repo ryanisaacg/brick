@@ -1,0 +1,7 @@
+// Int | 4
+fn length(arr: ref list[i32]): size {
+    arr.len()
+}
+
+let array = list[12, 34, 56, 78];
+length(ref array)

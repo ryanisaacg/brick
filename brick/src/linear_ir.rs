@@ -1151,13 +1151,10 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             LinearNode::bool_value(true),
         ]),
         HirNodeValue::IntrinsicCall(IntrinsicFunction::ArrayLength, mut args) => {
-            let HirNodeValue::TakeShared(arr) = args.remove(0).value else {
-                unreachable!()
-            };
-            let (location, offset) = lower_lvalue(ctx, *arr);
+            let location = lower_expression(ctx, args.remove(0));
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
-                offset: offset + ctx.pointer_size,
+                offset: ctx.pointer_size,
                 ty: PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             }
         }
