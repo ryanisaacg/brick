@@ -15,11 +15,6 @@ borrow checker and lifetimes:
     - drop values when the variable is assigned
     - non-affine types may not define a drop
 
-misc:
-- short-circuiting boolean evaluation
-- disallow top-level return
-- bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
-
 collections:
 - prevent references being stored in collections
 - tuples
@@ -57,6 +52,11 @@ modules:
 - modules can be declared explicitly
 - do files have to import each other?
 - how are modules declared?
+
+misc:
+- short-circuiting boolean evaluation
+- disallow top-level return
+- bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
 
 errors:
 - functions can define `throws`
@@ -118,10 +118,6 @@ compilation resume and reload:
     - evaluate
     - print
     - loop
-
-generic types:
-- syntax
-- metamorphizing
 
 anonymous types:
 - anonymous struct
