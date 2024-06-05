@@ -209,7 +209,7 @@ impl<'a> VM<'a> {
                         }
                     }
                 },
-                LinearNodeValue::If(_, if_branch, else_branch) => {
+                LinearNodeValue::If(_, if_branch, else_branch, _) => {
                     let mut found_goto = false;
                     for node in if_branch.iter() {
                         self.evaluate_node(params, node)?;
@@ -339,7 +339,7 @@ impl<'a> VM<'a> {
                     return Err(Unwind::Return(None));
                 }
             }
-            LinearNodeValue::If(cond, if_branch, else_branch) => {
+            LinearNodeValue::If(cond, if_branch, else_branch, _) => {
                 self.evaluate_node(params, cond)?;
                 let Some(Value::Byte(cond)) = self.op_stack.pop() else {
                     unreachable!()
@@ -814,22 +814,16 @@ fn write(
             write_primitive(op_stack, memory, location);
             write_primitive(op_stack, memory, location + 8);
         }
-        PhysicalType::Nullable(ty) => match op_stack.pop().unwrap() {
-            Value::Byte(0) => {
-                memory[location] = 0;
-            }
-            Value::Byte(_) => {
-                memory[location] = 1;
-                write(
-                    op_stack,
-                    layouts,
-                    memory,
-                    location + NULL_TAG_SIZE.size(USIZE),
-                    ty,
-                );
-            }
-            _ => unreachable!(),
-        },
+        PhysicalType::Nullable(ty) => {
+            write_primitive(op_stack, memory, location);
+            write(
+                op_stack,
+                layouts,
+                memory,
+                location + NULL_TAG_SIZE.size(USIZE),
+                ty,
+            );
+        }
     }
 }
 
@@ -927,19 +921,14 @@ fn read(
             read_primitive(op_stack, memory, location, PhysicalPrimitive::PointerSize);
         }
         PhysicalType::Nullable(ty) => {
-            let null_flag = memory[location];
-            if null_flag == 0 {
-                op_stack.push(bool_value(false));
-            } else {
-                read(
-                    op_stack,
-                    layouts,
-                    memory,
-                    location + NULL_TAG_SIZE.size(USIZE),
-                    ty,
-                );
-                op_stack.push(bool_value(true));
-            }
+            read(
+                op_stack,
+                layouts,
+                memory,
+                location + NULL_TAG_SIZE.size(USIZE),
+                ty,
+            );
+            read_primitive(op_stack, memory, location, PhysicalPrimitive::Byte);
         }
     }
 }

@@ -1,3 +1,3 @@
-// Int | 0
+// ?Int | null
 let x: i32? = null;
 x

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use bytemuck::Zeroable;
+
 use crate::{
     declaration_context::{IntrinsicFunction, Module, TypeID},
     hir::{
@@ -44,7 +46,20 @@ impl LinearNode {
         provenance: Option<SourceRange>,
     ) -> LinearNode {
         LinearNode {
-            value: LinearNodeValue::If(Box::new(cond), if_block, else_block),
+            value: LinearNodeValue::If(Box::new(cond), if_block, else_block, None),
+            provenance,
+        }
+    }
+
+    fn if_node_value(
+        cond: LinearNode,
+        if_block: Vec<LinearNode>,
+        else_block: Option<Vec<LinearNode>>,
+        provenance: Option<SourceRange>,
+        ty: PhysicalType,
+    ) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::If(Box::new(cond), if_block, else_block, Some(ty)),
             provenance,
         }
     }
@@ -205,9 +220,9 @@ impl LinearNode {
             | LinearNodeValue::WriteRegister(_, _)
             | LinearNodeValue::WriteRegistersSplitting(_, _)
             | LinearNodeValue::Sequence(_)
-            | LinearNodeValue::If(_, _, _)
             | LinearNodeValue::Discard(_, _)
             | LinearNodeValue::KillRegister(_) => None,
+            LinearNodeValue::If(_, _, _, ty) => ty.clone(),
             LinearNodeValue::Parameter(ty, _) | LinearNodeValue::ReadMemory { ty, .. } => {
                 Some(ty.clone())
             }
@@ -275,7 +290,12 @@ pub enum LinearNodeValue {
     IndirectCall(FunctionID, Box<LinearNode>, Vec<LinearNode>),
     RuntimeCall(RuntimeFunction, Vec<LinearNode>),
     Return(Option<Box<LinearNode>>),
-    If(Box<LinearNode>, Vec<LinearNode>, Option<Vec<LinearNode>>),
+    If(
+        Box<LinearNode>,
+        Vec<LinearNode>,
+        Option<Vec<LinearNode>>,
+        Option<PhysicalType>,
+    ),
     // TODO: labelled breaks?
     Break,
     Loop(Vec<LinearNode>),
@@ -378,7 +398,7 @@ impl LinearNode {
                 callback(func);
                 args.iter().for_each(callback);
             }
-            LinearNodeValue::If(cond, if_block, else_block) => {
+            LinearNodeValue::If(cond, if_block, else_block, _) => {
                 callback(cond);
                 for node in if_block.iter() {
                     callback(node);
@@ -456,7 +476,7 @@ impl LinearNode {
                 callback(func);
                 args.iter_mut().for_each(callback);
             }
-            LinearNodeValue::If(cond, if_block, else_block) => {
+            LinearNodeValue::If(cond, if_block, else_block, _) => {
                 callback(cond);
                 for node in if_block.iter_mut() {
                     callback(node);
@@ -558,7 +578,13 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         HirNodeValue::PointerSize(x) => LinearNodeValue::Size(x),
         HirNodeValue::Float(x) => LinearNodeValue::Float(x),
         HirNodeValue::Bool(x) => LinearNodeValue::Byte(if x { 1 } else { 0 }),
-        HirNodeValue::Null => LinearNodeValue::Byte(0),
+        HirNodeValue::Null => {
+            let ty = expr_ty_to_physical(&ty);
+            let mut results = Vec::new();
+            ty.zeroed(ctx, &mut results);
+
+            LinearNodeValue::Sequence(results)
+        }
         HirNodeValue::CharLiteral(x) => LinearNodeValue::CharLiteral(x),
         HirNodeValue::StringLiteral(string) => {
             let bytes = string.as_bytes();
@@ -646,27 +672,22 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             {
                 let (variant_idx, variant_ty) = &variants[&rhs];
                 let (location, offset) = lower_lvalue(ctx, *lhs);
-                LinearNodeValue::Sequence(vec![LinearNode::if_node(
+                LinearNodeValue::Sequence(vec![
+                    LinearNode::read_memory(
+                        location.clone(),
+                        offset + UNION_TAG_SIZE.size(ctx.pointer_size),
+                        variant_ty.clone().unwrap(),
+                    ),
                     LinearNode::ptr_comparison(
-                        ComparisonOp::NotEquals,
+                        ComparisonOp::EqualTo,
                         LinearNode::size(*variant_idx),
                         LinearNode::read_memory(
-                            location.clone(),
+                            location,
                             offset,
                             PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
                         ),
                     ),
-                    vec![LinearNode::bool_value(false)],
-                    Some(vec![
-                        LinearNode::read_memory(
-                            location,
-                            offset + UNION_TAG_SIZE.size(ctx.pointer_size),
-                            variant_ty.clone().unwrap(),
-                        ),
-                        LinearNode::bool_value(true),
-                    ]),
-                    None,
-                )])
+                ])
             } else if matches!(&lhs.ty, ExpressionType::Generator { .. }) {
                 let (location, mut offset) = lower_lvalue(ctx, *lhs);
                 offset += match rhs.as_str() {
@@ -732,22 +753,15 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                     lhs_ty,
                     lower_expression(ctx, *lhs),
                 ),
-                LinearNode::if_node(
-                    LinearNode::read_memory(
-                        LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
-                        0,
-                        PhysicalType::Primitive(PhysicalPrimitive::Byte),
-                    ),
-                    vec![
-                        LinearNode::read_memory(
-                            LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
-                            read_offset,
-                            ty,
-                        ),
-                        LinearNode::bool_value(true),
-                    ],
-                    Some(vec![LinearNode::bool_value(false)]),
-                    provenance.clone(),
+                LinearNode::read_memory(
+                    LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
+                    read_offset,
+                    ty,
+                ),
+                LinearNode::read_memory(
+                    LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::Byte),
                 ),
                 LinearNode::new(LinearNodeValue::VariableDestroy(temp_id)),
             ])
@@ -772,7 +786,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 };
                 ctx.linearize_nodes(else_block)
             });
-            LinearNodeValue::If(Box::new(cond), if_block, else_block)
+            LinearNodeValue::If(Box::new(cond), if_block, else_block, None)
         }
         HirNodeValue::Return(expr) => {
             let expr = expr.map(|expr| Box::new(lower_expression(ctx, *expr)));
@@ -1138,14 +1152,38 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             values.push(LinearNode::new(LinearNodeValue::Size(*variant_idx)));
             LinearNodeValue::Sequence(values)
         }
-        HirNodeValue::NullCoalesce(lhs, rhs) => LinearNodeValue::If(
-            Box::new(LinearNode::new(LinearNodeValue::UnaryLogical(
-                UnaryLogicalOp::BooleanNot,
-                Box::new(lower_expression(ctx, *lhs)),
-            ))),
-            vec![lower_expression(ctx, *rhs)],
-            None,
-        ),
+        HirNodeValue::NullCoalesce(lhs, rhs) => {
+            let result_ty = expr_ty_to_physical(&ty);
+            let lhs_ty = expr_ty_to_physical(&lhs.ty);
+            let lhs = lower_expression(ctx, *lhs);
+            let rhs = lower_expression(ctx, *rhs);
+            let temp_var_id = VariableID::new();
+
+            LinearNodeValue::Sequence(vec![
+                LinearNode::new(LinearNodeValue::VariableInit(temp_var_id, lhs_ty.clone())),
+                LinearNode::write_memory(
+                    LinearNode::new(LinearNodeValue::VariableLocation(temp_var_id)),
+                    0,
+                    lhs_ty,
+                    lhs,
+                ),
+                LinearNode::if_node_value(
+                    LinearNode::read_memory(
+                        LinearNode::new(LinearNodeValue::VariableLocation(temp_var_id)),
+                        0,
+                        PhysicalType::Primitive(PhysicalPrimitive::Byte),
+                    ),
+                    vec![LinearNode::read_memory(
+                        LinearNode::new(LinearNodeValue::VariableLocation(temp_var_id)),
+                        NULL_TAG_SIZE.size(ctx.pointer_size),
+                        result_ty.clone(),
+                    )],
+                    Some(vec![rhs]),
+                    provenance.clone(),
+                    result_ty,
+                ),
+            ])
+        }
         HirNodeValue::MakeNullable(value) => LinearNodeValue::Sequence(vec![
             lower_expression(ctx, *value),
             LinearNode::bool_value(true),
@@ -1723,7 +1761,7 @@ fn dict_index_location_or_abort(
                 PhysicalType::Primitive(idx_ty),
                 idx,
             ),
-            LinearNode::if_node(
+            LinearNode::if_node_value(
                 dict_get_entry_for_key(
                     dict,
                     LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
@@ -1739,6 +1777,7 @@ fn dict_index_location_or_abort(
                 ],
                 Some(vec![LinearNode::new(LinearNodeValue::Abort)]),
                 None,
+                PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
             ),
         ])),
         key_size,
@@ -1957,6 +1996,7 @@ fn dict_get_entry_for_key(
 }
 
 const UNION_TAG_SIZE: SizeInPointers = SizeInPointers(1);
+// TODO: wait shouldn't this always be a single byte
 pub const NULL_TAG_SIZE: SizeInPointers = SizeInPointers(1);
 
 fn primitive_to_physical(p: PrimitiveType) -> PhysicalPrimitive {
@@ -2056,6 +2096,49 @@ impl PhysicalType {
                 PhysicalCollection::String => pointer_size * 2,
             },
             PhysicalType::Generator => pointer_size * 3,
+        }
+    }
+
+    fn zeroed(&self, ctx: &LinearContext, nodes: &mut Vec<LinearNode>) {
+        match self {
+            PhysicalType::Primitive(p) => nodes.push(LinearNode::new(match p {
+                PhysicalPrimitive::Byte => LinearNodeValue::Byte(0),
+                PhysicalPrimitive::Int32 | PhysicalPrimitive::Int64 => LinearNodeValue::Int(0),
+                PhysicalPrimitive::Float32 | PhysicalPrimitive::Float64 => {
+                    LinearNodeValue::Float(0.0)
+                }
+                PhysicalPrimitive::PointerSize => LinearNodeValue::Size(0),
+                PhysicalPrimitive::FunctionPointer => {
+                    LinearNodeValue::FunctionID(FunctionID::zeroed())
+                }
+            })),
+            PhysicalType::Referenced(ty_id) => {
+                let ty = &ctx.layouts[ty_id];
+                match &ty.value {
+                    TypeLayoutValue::Structure(fields) => {
+                        for (_, _, field) in fields.iter() {
+                            field.zeroed(ctx, nodes);
+                        }
+                    }
+                    TypeLayoutValue::Interface(_) => todo!(),
+                    TypeLayoutValue::Union(_) => todo!(),
+                }
+            }
+            PhysicalType::Nullable(inner) => {
+                nodes.push(LinearNode::bool_value(false));
+                inner.zeroed(ctx, nodes);
+            }
+            PhysicalType::Collection(PhysicalCollection::String) => {
+                for _ in 0..3 {
+                    nodes.push(LinearNode::new(LinearNodeValue::Size(0)));
+                }
+            }
+            PhysicalType::Collection(PhysicalCollection::Dict | PhysicalCollection::Array)
+            | PhysicalType::Generator => {
+                for _ in 0..3 {
+                    nodes.push(LinearNode::new(LinearNodeValue::Size(0)));
+                }
+            }
         }
     }
 }

@@ -150,13 +150,6 @@ fn data() {
             "coroutine/yield_basic.brick",
             "coroutine/yield_once.brick",
             "coroutine/yield_twice.brick",
-            // nulls not implemented
-            "nullability/basic_null.brick",
-            "nullability/null_coalesce.brick",
-            "nullability/null_traverse_is_null.brick",
-            "nullability/null_traverse_union.brick",
-            "unions/basic_construction.brick",
-            "unions/incorrect_access.brick",
         ]
         .into_iter()
         .collect(),
@@ -185,13 +178,13 @@ fn look_for_value(
             Ok(TestValue::Void)
         }
         TestValue::Null => {
-            let mut results = [Val::I32(-1)];
+            let mut results = [Val::I32(-1), Val::I32(-1)];
             func.call(store, &[], &mut results)?;
 
-            if results[0].i32() == Some(0) {
+            if results[1].i32() == Some(0) {
                 Ok(TestValue::Null)
             } else {
-                bail!("wrong result returned: {:?}", results[0])
+                bail!("wrong result returned: {:?}", results)
             }
         }
         TestValue::Int(_) => {
@@ -216,22 +209,22 @@ fn look_for_value(
         }
         TestValue::Nullable(expected) => {
             let mut results = [
-                Val::I32(-1),
                 match expected.as_ref() {
                     TestValue::Int(_) => Val::I32(-1),
                     TestValue::Float(_) => Val::F32(0),
                     _ => todo!(),
                 },
+                Val::I32(-1),
             ];
 
             func.call(store, &[], &mut results)?;
 
-            if results[0].unwrap_i32() == 0 {
+            if results[1].unwrap_i32() == 0 {
                 Ok(TestValue::Null)
-            } else if results[0].unwrap_i32() == 1 {
+            } else if results[1].unwrap_i32() == 1 {
                 Ok(TestValue::Nullable(Box::new(match expected.as_ref() {
-                    TestValue::Int(_) => TestValue::Int(results[1].unwrap_i32() as i64),
-                    TestValue::Float(_) => TestValue::Float(results[1].unwrap_f32() as f64),
+                    TestValue::Int(_) => TestValue::Int(results[0].unwrap_i32() as i64),
+                    TestValue::Float(_) => TestValue::Float(results[0].unwrap_f32() as f64),
                     _ => todo!(),
                 })))
             } else {

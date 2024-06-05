@@ -371,11 +371,16 @@ fn encode_node(
             }
             ctx.instructions.push(Instruction::Return);
         }
-        LinearNodeValue::If(cond, then_branch, else_branch) => {
+        LinearNodeValue::If(cond, then_branch, else_branch, ty) => {
             encode_node(ctx, cond, None);
             ctx.last_loop_depth += 1;
             // TODO: BlockType for branches
-            ctx.instructions.push(Instruction::If(BlockType::Empty));
+            let block_type = match ty {
+                None => BlockType::Empty,
+                Some(PhysicalType::Primitive(p)) => BlockType::Result(primitive_to_val_type(*p)),
+                _ => todo!(),
+            };
+            ctx.instructions.push(Instruction::If(block_type));
             let pre_then_idx = callbacks.map(|c| c.index());
             for node in then_branch.iter() {
                 encode_node(ctx, node, callbacks);
@@ -824,14 +829,13 @@ pub fn walk_vals_read_order(
             }
         }
         PhysicalType::Nullable(inner) => {
-            // TODO: uhhhh this doesn't match the linear IR
+            walk_vals_read_order(declarations, inner.as_ref(), offset + 4, callback);
             walk_vals_read_order(
                 declarations,
                 &PhysicalType::Primitive(PhysicalPrimitive::Byte),
                 offset,
                 callback,
             );
-            walk_vals_read_order(declarations, inner.as_ref(), offset + 4, callback);
         }
         PhysicalType::Collection(PhysicalCollection::Array | PhysicalCollection::Dict)
         | PhysicalType::Generator => {

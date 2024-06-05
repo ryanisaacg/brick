@@ -53,13 +53,12 @@ fn look_for_value(
             }
         }
         TestValue::Null => {
-            if results.len() == 1 && results[0] == Value::Byte(0) {
-                Ok(TestValue::Null)
+            if results.len() != 2 {
+                bail!("wrong number of results returned: {results:?}, expected 2")
+            } else if results[1] != Value::Byte(0) {
+                bail!("non-null result: {results:?}")
             } else {
-                bail!(
-                    "wrong number of results returned: {:?}, expected 1",
-                    results
-                )
+                Ok(TestValue::Null)
             }
         }
         TestValue::Nullable(expected) => {

@@ -207,7 +207,11 @@ fn parse_intended_result(contents: &str) -> TestExpectation {
             let ty = components.next().unwrap();
             let value = components.next().unwrap();
             TestExpectation::ProducesValue(if let Some(ty) = ty.strip_prefix('?') {
-                TestValue::Nullable(Box::new(parse_test_value(ty, value)))
+                if value == "null" {
+                    TestValue::Null
+                } else {
+                    TestValue::Nullable(Box::new(parse_test_value(ty, value)))
+                }
             } else {
                 parse_test_value(ty, value)
             })

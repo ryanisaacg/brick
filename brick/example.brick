@@ -1,9 +1,6 @@
-// Int | 5678
-
-fn modify(val: ref cell[i32]) {
-    val.set(5678);
-}
-let value = cell { 1234 };
-borrow val1 = ref value;
-modify(val1);
-value.get()
+// Int | 31
+let x: i32? = 18;
+let y = x ?? 8;
+x = null;
+let z = x ?? 13;
+y + z
