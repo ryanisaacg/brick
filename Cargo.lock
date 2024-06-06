@@ -133,11 +133,18 @@ dependencies = [
 name = "brick-wasm-backend"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "brick",
- "brick-runtime",
- "data-test-driver",
  "wasm-encoder 0.206.0",
+]
+
+[[package]]
+name = "brick-wasmtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "brick-runtime",
+ "brick-wasm-backend",
+ "data-test-driver",
  "wasmtime",
 ]
 

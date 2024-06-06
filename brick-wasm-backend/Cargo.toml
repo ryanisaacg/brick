@@ -9,8 +9,3 @@ edition = "2021"
 wasm-encoder = "0.206.0"
 brick = { path = "../brick" }
 
-[dev-dependencies]
-anyhow = "1.0"
-brick-runtime = { path = "../brick-runtime" }
-data-test-driver = { path = "../data-test-driver" }
-wasmtime = "20"

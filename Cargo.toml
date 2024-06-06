@@ -4,6 +4,6 @@ members = [
     "brick",
     "brick-lsp",
     "brick-runtime",
-    "brick-wasm-backend",
+    "brick-wasm-backend", "brick-wasmtime",
     "data-test-driver",
 ]

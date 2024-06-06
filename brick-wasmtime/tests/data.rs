@@ -2,8 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context};
 use brick_wasm_backend::compile;
+use brick_wasmtime::add_runtime_functions;
 use data_test_driver::TestValue;
-use wasmtime::{AsContextMut, Caller, Engine, Extern, Func, Linker, Memory, Module, Store, Val};
+use wasmtime::{Engine, Func, Linker, Memory, Module, Store, Val};
 
 #[test]
 fn data() {
@@ -21,105 +22,16 @@ fn data() {
 
             let binary = compile("main", "main.brick", contents.to_string(), false)?.finish();
             let engine = Engine::default();
-            let module = Module::from_binary(&engine, binary.as_slice())?;
             let mut store = Store::new(&engine, ());
             let mut linker = Linker::new(&engine);
-            linker.func_wrap(
-                "brick-runtime",
-                "brick_runtime_init",
-                |mut caller: Caller<'_, ()>, heap_start: i32, size: i32| {
-                    let mem = mem_ptr(&mut caller);
-                    unsafe {
-                        let allocator = brick_runtime::brick_runtime_init(
-                            mem.add(heap_start as usize),
-                            size as usize,
-                        );
-                        (allocator as *mut u8).offset_from(mem) as i32
-                    }
-                },
-            )?;
-            linker.func_wrap(
-                "brick-runtime",
-                "brick_runtime_alloc",
-                |mut caller: Caller<'_, ()>, allocator: i32, size: i32| {
-                    let mem = mem_ptr(&mut caller);
-                    unsafe {
-                        let allocated_block = brick_runtime::brick_runtime_alloc(
-                            mem.add(allocator as usize),
-                            size as usize,
-                        );
-                        allocated_block.offset_from(mem) as i32
-                    }
-                },
-            )?;
-            linker.func_wrap(
-                "brick-runtime",
-                "brick_runtime_realloc",
-                |mut caller: Caller<'_, ()>, allocator: i32, ptr: i32, size: i32| {
-                    let mem = mem_ptr(&mut caller);
-                    unsafe {
-                        let allocated_block = brick_runtime::brick_runtime_realloc(
-                            mem.add(allocator as usize),
-                            mem.add(ptr as usize),
-                            size as usize,
-                        );
-                        allocated_block.offset_from(mem) as i32
-                    }
-                },
-            )?;
-            linker.func_wrap(
-                "brick-runtime",
-                "brick_runtime_dealloc",
-                |mut caller: Caller<'_, ()>, allocator: i32, region: i32| {
-                    let mem = mem_ptr(&mut caller);
-                    unsafe {
-                        brick_runtime::brick_runtime_dealloc(
-                            mem.add(allocator as usize),
-                            mem.add(region as usize),
-                        );
-                    }
-                },
-            )?;
-            linker.func_wrap(
-                "brick-runtime",
-                "brick_string_concat",
-                |mut caller: Caller<'_, ()>,
-                 allocator: i32,
-                 a_ptr: i32,
-                 a_len: i32,
-                 b_ptr: i32,
-                 b_len: i32| {
-                    let mem = mem_ptr(&mut caller);
-                    unsafe {
-                        let new_str = brick_runtime::brick_string_concat(
-                            mem.add(allocator as usize),
-                            mem.add(a_ptr as usize),
-                            a_len as usize,
-                            mem.add(b_ptr as usize),
-                            b_len as usize,
-                        );
-                        (new_str.offset_from(mem) as i32, a_len + b_len)
-                    }
-                },
-            )?;
-            linker.func_wrap(
-                "brick-runtime",
-                "brick_memcpy",
-                |mut caller: Caller<'_, ()>, dest: i32, source: i32, len: i32| {
-                    let mem = mem_ptr(&mut caller);
-                    unsafe {
-                        let dest = mem.add(dest as usize);
-                        let source = mem.add(source as usize);
-                        brick_runtime::brick_memcpy(dest, source, len as usize);
-                    }
-                },
-            )?;
+            add_runtime_functions(&mut linker)?;
 
             let fn_counter = counter.clone();
             linker.func_wrap("bindings", "incr_test_counter", move || {
                 *fn_counter.lock().unwrap() += 1;
             })?;
 
+            let module = Module::from_binary(&engine, binary.as_slice())?;
             let instance = linker.instantiate(&mut store, &module)?;
             let func = instance
                 .get_func(&mut store, "main")
@@ -154,14 +66,6 @@ fn data() {
         .into_iter()
         .collect(),
     );
-}
-
-fn mem_ptr(caller: &mut Caller<'_, ()>) -> *mut u8 {
-    let Extern::Memory(mem) = caller.get_export("memory").unwrap() else {
-        unreachable!();
-    };
-    let store = caller.as_context_mut();
-    mem.data_ptr(store)
 }
 
 fn look_for_value(
