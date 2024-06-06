@@ -1,0 +1,41 @@
+extern fn set_color(r: i32, g: i32, b: i32, a: i32);
+extern fn clear();
+extern fn fill_rect(x: i32, y: i32, w: i32, h: i32);
+extern fn present();
+extern fn is_key_down(key: i32): bool;
+
+
+struct State {
+    player: Point,
+}
+
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+extern fn init(): rc[State] {
+    let state = State {
+        player: Point {
+            x: 0,
+            y: 0,
+        },
+    };
+    rc { state }
+}
+
+extern fn tick(state: unique State) {
+    // Update
+    if is_key_down(32) {
+        state.player.x += 1;
+    }
+
+    // Draw
+    set_color(0, 0, 0, 255);
+    clear();
+
+    set_color(255, 0, 0, 255);
+    fill_rect(state.player.x, state.player.y, 32, 32);
+
+    present();
+}
