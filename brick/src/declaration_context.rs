@@ -28,7 +28,8 @@ pub struct DeclarationContext {
     pub dict_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
     pub rc_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
     pub cell_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
-    pub extern_functions: Vec<(String, FunctionID)>,
+    pub extern_function_bindings: Vec<(String, FunctionID)>,
+    pub extern_function_exports: Vec<(String, FunctionID)>,
 }
 
 impl Default for DeclarationContext {
@@ -49,7 +50,8 @@ impl DeclarationContext {
             dict_intrinsics: HashMap::new(),
             rc_intrinsics: HashMap::new(),
             cell_intrinsics: HashMap::new(),
-            extern_functions: Vec::new(),
+            extern_function_bindings: Vec::new(),
+            extern_function_exports: Vec::new(),
         };
         add_intrinsics(&mut ctx);
         ctx
@@ -87,7 +89,8 @@ impl DeclarationContext {
             names_to_declarations,
             &mut self.id_to_decl,
             &mut self.id_to_func,
-            &mut self.extern_functions,
+            &mut self.extern_function_bindings,
+            &mut self.extern_function_exports,
         )
     }
 
@@ -193,7 +196,8 @@ fn resolve_top_level_declarations(
     names_to_declarations: HashMap<String, &AstNode<'_>>,
     id_to_decl: &mut HashMap<TypeID, TypeDeclaration>,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
-    extern_functions: &mut Vec<(String, FunctionID)>,
+    extern_function_bindings: &mut Vec<(String, FunctionID)>,
+    extern_function_exports: &mut Vec<(String, FunctionID)>,
 ) -> Result<(), TypecheckError> {
     let name_to_type_id = names_to_declarations
         .keys()
@@ -210,7 +214,16 @@ fn resolve_top_level_declarations(
             if let Some(fn_id) = fn_id {
                 module.func_name_to_id.insert(name.clone(), fn_id);
                 if matches!(&node.value, AstNodeValue::ExternFunctionBinding(_)) {
-                    extern_functions.push((name.clone(), fn_id));
+                    extern_function_bindings.push((name.clone(), fn_id));
+                }
+                if matches!(
+                    &node.value,
+                    AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+                        is_extern: true,
+                        ..
+                    })
+                ) {
+                    extern_function_exports.push((name.clone(), fn_id));
                 }
             }
         } else {

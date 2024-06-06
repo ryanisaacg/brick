@@ -125,7 +125,7 @@ pub fn compile(
     let mut function_id_to_ty_idx = HashMap::new();
     // Imports
     let linear_function_to_id = runtime::add_runtime_imports(&mut import_section, &mut ty_section);
-    for (name, fn_id) in declarations.extern_functions.iter() {
+    for (name, fn_id) in declarations.extern_function_bindings.iter() {
         function_id_to_fn_idx.insert(*fn_id, fn_section.len() + import_section.len());
         function_id_to_ty_idx.insert(*fn_id, ty_section.len());
         import_section.import("bindings", name, EntityType::Function(ty_section.len()));
@@ -216,6 +216,10 @@ pub fn compile(
     });
     exports.export("memory", ExportKind::Memory, MAIN_MEMORY);
     exports.export("main", ExportKind::Func, start_index);
+    for (name, func_id) in declarations.extern_function_exports.iter() {
+        let fn_idx = function_id_to_fn_idx[func_id];
+        exports.export(name, ExportKind::Func, fn_idx);
+    }
 
     module.section(&ty_section);
     module.section(&import_section);

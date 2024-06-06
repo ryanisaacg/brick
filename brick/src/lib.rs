@@ -104,7 +104,7 @@ pub fn interpret_code(
         .map(|func| (func.id, Function::Ir(func)))
         .collect();
 
-    for (name, fn_id) in declarations.extern_functions.iter() {
+    for (name, fn_id) in declarations.extern_function_bindings.iter() {
         if let Some(implementation) = bindings.remove(name) {
             functions.insert(*fn_id, Function::Extern(implementation));
         }
