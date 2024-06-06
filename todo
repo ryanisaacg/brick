@@ -107,6 +107,9 @@ coroutines / generators / async:
     - require coroutines to return generators
     - prevent calling coroutine through immutable references
 
+hot reloading:
+- struct field order should be deterministic
+
 compilation resume and reload:
 - rework the hashmaps into an actual environment data structure that allows for generational indexing?
 - differentiate modules and compilation units, or give up on first class modules

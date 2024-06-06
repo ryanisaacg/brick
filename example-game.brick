@@ -27,7 +27,7 @@ extern fn init(): rc[State] {
 extern fn tick(state: unique State) {
     // Update
     if is_key_down(32) {
-        state.player.x += 1;
+        state.player.x -= 1;
     }
 
     // Draw

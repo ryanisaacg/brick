@@ -7,15 +7,13 @@ use std::{
 use anyhow::{bail, Context};
 use brick_wasm_backend::compile;
 use brick_wasmtime::add_runtime_functions;
-use sdl2::{event::Event, pixels::Color, rect::Rect};
+use sdl2::{event::Event, keyboard::Keycode, pixels::Color, rect::Rect};
 use wasmtime::{Engine, Linker, Module, Store, Val};
 
 fn main() -> anyhow::Result<()> {
     let mut args = env::args();
     args.next();
-    let filename = args.next().expect("pass a filename");
-    let contents = std::fs::read_to_string(&filename)?;
-    let binary = compile("main", String::leak(filename), contents, true)?;
+    let filename = String::leak(args.next().expect("pass a filename"));
 
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
@@ -51,13 +49,13 @@ fn main() -> anyhow::Result<()> {
         }
     })?;
 
-    let module = Module::from_binary(&engine, binary.as_slice())?;
-    let instance = linker.instantiate(&mut store, &module)?;
+    let module = get_module(&engine, filename)?;
+    let mut instance = linker.instantiate(&mut store, &module)?;
 
     let init_func = instance
         .get_func(&mut store, "init")
         .context("failed to find init")?;
-    let tick_func = instance
+    let mut tick_func = instance
         .get_func(&mut store, "tick")
         .context("failed to find tick")?;
 
@@ -84,6 +82,26 @@ fn main() -> anyhow::Result<()> {
             match event {
                 Event::Quit { .. } => {
                     running = false;
+                }
+                Event::KeyDown {
+                    keycode: Some(Keycode::R),
+                    repeat: false,
+                    ..
+                } => {
+                    let memory = instance
+                        .get_memory(&mut store, "memory")
+                        .context("failed to find memory")?;
+                    let data = memory.data(&store).to_vec();
+                    let module = get_module(&engine, filename)?;
+                    instance = linker.instantiate(&mut store, &module)?;
+                    tick_func = instance
+                        .get_func(&mut store, "tick")
+                        .context("failed to find tick")?;
+                    let memory = instance
+                        .get_memory(&mut store, "memory")
+                        .context("failed to find memory")?;
+                    memory.data_mut(&mut store).copy_from_slice(&data[..]);
+                    println!("reloaded!");
                 }
                 Event::KeyDown {
                     keycode: Some(keycode),
@@ -131,6 +149,12 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn get_module(engine: &Engine, filename: &'static str) -> anyhow::Result<Module> {
+    let contents = std::fs::read_to_string(filename)?;
+    let binary = compile("main", filename, contents, true)?;
+    Module::from_binary(engine, binary.as_slice())
 }
 
 enum DrawCommand {
