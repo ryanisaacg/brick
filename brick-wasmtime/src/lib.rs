@@ -16,11 +16,14 @@ pub fn add_runtime_functions(linker: &mut Linker<()>) -> anyhow::Result<()> {
     linker.func_wrap(
         "brick-runtime",
         "brick_runtime_alloc",
-        |mut caller: Caller<'_, ()>, allocator: i32, size: i32| {
+        |mut caller: Caller<'_, ()>, allocator: i32, size: i32, alignment: i32| {
             let mem = mem_ptr(&mut caller);
             unsafe {
-                let allocated_block =
-                    brick_runtime::brick_runtime_alloc(mem.add(allocator as usize), size as usize);
+                let allocated_block = brick_runtime::brick_runtime_alloc(
+                    mem.add(allocator as usize),
+                    size as usize,
+                    alignment as usize,
+                );
                 allocated_block.offset_from(mem) as i32
             }
         },

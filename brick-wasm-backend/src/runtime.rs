@@ -19,9 +19,9 @@ pub fn add_runtime_imports(
             vec![],
         ),
         (
-            RuntimeFunction::Alloc,
+            RuntimeFunction::Alloc { alignment: 0 },
             "brick_runtime_alloc",
-            vec![ValType::I32, ValType::I32],
+            vec![ValType::I32, ValType::I32, ValType::I32],
             vec![ValType::I32],
         ),
         (

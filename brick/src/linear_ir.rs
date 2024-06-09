@@ -95,19 +95,19 @@ impl LinearNode {
         }
     }
 
-    fn heap_alloc_const(size: usize) -> LinearNode {
+    fn heap_alloc_const(size: usize, alignment: usize) -> LinearNode {
         LinearNode {
             value: LinearNodeValue::RuntimeCall(
-                RuntimeFunction::Alloc,
+                RuntimeFunction::Alloc { alignment },
                 vec![LinearNode::size(size)],
             ),
             provenance: None,
         }
     }
 
-    fn heap_alloc_var(size: LinearNode) -> LinearNode {
+    fn heap_alloc_var(size: LinearNode, alignment: usize) -> LinearNode {
         LinearNode {
-            value: LinearNodeValue::RuntimeCall(RuntimeFunction::Alloc, vec![size]),
+            value: LinearNodeValue::RuntimeCall(RuntimeFunction::Alloc { alignment }, vec![size]),
             provenance: None,
         }
     }
@@ -235,7 +235,7 @@ impl LinearNode {
                     Some(PhysicalType::Collection(PhysicalCollection::String))
                 }
                 RuntimeFunction::Memcpy | RuntimeFunction::Dealloc => None,
-                RuntimeFunction::Realloc | RuntimeFunction::Alloc => {
+                RuntimeFunction::Realloc | RuntimeFunction::Alloc { .. } => {
                     Some(PhysicalType::Primitive(PhysicalPrimitive::PointerSize))
                 }
             },
@@ -349,7 +349,7 @@ pub enum LinearNodeValue {
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum RuntimeFunction {
     // (alloc_size) -> ptr
-    Alloc,
+    Alloc { alignment: usize },
     // (ptr, alloc_size) -> ptr
     Realloc,
     // (ptr) -> void
@@ -878,6 +878,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             };
             let inner_ty = expr_ty_to_physical(inner_ty.as_ref());
             let size = inner_ty.size(ctx);
+            let alignment = inner_ty.alignment_ctx(ctx);
 
             let length = values.len();
 
@@ -885,7 +886,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
 
             let mut instrs = vec![LinearNode::write_register(
                 buffer_ptr,
-                LinearNode::heap_alloc_const(size * values.len()),
+                LinearNode::heap_alloc_const(size * values.len(), alignment),
             )];
             instrs.extend(values.into_iter().enumerate().map(|(idx, value)| {
                 LinearNode::write_memory(
@@ -910,6 +911,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             };
             let inner_ty = expr_ty_to_physical(inner_ty.as_ref());
             let size = inner_ty.size(ctx);
+            let alignment = inner_ty.alignment_ctx(ctx);
             let length = lower_expression(ctx, *length);
 
             let length_register = RegisterID::new();
@@ -920,11 +922,14 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 LinearNode::write_register(length_register, length),
                 LinearNode::write_register(
                     buffer_register,
-                    LinearNode::heap_alloc_var(LinearNode::ptr_arithmetic(
-                        ArithmeticOp::Multiply,
-                        LinearNode::size(size),
-                        LinearNode::read_register(length_register),
-                    )),
+                    LinearNode::heap_alloc_var(
+                        LinearNode::ptr_arithmetic(
+                            ArithmeticOp::Multiply,
+                            LinearNode::size(size),
+                            LinearNode::read_register(length_register),
+                        ),
+                        alignment,
+                    ),
                 ),
                 LinearNode::write_register(index_register, LinearNode::size(0)),
                 LinearNode::new(LinearNodeValue::Loop(vec![LinearNode::if_node(
@@ -1061,6 +1066,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             };
             let key_ty = expr_ty_to_physical(&key_ty);
             let value_ty = expr_ty_to_physical(&value_ty);
+            let alignment = key_ty.alignment_ctx(ctx).max(value_ty.alignment_ctx(ctx));
 
             let key_size = key_ty.size(ctx);
             let value_size = value_ty.size(ctx);
@@ -1072,7 +1078,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
 
             let mut instrs = vec![LinearNode::write_register(
                 buffer,
-                LinearNode::heap_alloc_const(entry_size * length),
+                LinearNode::heap_alloc_const(entry_size * length, alignment),
             )];
             let (keys, values): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
             instrs.extend(keys.into_iter().enumerate().map(|(idx, value)| {
@@ -1103,13 +1109,14 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         HirNodeValue::ReferenceCountLiteral(inner) => {
             let inner_ty = expr_ty_to_physical(&inner.ty);
             let inner_size = inner_ty.size(ctx);
+            let alignment = inner_ty.alignment_ctx(ctx);
             let alloc_size = inner_size + 4;
             let alloc_register = RegisterID::new();
 
             LinearNodeValue::Sequence(vec![
                 LinearNode::write_register(
                     alloc_register,
-                    LinearNode::heap_alloc_const(alloc_size),
+                    LinearNode::heap_alloc_const(alloc_size, alignment),
                 ),
                 LinearNode::write_memory(
                     LinearNode::read_register(alloc_register),
@@ -1532,7 +1539,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         } => {
             // TODO: care about args
             LinearNodeValue::Sequence(vec![
-                LinearNode::heap_alloc_const(64), // TODO: allocate a statically sized stack frame
+                LinearNode::heap_alloc_const(64, 32), // TODO: allocate a statically sized stack frame
                 LinearNode::size(0),
                 LinearNode::new(LinearNodeValue::FunctionID(generator_function)),
             ])
@@ -2029,6 +2036,7 @@ pub struct DeclaredTypeLayout {
     pub value: TypeLayoutValue,
     // TODO: remove field?
     pub size: usize,
+    pub alignment: usize,
 }
 
 impl DeclaredTypeLayout {
@@ -2096,6 +2104,29 @@ impl PhysicalType {
                 PhysicalCollection::String => pointer_size * 2,
             },
             PhysicalType::Generator => pointer_size * 3,
+        }
+    }
+
+    pub fn alignment_ctx(&self, ctx: &LinearContext<'_>) -> usize {
+        self.alignment(ctx.layouts, ctx.byte_size, ctx.pointer_size)
+    }
+
+    pub fn alignment(
+        &self,
+        declarations: &HashMap<TypeID, DeclaredTypeLayout>,
+        byte_size: usize,
+        pointer_size: usize,
+    ) -> usize {
+        match self {
+            PhysicalType::Primitive(prim) => match prim {
+                PhysicalPrimitive::Byte => byte_size,
+                PhysicalPrimitive::Int32 | PhysicalPrimitive::Float32 => 32,
+                PhysicalPrimitive::Int64 | PhysicalPrimitive::Float64 => 64,
+                PhysicalPrimitive::FunctionPointer | PhysicalPrimitive::PointerSize => pointer_size,
+            },
+            PhysicalType::Referenced(id) => declarations[id].alignment,
+            PhysicalType::Nullable(inner) => inner.alignment(declarations, byte_size, pointer_size),
+            PhysicalType::Generator | PhysicalType::Collection(_) => pointer_size,
         }
     }
 
@@ -2167,41 +2198,62 @@ fn layout_static_decl(
 
     let layout = match decl {
         TypeDeclaration::Struct(struct_ty) => {
-            let mut size = 0;
-            let fields = struct_ty
+            let mut fields: Vec<_> = struct_ty
                 .fields
                 .iter()
                 .map(|(name, field)| {
                     let field = layout_type(declarations, layouts, field, byte_size, pointer_size);
-                    let field_size = field.size_from_decls(layouts, byte_size, pointer_size);
-                    let offset = size;
-                    size += field_size;
-                    (name.clone(), offset, field)
+                    (name.clone(), 0, field)
                 })
                 .collect();
+            // Sort by size first for alignment reasons, then by name
+            fields.sort_by(|(name_a, _, field_a), (name_b, _, field_b)| {
+                let size_a = field_a.size_from_decls(layouts, byte_size, pointer_size);
+                let size_b = field_b.size_from_decls(layouts, byte_size, pointer_size);
+                if size_a == size_b {
+                    name_a.cmp(name_b)
+                } else {
+                    size_a.cmp(&size_b)
+                }
+            });
+            let mut size: usize = 0;
+            let mut alignment = 0;
+            for (_, offset, ty) in fields.iter_mut() {
+                let field_size = ty.size_from_decls(layouts, byte_size, pointer_size);
+                let field_alignment = ty.alignment(layouts, byte_size, pointer_size);
+                let padding = size.abs_diff(field_alignment) % field_alignment;
+                *offset = size + padding;
+                size = *offset + field_size;
+                alignment = alignment.max(field_alignment);
+            }
             DeclaredTypeLayout {
                 value: TypeLayoutValue::Structure(fields),
                 size,
+                alignment,
             }
         }
         TypeDeclaration::Interface(interface_ty) => {
             let mut size = pointer_size;
-            let fields = interface_ty
-                .associated_functions
-                .values()
-                .map(|decl| {
+            // Sort functions by name to ensure that the order is deterministic
+            let mut associated_functions_alphabetical: Vec<_> =
+                interface_ty.associated_functions.keys().collect();
+            associated_functions_alphabetical.sort();
+            let fields = associated_functions_alphabetical
+                .iter()
+                .map(|name| {
                     size += pointer_size;
-                    *decl
+                    interface_ty.associated_functions[name.as_str()]
                 })
                 .collect();
             DeclaredTypeLayout {
                 value: TypeLayoutValue::Interface(fields),
                 size,
+                alignment: pointer_size,
             }
         }
         TypeDeclaration::Union(union_ty) => {
             let mut largest_variant = 0;
-            let variants = union_ty
+            let variants: HashMap<_, _> = union_ty
                 .variant_order
                 .iter()
                 .enumerate()
@@ -2221,10 +2273,18 @@ fn layout_static_decl(
                     (name.clone(), (idx, variant))
                 })
                 .collect();
+            let alignment = variants
+                .values()
+                .filter_map(|(_, ty)| ty.as_ref())
+                .map(|ty| ty.alignment(layouts, byte_size, pointer_size))
+                .max()
+                .unwrap_or(0)
+                .max(UNION_TAG_SIZE.size(pointer_size));
 
             DeclaredTypeLayout {
                 value: TypeLayoutValue::Union(variants),
                 size: UNION_TAG_SIZE.size(pointer_size) + largest_variant,
+                alignment,
             }
         }
         TypeDeclaration::Module(_module) => {

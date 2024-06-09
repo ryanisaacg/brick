@@ -668,13 +668,13 @@ impl<'a> VM<'a> {
                     );
                 }
             }
-            LinearNodeValue::RuntimeCall(RuntimeFunction::Alloc, args) => {
+            LinearNodeValue::RuntimeCall(RuntimeFunction::Alloc { alignment }, args) => {
                 self.evaluate_node(params, &args[0])?;
                 let Some(Value::Size(amount)) = self.op_stack.pop() else {
                     unreachable!()
                 };
                 let allocation = unsafe {
-                    let new_ptr = brick_runtime_alloc(self.allocator(), amount);
+                    let new_ptr = brick_runtime_alloc(self.allocator(), amount, *alignment);
 
                     new_ptr.offset_from(self.memory.as_mut_ptr()) as usize
                 };

@@ -22,10 +22,15 @@ const LAYOUT_SIZE: usize = core::mem::size_of::<Layout>();
 
 // TODO: take alignment as a parameter?
 #[no_mangle]
-pub unsafe extern "C" fn brick_runtime_alloc(allocator: *mut u8, alloc_size: usize) -> *mut u8 {
+pub unsafe extern "C" fn brick_runtime_alloc(
+    allocator: *mut u8,
+    alloc_size: usize,
+    alloc_align: usize,
+) -> *mut u8 {
     let heap = (allocator as *mut Heap).as_ref().unwrap();
+    let alloc_align = core::mem::align_of::<Layout>().max(alloc_align);
     let alloc_size = alloc_size + LAYOUT_SIZE;
-    let layout = Layout::from_size_align(alloc_size, 1).unwrap();
+    let layout = Layout::from_size_align(alloc_size, alloc_align).unwrap();
     let allocation = heap.alloc(layout);
 
     if allocation as usize == 0 {
@@ -86,7 +91,7 @@ pub unsafe extern "C" fn brick_string_concat(
     let a_slice = core::slice::from_raw_parts(a_ptr, a_len);
     let b_slice = core::slice::from_raw_parts(b_ptr, b_len);
 
-    let memory_region = brick_runtime_alloc(allocator, a_len + b_len);
+    let memory_region = brick_runtime_alloc(allocator, a_len + b_len, 8);
     let target = core::slice::from_raw_parts_mut(memory_region, a_len);
     target.copy_from_slice(a_slice);
     let target = core::slice::from_raw_parts_mut(memory_region.add(a_len), b_len);

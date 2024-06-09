@@ -340,8 +340,7 @@ fn encode_node(
             handle_function_call_results(ctx, callbacks, node_ty.as_ref());
         }
         LinearNodeValue::RuntimeCall(
-            func @ (RuntimeFunction::Alloc
-            | RuntimeFunction::Realloc
+            func @ (RuntimeFunction::Realloc
             | RuntimeFunction::Dealloc
             | RuntimeFunction::StringConcat),
             args,
@@ -352,6 +351,21 @@ fn encode_node(
                 encode_node(ctx, arg, None);
             }
             let fn_id = ctx.linear_function_to_id.get(func).unwrap();
+            ctx.instructions.push(Instruction::Call(*fn_id));
+            handle_function_call_results(ctx, callbacks, node_ty.as_ref());
+        }
+        LinearNodeValue::RuntimeCall(RuntimeFunction::Alloc { alignment }, args) => {
+            ctx.instructions
+                .push(Instruction::GlobalGet(ctx.allocptr_global_idx));
+            for arg in args.iter() {
+                encode_node(ctx, arg, None);
+            }
+            ctx.instructions
+                .push(Instruction::I32Const(*alignment as i32));
+            let fn_id = ctx
+                .linear_function_to_id
+                .get(&RuntimeFunction::Alloc { alignment: 0 })
+                .unwrap();
             ctx.instructions.push(Instruction::Call(*fn_id));
             handle_function_call_results(ctx, callbacks, node_ty.as_ref());
         }
