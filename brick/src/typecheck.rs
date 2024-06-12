@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::{
     declaration_context::{resolve_type_expr, DeclarationContext, Module, TypeID},
     id::{AnyID, FunctionID},
-    multi_error::{merge_results, print_multi_errors, MultiError},
+    multi_error::{merge_results, merge_results_or_value, print_multi_errors, MultiError},
     parser::{
         AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
         InterfaceDeclarationValue, MatchDeclaration, StructDeclarationValue, UnaryOp,
@@ -345,6 +345,8 @@ pub enum TypecheckError {
     FieldNotPresent(String, SourceRange),
     #[error("non-struct declaration in struct literal: {0}")]
     NonStructDeclStructLiteral(SourceRange),
+    #[error("can't assign new value to reference: {0}")]
+    CantAssignToReference(SourceRange),
 }
 
 impl MultiError for TypecheckError {
@@ -1038,6 +1040,7 @@ fn typecheck_expression<'a>(
             ExpressionType::Primitive(PrimitiveType::Bool)
         }
         AstNodeValue::BinExpr(BinOp::Assignment, left, right) => {
+            let mut errors = Ok(());
             let left_ty = typecheck_expression(
                 left,
                 outer_scopes,
@@ -1045,21 +1048,41 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            // TODO: validate legal type to assign
             if !validate_lvalue(left) {
-                return Err(TypecheckError::IllegalAssignmentLHS(
-                    left.provenance.clone(),
-                ));
+                merge_results(
+                    &mut errors,
+                    Err(TypecheckError::IllegalAssignmentLHS(
+                        left.provenance.clone(),
+                    )),
+                );
             }
-            let right = typecheck_expression(
-                right,
-                outer_scopes,
-                current_scope,
-                context,
-                generator_input_ty,
-            )?;
+            if matches!(left_ty, ExpressionType::Pointer(_, _)) {
+                merge_results(
+                    &mut errors,
+                    Err(TypecheckError::CantAssignToReference(
+                        left.provenance.clone(),
+                    )),
+                );
+            }
+            let right = merge_results_or_value(
+                &mut errors,
+                typecheck_expression(
+                    right,
+                    outer_scopes,
+                    current_scope,
+                    context,
+                    generator_input_ty,
+                ),
+            );
 
-            assert_assignable_to(context.declarations, left_ty, right)?;
+            if let Some(right) = right {
+                merge_results(
+                    &mut errors,
+                    assert_assignable_to(context.declarations, left_ty, right),
+                );
+            }
+
+            errors?;
 
             ExpressionType::Void
         }
