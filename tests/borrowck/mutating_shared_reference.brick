@@ -1,0 +1,5 @@
+// NoCompile
+
+let x = 5;
+borrow x1 = ref x;
+*x1 = 6;

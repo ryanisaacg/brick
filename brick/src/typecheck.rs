@@ -313,8 +313,8 @@ pub enum TypecheckError {
     ExpectedNullableLHS(SourceRange),
     #[error("cannot yield outside of a generator: {0}")]
     CannotYield(SourceRange),
-    #[error("illegal lvalue: {0}")]
-    IllegalLvalue(SourceRange),
+    #[error("illegal left hand side of assignment: {0}")]
+    IllegalAssignmentLHS(SourceRange),
     #[error("illegal lhs of dot operator: {0}")]
     IllegalDotLHS(SourceRange),
     #[error("must return a generator: {0}")]
@@ -1047,7 +1047,9 @@ fn typecheck_expression<'a>(
             )?;
             // TODO: validate legal type to assign
             if !validate_lvalue(left) {
-                return Err(TypecheckError::IllegalLvalue(left.provenance.clone()));
+                return Err(TypecheckError::IllegalAssignmentLHS(
+                    left.provenance.clone(),
+                ));
             }
             let right = typecheck_expression(
                 right,
@@ -1074,7 +1076,9 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             if !validate_lvalue(left) {
-                return Err(TypecheckError::IllegalLvalue(left.provenance.clone()));
+                return Err(TypecheckError::IllegalAssignmentLHS(
+                    left.provenance.clone(),
+                ));
             }
             let right = typecheck_expression(
                 right,
