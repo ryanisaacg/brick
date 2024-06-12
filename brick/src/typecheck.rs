@@ -347,6 +347,8 @@ pub enum TypecheckError {
     NonStructDeclStructLiteral(SourceRange),
     #[error("can't assign new value to reference: {0}")]
     CantAssignToReference(SourceRange),
+    #[error("illegal assignment to a shared reference: {0}")]
+    IllegalSharedRefMutation(SourceRange),
 }
 
 impl MultiError for TypecheckError {
@@ -1048,22 +1050,11 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            if !validate_lvalue(left) {
-                merge_results(
-                    &mut errors,
-                    Err(TypecheckError::IllegalAssignmentLHS(
-                        left.provenance.clone(),
-                    )),
-                );
-            }
-            if matches!(left_ty, ExpressionType::Pointer(_, _)) {
-                merge_results(
-                    &mut errors,
-                    Err(TypecheckError::CantAssignToReference(
-                        left.provenance.clone(),
-                    )),
-                );
-            }
+            merge_results(&mut errors, validate_assignment_lhs(left));
+            merge_results(
+                &mut errors,
+                ensure_no_assignment_to_reference(left_ty, &left.provenance),
+            );
             let right = merge_results_or_value(
                 &mut errors,
                 typecheck_expression(
@@ -1091,6 +1082,7 @@ fn typecheck_expression<'a>(
             left,
             right,
         ) => {
+            let mut errors = Ok(());
             let left_ty = typecheck_expression(
                 left,
                 outer_scopes,
@@ -1098,11 +1090,11 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            if !validate_lvalue(left) {
-                return Err(TypecheckError::IllegalAssignmentLHS(
-                    left.provenance.clone(),
-                ));
-            }
+            merge_results(&mut errors, validate_assignment_lhs(left));
+            merge_results(
+                &mut errors,
+                ensure_no_assignment_to_reference(left_ty, &left.provenance),
+            );
             let right = typecheck_expression(
                 right,
                 outer_scopes,
@@ -1114,10 +1106,18 @@ fn typecheck_expression<'a>(
             if !matches!(fully_dereference(left_ty), ExpressionType::Primitive(_))
                 || !matches!(fully_dereference(right), ExpressionType::Primitive(_))
             {
-                return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
+                merge_results(
+                    &mut errors,
+                    Err(TypecheckError::ArithmeticMismatch(node.provenance.clone())),
+                );
             }
 
-            assert_assignable_to(context.declarations, left_ty, right)?;
+            merge_results(
+                &mut errors,
+                assert_assignable_to(context.declarations, left_ty, right),
+            );
+
+            errors?;
 
             ExpressionType::Void
         }
@@ -1797,6 +1797,127 @@ fn typecheck_returns<'a>(
     });
 
     results
+}
+
+fn validate_assignment_lhs(lhs: &AstNode<'_>) -> Result<(), TypecheckError> {
+    match &lhs.value {
+        // TODO: remove this if I add auto-deref later
+        AstNodeValue::Name { .. } => {
+            validate_assignment_lhs_ty(lhs.ty.get().unwrap(), &lhs.provenance)
+        }
+        AstNodeValue::Deref(inner) => {
+            let Some(ExpressionType::Pointer(kind, _)) = inner.ty.get() else {
+                unreachable!()
+            };
+            let mut errors = if *kind == PointerKind::Shared {
+                Err(TypecheckError::IllegalSharedRefMutation(
+                    lhs.provenance.clone(),
+                ))
+            } else {
+                Ok(())
+            };
+            merge_results(&mut errors, validate_assignment_lhs(inner));
+            errors
+        }
+        AstNodeValue::BinExpr(BinOp::Dot | BinOp::Index, lhs, _) => validate_assignment_lhs(lhs),
+
+        AstNodeValue::BinExpr(_, _, _)
+        | AstNodeValue::FunctionDeclaration(_)
+        | AstNodeValue::ExternFunctionBinding(_)
+        | AstNodeValue::StructDeclaration(_)
+        | AstNodeValue::UnionDeclaration(_)
+        | AstNodeValue::InterfaceDeclaration(_)
+        | AstNodeValue::RequiredFunction(_)
+        | AstNodeValue::Declaration(_, _, _, _)
+        | AstNodeValue::Import(_)
+        | AstNodeValue::Return(_)
+        | AstNodeValue::Yield(_)
+        | AstNodeValue::Statement(_)
+        | AstNodeValue::Int(_)
+        | AstNodeValue::Float(_)
+        | AstNodeValue::Bool(_)
+        | AstNodeValue::CharLiteral(_)
+        | AstNodeValue::StringLiteral(_)
+        | AstNodeValue::Null
+        | AstNodeValue::If(_)
+        | AstNodeValue::While(_, _)
+        | AstNodeValue::Match(_)
+        | AstNodeValue::Loop(_)
+        | AstNodeValue::Call(_, _)
+        | AstNodeValue::TakeUnique(_)
+        | AstNodeValue::TakeRef(_)
+        | AstNodeValue::RecordLiteral { .. }
+        | AstNodeValue::DictLiteral(_)
+        | AstNodeValue::ArrayLiteral(_)
+        | AstNodeValue::ArrayLiteralLength(_, _)
+        | AstNodeValue::Block(_)
+        | AstNodeValue::UniqueType(_)
+        | AstNodeValue::VoidType
+        | AstNodeValue::SharedType(_)
+        | AstNodeValue::ArrayType(_)
+        | AstNodeValue::RcType(_)
+        | AstNodeValue::DictType(_, _)
+        | AstNodeValue::UnaryExpr(_, _)
+        | AstNodeValue::NullableType(_)
+        | AstNodeValue::GeneratorType { .. }
+        | AstNodeValue::BorrowDeclaration(..)
+        | AstNodeValue::ReferenceCountLiteral(_)
+        | AstNodeValue::CellType(_)
+        | AstNodeValue::CellLiteral(_) => {
+            Err(TypecheckError::IllegalAssignmentLHS(lhs.provenance.clone()))
+        }
+    }
+}
+
+fn ensure_no_assignment_to_reference(
+    lhs: &ExpressionType,
+    provenance: &SourceRange,
+) -> Result<(), TypecheckError> {
+    match lhs {
+        ExpressionType::ReferenceToType(_)
+        | ExpressionType::Null
+        | ExpressionType::Unreachable
+        | ExpressionType::Void
+        | ExpressionType::ReferenceToFunction(_) => {
+            Err(TypecheckError::IllegalAssignmentLHS(provenance.clone()))
+        }
+        ExpressionType::Collection(_)
+        | ExpressionType::InstanceOf(_)
+        | ExpressionType::Primitive(_)
+        | ExpressionType::Generator { .. } => Ok(()),
+        ExpressionType::Nullable(inner) => ensure_no_assignment_to_reference(inner, provenance),
+        ExpressionType::Pointer(_, _) => {
+            Err(TypecheckError::CantAssignToReference(provenance.clone()))
+        }
+        ExpressionType::TypeParameterReference(_) => todo!(),
+        ExpressionType::FunctionReference { .. } => todo!(),
+    }
+}
+
+fn validate_assignment_lhs_ty(
+    lhs: &ExpressionType,
+    provenance: &SourceRange,
+) -> Result<(), TypecheckError> {
+    match lhs {
+        ExpressionType::ReferenceToType(_)
+        | ExpressionType::Null
+        | ExpressionType::Unreachable
+        | ExpressionType::Void
+        | ExpressionType::ReferenceToFunction(_) => {
+            Err(TypecheckError::IllegalAssignmentLHS(provenance.clone()))
+        }
+        ExpressionType::Collection(_)
+        | ExpressionType::InstanceOf(_)
+        | ExpressionType::Primitive(_)
+        | ExpressionType::Generator { .. }
+        | ExpressionType::Pointer(PointerKind::Unique, _) => Ok(()),
+        ExpressionType::Nullable(inner) => validate_assignment_lhs_ty(inner, provenance),
+        ExpressionType::Pointer(PointerKind::Shared, _) => {
+            Err(TypecheckError::IllegalSharedRefMutation(provenance.clone()))
+        }
+        ExpressionType::TypeParameterReference(_) => todo!(),
+        ExpressionType::FunctionReference { .. } => todo!(),
+    }
 }
 
 fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {

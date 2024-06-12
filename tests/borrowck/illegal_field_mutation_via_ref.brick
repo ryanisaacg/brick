@@ -1,0 +1,7 @@
+// NoCompile
+struct Data {
+    value: i32
+}
+let x = Data { value: 12 };
+borrow x1 = ref x;
+x1.value = 13;
