@@ -1,0 +1,15 @@
+// Compile
+struct Data: Move {}
+
+fn drop(x: Data) {}
+
+fn calculate(): Data {
+    let x = Data{};
+    loop {
+        return x;
+    }
+}
+
+calculate();
+
+
