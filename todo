@@ -4,7 +4,6 @@ borrow checker and lifetimes:
 - must-use-type support
 - can't dereference pointers to Move types
 - drop:
-    - drop points must come after all references to a value expire
     - detect drops when a value is conditionally moved
     - validate the drop method has the correct arguments and no return value
     - drop dicts

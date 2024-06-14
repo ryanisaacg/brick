@@ -1,0 +1,9 @@
+// Int | 789
+fn modify(val: rc[cell[i32]]) {
+    *val.set(789);
+}
+let value = rc { cell { 123 } };
+modify(value.clone());
+let cell_stored_value = 0;
+*value.get(unique cell_stored_value);
+cell_stored_value

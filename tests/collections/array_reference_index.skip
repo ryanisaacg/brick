@@ -1,0 +1,7 @@
+// Int | 56
+fn third_element(arr: ref list[i32]): i32 {
+    arr[2]
+}
+
+let array = list[12, 34, 56];
+third_element(ref array);

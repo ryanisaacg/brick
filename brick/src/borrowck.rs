@@ -51,6 +51,8 @@ pub enum LifetimeError {
         use_point: Option<SourceRange>,
         ref_point: Option<SourceRange>,
     },
+    #[error("borrow used before initialization. this is almost certainly an ICE. {}", maybe_range(.0))]
+    UsedUninitBorrow(Option<SourceRange>),
 }
 
 impl MultiError for LifetimeError {
@@ -271,7 +273,7 @@ fn borrow_check_node(
             if let Some(existing_borrow_state) = borrow_state.get_mut(var_id) {
                 merge_results(
                     &mut results,
-                    update_borrow_state(existing_borrow_state, node),
+                    update_borrow_state(existing_borrow_state, variable_state, node),
                 );
             } else {
                 // We can ignore copy types
@@ -544,7 +546,10 @@ fn mark_node_used(
                     }
                 }
             } else if let Some(borrow_state) = borrow_state.get_mut(var_id) {
-                merge_results(&mut results, update_borrow_state(borrow_state, node));
+                merge_results(
+                    &mut results,
+                    update_borrow_state(borrow_state, variable_state, node),
+                );
             }
         }
         _ => {
@@ -562,13 +567,18 @@ fn mark_node_used(
 
 fn update_borrow_state(
     borrow_state: &mut BorrowState,
+    variable_state: &mut HashMap<VariableID, VariableState>,
     node: &HirNode,
 ) -> Result<(), LifetimeError> {
     match &mut borrow_state.state {
-        BorrowLifeState::Initialized => Ok(()),
-        BorrowLifeState::Assigned(_var_id, id, provenance) => {
+        BorrowLifeState::Initialized => {
+            Err(LifetimeError::UsedUninitBorrow(node.provenance.clone()))
+        }
+        BorrowLifeState::Assigned(var_id, id, provenance) => {
             *id = node.id;
             *provenance = node.provenance.clone();
+            let var_state = variable_state.get_mut(var_id).unwrap();
+            var_state.state = VariableLifeState::Used(node.id, node.provenance.clone());
             Ok(())
         }
         BorrowLifeState::ValueMoved(_id, move_point) => Err(LifetimeError::BorrowUseAfterMove {
