@@ -381,10 +381,10 @@ impl<'a> TypecheckContext<'a> {
     }
 }
 
-pub struct TypecheckedFile<'a> {
-    pub functions: Vec<TypecheckedFunction<'a>>,
-    pub top_level_statements: Vec<&'a AstNode<'a>>,
-    pub module: &'a Module,
+pub struct TypecheckedFile<'ast, 'decl> {
+    pub functions: Vec<TypecheckedFunction<'ast>>,
+    pub top_level_statements: Vec<&'ast AstNode<'ast>>,
+    pub module: &'decl Module,
 }
 
 #[derive(Clone, Debug)]
@@ -395,11 +395,11 @@ pub struct TypecheckedFunction<'a> {
 }
 
 // TODO: pass import namespace in
-pub fn typecheck<'a>(
-    file: impl Iterator<Item = &'a AstNode<'a>>,
+pub fn typecheck<'ast, 'decl>(
+    file: impl Iterator<Item = &'ast AstNode<'ast>>,
     current_module_name: &str,
-    declarations: &'a DeclarationContext,
-) -> Result<TypecheckedFile<'a>, TypecheckError> {
+    declarations: &'decl DeclarationContext,
+) -> Result<TypecheckedFile<'ast, 'decl>, TypecheckError> {
     let mut top_level_type_names = HashMap::new();
     let mut top_level_function_names = HashMap::new();
     let mut top_level_name_to_expr_type = HashMap::new();
@@ -458,12 +458,12 @@ pub fn typecheck<'a>(
     })
 }
 
-fn typecheck_node<'ast>(
-    statement: &'ast AstNode<'ast>,
+fn typecheck_node<'a>(
+    statement: &'a AstNode<'a>,
     context: &TypecheckContext,
     top_level_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
-    functions: &mut Vec<TypecheckedFunction<'ast>>,
-    top_level_statements: &mut Vec<&AstNode<'ast>>,
+    functions: &mut Vec<TypecheckedFunction<'a>>,
+    top_level_statements: &mut Vec<&AstNode<'a>>,
 ) -> Result<(), TypecheckError> {
     match &statement.value {
         AstNodeValue::FunctionDeclaration(func) => {

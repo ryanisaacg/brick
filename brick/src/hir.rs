@@ -24,7 +24,10 @@ mod simplify_sequence_expressions;
 mod unions;
 mod widen_null;
 
-pub fn lower_module(module: TypecheckedFile<'_>, declarations: &DeclarationContext) -> HirModule {
+pub fn lower_module<'dest>(
+    module: TypecheckedFile<'_, 'dest>,
+    declarations: &'dest DeclarationContext,
+) -> HirModule {
     let mut module = lower::lower_module(module, declarations);
 
     // Important that this comes before ANY pass that uses the declarations

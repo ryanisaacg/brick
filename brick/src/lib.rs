@@ -16,6 +16,7 @@ pub use linear_ir::{
     PhysicalCollection, PhysicalPrimitive, PhysicalType, RuntimeFunction, TypeLayoutValue,
 };
 use linear_ir::{layout_types, LinearContext};
+use parser::{AstNode, AstNodeValue};
 use thiserror::Error;
 use typecheck::typecheck;
 pub use typecheck::{ExpressionType, FuncType, TypeDeclaration};
@@ -26,12 +27,12 @@ mod hir;
 mod interpreter;
 mod linear_ir;
 mod multi_error;
-mod parser;
+pub mod parser;
 mod provenance;
 mod tokenizer;
 mod typecheck;
 
-use parser::{AstNode, AstNodeValue, ParseError};
+use parser::ParseError;
 use typed_arena::Arena;
 
 use crate::{hir::lower_module, typecheck::TypecheckError};
@@ -133,10 +134,13 @@ pub fn lower_code(
     byte_size: usize,
     pointer_size: usize,
 ) -> Result<LowerResults, CompileError> {
+    let parse_arena = Arena::new();
+    let modules = parse_files(&parse_arena, module_name.to_string(), source_name, contents)?;
+
     let CompilationResults {
         modules,
         mut declarations,
-    } = typecheck_module(module_name, source_name, contents)?;
+    } = typecheck_module(&modules)?;
 
     let mut type_layouts = HashMap::new();
     layout_types(
@@ -214,20 +218,18 @@ pub struct CompilationResults {
 }
 
 pub fn check_types(source: &str) -> Result<CompilationResults, CompileError> {
-    typecheck_module("main", "eval", source.to_string())
+    let parse_arena = Arena::new();
+    let modules = parse_files(&parse_arena, "main".to_string(), "eval", source.to_string())?;
+
+    typecheck_module(&modules)
 }
 
-pub fn typecheck_module(
-    module_name: &str,
-    source_name: &'static str,
-    contents: String,
+pub fn typecheck_module<'a>(
+    modules: &'a HashMap<String, Vec<AstNode<'a>>>,
 ) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
-    let parse_arena = Arena::new();
-    let modules = parse_files(&parse_arena, module_name.to_string(), source_name, contents)?;
-
-    let declarations = collect_declarations(&modules)?;
+    let declarations = collect_declarations(modules)?;
 
     let module_results = modules
         .par_iter()
@@ -302,7 +304,7 @@ struct ParseQueueEntry {
     contents: String,
 }
 
-fn parse_files<'a>(
+pub fn parse_files<'a>(
     arena: &'a Arena<AstNode<'a>>,
     module_name: String,
     source_name: &'static str,

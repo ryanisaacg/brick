@@ -15,7 +15,10 @@ use crate::{
     DeclarationContext,
 };
 
-pub fn lower_module(module: TypecheckedFile<'_>, declarations: &DeclarationContext) -> HirModule {
+pub fn lower_module(
+    module: TypecheckedFile<'_, '_>,
+    declarations: &DeclarationContext,
+) -> HirModule {
     let TypecheckedFile {
         functions,
         top_level_statements,
