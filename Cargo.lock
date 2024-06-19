@@ -111,6 +111,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "brick-fmt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "brick",
+ "data-test-driver",
+ "typed-arena",
+]
+
+[[package]]
 name = "brick-lsp"
 version = "0.1.0"
 dependencies = [

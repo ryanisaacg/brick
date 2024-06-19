@@ -377,6 +377,33 @@ pub enum BinOp {
     BooleanOr,
 }
 
+impl BinOp {
+    pub fn binding_power(&self) -> u8 {
+        match self {
+            BinOp::Dot => DOT,
+            BinOp::Index => 255,
+            BinOp::Concat => CONCAT,
+            BinOp::NullCoalesce => NULL_COALESCE,
+            BinOp::NullChaining => NULL_CHAINING,
+            BinOp::Add | BinOp::Subtract => SUM,
+            BinOp::Multiply | BinOp::Divide => FACTOR,
+            BinOp::LessThan
+            | BinOp::GreaterThan
+            | BinOp::LessEqualThan
+            | BinOp::GreaterEqualThan
+            | BinOp::EqualTo
+            | BinOp::NotEquals => COMPARE,
+            BinOp::Assignment
+            | BinOp::AddAssign
+            | BinOp::SubtractAssign
+            | BinOp::MultiplyAssign
+            | BinOp::DivideAssign => ASSIGNMENT,
+            BinOp::BooleanAnd => BOOLEAN_AND,
+            BinOp::BooleanOr => BOOLEAN_OR,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ParseError {
     #[error("unexpected token {0}, {1}")]
@@ -667,7 +694,7 @@ fn interface_or_struct_body<'a>(
                         params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
                         returns,
                         body: add_node(context, body),
-                        is_extern: true,
+                        is_extern: false,
                         is_coroutine: false,
                     }),
                     SourceRange::new(start, cursor),

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "brick",
+    "brick", "brick-fmt",
     "brick-lsp",
     "brick-runtime",
     "brick-wasm-backend", "brick-wasmtime",
