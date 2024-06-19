@@ -1,28 +1,12 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use assert_matches::assert_matches;
-use brick::{eval_with_bindings, ExternBinding, Value};
+use brick::{eval_with_bindings, Value};
 
 static mut INCR_VALUE: i32 = 0;
 
 #[test]
 fn extern_binding() {
-    let mut bindings: HashMap<String, ExternBinding> = HashMap::new();
-
-    bindings.insert(
-        "next".to_string(),
-        Box::new(|_, _| {
-            let x = unsafe { INCR_VALUE };
-            unsafe {
-                INCR_VALUE += 1;
-            }
-            Some(Value::Int32(x))
-        }),
-    );
-
     let result = eval_with_bindings(
         r#"
 extern fn next(): i32;
@@ -31,7 +15,16 @@ x = next();
 x = next();
 x
 "#,
-        bindings,
+        vec![(
+            "next",
+            Box::new(|_, _| {
+                let x = unsafe { INCR_VALUE };
+                unsafe {
+                    INCR_VALUE += 1;
+                }
+                Some(Value::Int32(x))
+            }),
+        )],
     )
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(2)]);
@@ -39,21 +32,6 @@ x
 
 #[test]
 fn extern_pointer() {
-    let mut funcs: HashMap<String, ExternBinding> = HashMap::new();
-    funcs.insert(
-        "increment".to_string(),
-        Box::new(|vm, mut stack| {
-            let Value::Size(pointer) = stack.pop().unwrap() else {
-                unreachable!()
-            };
-            let size = std::mem::size_of::<i32>();
-            let mut value: i32 = *bytemuck::from_bytes(&vm.memory[pointer..(pointer + size)]);
-            value += 1;
-            vm.memory[pointer..(pointer + size)].copy_from_slice(bytemuck::bytes_of(&value));
-
-            None
-        }),
-    );
     let result = eval_with_bindings(
         r#"
 extern fn increment(a: unique i32);
@@ -61,7 +39,20 @@ let x = 10;
 increment(unique x);
 x
 "#,
-        funcs,
+        vec![(
+            "increment",
+            Box::new(|vm, mut stack| {
+                let Value::Size(pointer) = stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                let size = std::mem::size_of::<i32>();
+                let mut value: i32 = *bytemuck::from_bytes(&vm.memory[pointer..(pointer + size)]);
+                value += 1;
+                vm.memory[pointer..(pointer + size)].copy_from_slice(bytemuck::bytes_of(&value));
+
+                None
+            }),
+        )],
     )
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(11)]);
@@ -69,31 +60,9 @@ x
 
 #[test]
 fn externally_driven_coroutine() {
-    let mut bindings: HashMap<String, ExternBinding> = HashMap::new();
     let results = Arc::new(Mutex::new(Vec::new()));
 
     let push_results = results.clone();
-    bindings.insert(
-        "push".to_string(),
-        Box::new(move |_, mut args| {
-            let mut results = push_results.lock().unwrap();
-            results.push(args.remove(0));
-            None
-        }),
-    );
-    bindings.insert(
-        "call_generator_times".to_string(),
-        Box::new(|vm, mut args| {
-            let Value::Int32(times) = args.pop().unwrap() else {
-                unreachable!()
-            };
-            let generator = args.pop().unwrap();
-            for _ in 0..times {
-                vm.resume_generator(generator.clone()).unwrap();
-            }
-            None
-        }),
-    );
 
     eval_with_bindings(
         r#"
@@ -112,7 +81,29 @@ gen fn push_increasing(): generator[void, void] {
 let seq = push_increasing();
 call_generator_times(unique seq, 5);
 "#,
-        bindings,
+        vec![
+            (
+                "push",
+                Box::new(move |_, mut args| {
+                    let mut results = push_results.lock().unwrap();
+                    results.push(args.remove(0));
+                    None
+                }),
+            ),
+            (
+                "call_generator_times",
+                Box::new(|vm, mut args| {
+                    let Value::Int32(times) = args.pop().unwrap() else {
+                        unreachable!()
+                    };
+                    let generator = args.pop().unwrap();
+                    for _ in 0..times {
+                        vm.resume_generator(generator.clone()).unwrap();
+                    }
+                    None
+                }),
+            ),
+        ],
     )
     .unwrap();
 
@@ -196,7 +187,7 @@ let json = parse_json("{\'hello\': 1024 }");
 let obj = json.Object ?? dict{ dummy: JsonValue { Null: false } };
 obj["hello"].Number
 "#,
-        HashMap::new(),
+        Vec::new(),
     )
     .unwrap();
     assert_eq!(&result[..], &[Value::Float64(1024.0)]);

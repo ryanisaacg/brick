@@ -1,10 +1,10 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     sync::{Arc, Mutex},
 };
 
 use anyhow::bail;
-use brick::{check_types, interpret_code, ExternBinding, Value};
+use brick::{check_types, interpret_code, Value};
 use data_test_driver::TestValue;
 
 #[test]
@@ -22,15 +22,17 @@ fn data() {
             let counter = Arc::new(Mutex::new(0));
 
             let func_counter = counter.clone();
-            let mut bindings: HashMap<String, ExternBinding> = HashMap::new();
-            bindings.insert(
-                "incr_test_counter".to_string(),
-                Box::new(move |_, _| {
-                    *func_counter.lock().unwrap() += 1;
-                    None
-                }),
-            );
-            let (mut results, memory) = interpret_code("eval", contents.to_string(), bindings)?;
+            let (mut results, memory) = interpret_code(
+                "eval",
+                contents.to_string(),
+                vec![(
+                    "incr_test_counter",
+                    Box::new(move |_, _| {
+                        *func_counter.lock().unwrap() += 1;
+                        None
+                    }),
+                )],
+            )?;
             let counter = *counter.lock().unwrap();
             look_for_value(&mut results, &memory[..], expected, counter)
         },

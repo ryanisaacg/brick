@@ -63,18 +63,18 @@ pub enum CompileError {
 }
 
 pub fn eval(source: &str) -> Result<Vec<Value>, IntepreterError> {
-    let (val, _) = interpret_code("eval", source.to_string(), HashMap::new())?;
+    let (val, _) = interpret_code("eval", source.to_string(), Default::default())?;
 
     Ok(val)
 }
 
 pub fn eval_preserve_vm(source: &str) -> Result<(Vec<Value>, Vec<u8>), IntepreterError> {
-    interpret_code("eval", source.to_string(), HashMap::new())
+    interpret_code("eval", source.to_string(), Default::default())
 }
 
 pub fn eval_with_bindings(
     source: &str,
-    bindings: HashMap<String, ExternBinding>,
+    bindings: Vec<(&str, ExternBinding)>,
 ) -> Result<Vec<Value>, IntepreterError> {
     let (val, _) = interpret_code("eval", source.to_string(), bindings)?;
 
@@ -84,7 +84,7 @@ pub fn eval_with_bindings(
 pub fn interpret_code(
     source_name: &'static str,
     contents: String,
-    mut bindings: HashMap<String, ExternBinding>,
+    bindings: Vec<(&str, ExternBinding)>,
 ) -> Result<(Vec<Value>, Vec<u8>), IntepreterError> {
     let LowerResults {
         statements,
@@ -105,8 +105,13 @@ pub fn interpret_code(
         .map(|func| (func.id, Function::Ir(func)))
         .collect();
 
-    for (name, fn_id) in declarations.extern_function_bindings.iter() {
-        if let Some(implementation) = bindings.remove(name) {
+    let binding_name_to_fn: HashMap<_, _> = declarations
+        .extern_function_bindings
+        .iter()
+        .map(|(name, id)| (name.as_str(), *id))
+        .collect();
+    for (name, implementation) in bindings {
+        if let Some(fn_id) = binding_name_to_fn.get(name) {
             functions.insert(*fn_id, Function::Extern(implementation));
         }
     }
