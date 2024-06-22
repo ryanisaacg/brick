@@ -45,6 +45,7 @@ wasm backend:
 diagnostics:
 - parsing recovery during errors
 - "unknown type" placeholder for better error reporting
+- "u32" used as type results in strange errors
 
 modules:
 - modules can be indexed in a type expression context
