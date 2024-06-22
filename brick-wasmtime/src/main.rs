@@ -2,6 +2,7 @@ use std::{
     collections::HashSet,
     env,
     sync::{mpsc::TryRecvError, Arc, Mutex},
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{bail, Context};
@@ -10,6 +11,8 @@ use brick_wasm_backend::compile;
 use brick_wasmtime::add_runtime_functions;
 use sdl2::{event::Event, keyboard::Keycode, pixels::Color, rect::Rect};
 use wasmtime::{Engine, Linker, Module, Store, Val};
+
+const MINIMUM_TICK_TIME: u64 = 16;
 
 fn main() -> anyhow::Result<()> {
     let mut args = env::args();
@@ -78,6 +81,9 @@ fn main() -> anyhow::Result<()> {
     let ctx_pointer = results[0].clone();
 
     let mut running = true;
+
+    let mut last_frame = SystemTime::UNIX_EPOCH;
+
     while running {
         for event in event_pump.poll_iter() {
             match event {
@@ -126,7 +132,12 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        tick_func.call(&mut store, &[ctx_pointer.clone()], &mut [])?;
+        if SystemTime::now().duration_since(last_frame).unwrap()
+            >= Duration::from_millis(MINIMUM_TICK_TIME)
+        {
+            tick_func.call(&mut store, &[ctx_pointer.clone()], &mut [])?;
+            last_frame = SystemTime::now();
+        }
 
         loop {
             let event = match recv_draw_command.try_recv() {
