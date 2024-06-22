@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{bail, Context};
+use brick::SourceFile;
 use brick_wasm_backend::compile;
 use brick_wasmtime::add_runtime_functions;
 use sdl2::{event::Event, keyboard::Keycode, pixels::Color, rect::Rect};
@@ -12,8 +13,8 @@ use wasmtime::{Engine, Linker, Module, Store, Val};
 
 fn main() -> anyhow::Result<()> {
     let mut args = env::args();
-    args.next();
-    let filename = String::leak(args.next().expect("pass a filename"));
+    args.next(); // skip binary name
+    let files: Vec<_> = args.map(|arg| String::leak(arg) as &'static str).collect();
 
     let engine = Engine::default();
     let mut store = Store::new(&engine, ());
@@ -49,7 +50,7 @@ fn main() -> anyhow::Result<()> {
         }
     })?;
 
-    let module = get_module(&engine, filename)?;
+    let module = get_module(&engine, &files)?;
     let mut instance = linker.instantiate(&mut store, &module)?;
 
     let init_func = instance
@@ -92,7 +93,7 @@ fn main() -> anyhow::Result<()> {
                         .get_memory(&mut store, "memory")
                         .context("failed to find memory")?;
                     let data = memory.data(&store).to_vec();
-                    let module = get_module(&engine, filename)?;
+                    let module = get_module(&engine, &files)?;
                     instance = linker.instantiate(&mut store, &module)?;
                     tick_func = instance
                         .get_func(&mut store, "tick")
@@ -151,9 +152,25 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_module(engine: &Engine, filename: &'static str) -> anyhow::Result<Module> {
-    let contents = std::fs::read_to_string(filename)?;
-    let binary = compile("main", filename, contents, true)?;
+fn get_module(engine: &Engine, files: &[&'static str]) -> anyhow::Result<Module> {
+    let source_files = files
+        .iter()
+        .map(|filename| -> anyhow::Result<SourceFile> {
+            let after_last_slash = filename
+                .rfind(std::path::MAIN_SEPARATOR)
+                .map(|idx| idx + 1)
+                .unwrap_or(0);
+            let dot = filename.find('.').unwrap_or(filename.len());
+            let module_name = &filename[after_last_slash..dot];
+            let contents = std::fs::read_to_string(filename)?;
+            Ok(SourceFile {
+                filename,
+                module_name,
+                contents,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let binary = compile(source_files, true)?;
     Module::from_binary(engine, binary.as_slice())
 }
 

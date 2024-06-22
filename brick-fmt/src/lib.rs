@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 
 use brick::{
-    parse_files,
+    parse_file,
     parser::{AstNode, AstNodeValue, BinOp, UnaryOp, UnionDeclarationVariant},
     CompileError,
 };
@@ -9,9 +9,9 @@ use typed_arena::Arena;
 
 pub fn format_str(source: &str) -> Result<String, CompileError> {
     let parse_arena = Arena::new();
-    let mut modules = parse_files(&parse_arena, "main".to_string(), "eval", source.to_string())?;
+    let mut ast = parse_file(&parse_arena, "input", source.to_string())?;
 
-    Ok(format(modules.values_mut().next().unwrap()))
+    Ok(format(&mut ast[..]))
 }
 
 pub fn format(nodes: &mut [AstNode]) -> String {
@@ -168,7 +168,12 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
         }
         AstNodeValue::Import(path) => {
             result.push_str("import ");
-            result.push_str(path);
+            for (idx, entry) in path.iter().enumerate() {
+                result.push_str(entry);
+                if idx + 1 != path.len() {
+                    result.push('.');
+                }
+            }
             result.push(';');
         }
         AstNodeValue::Return(inner) => {

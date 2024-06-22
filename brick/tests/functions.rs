@@ -1,9 +1,25 @@
 use std::sync::{Arc, Mutex};
 
 use assert_matches::assert_matches;
-use brick::{eval_with_bindings, Value};
+use brick::{interpret_code, ExternBinding, IntepreterError, SourceFile, Value};
 
 static mut INCR_VALUE: i32 = 0;
+
+pub fn eval_with_bindings(
+    source: &str,
+    bindings: Vec<(&str, ExternBinding)>,
+) -> Result<Vec<Value>, IntepreterError> {
+    let (val, _) = interpret_code(
+        vec![SourceFile {
+            module_name: "main",
+            filename: "main.brick",
+            contents: source.to_string(),
+        }],
+        bindings,
+    )?;
+
+    Ok(val)
+}
 
 #[test]
 fn extern_binding() {

@@ -277,7 +277,7 @@ pub enum AstNodeValue<'a> {
         VariableID,
     ),
     BorrowDeclaration(String, &'a mut AstNode<'a>, VariableID),
-    Import(String),
+    Import(Vec<String>),
     Return(Option<&'a mut AstNode<'a>>),
     Yield(Option<&'a mut AstNode<'a>>),
     // Any non-specific expression that ends in ; is a statement
@@ -972,13 +972,34 @@ fn function_header<'a>(
 
 fn import_declaration<'a>(
     source: &mut TokenIter,
-    cursor: SourceMarker,
+    start: SourceMarker,
 ) -> Result<AstNode<'a>, ParseError> {
-    let (name, provenance) = word(source, cursor, "expected word after 'import'")?;
+    let (name, provenance) = word(source, start, "expected word after 'import'")?;
+    let mut cursor = provenance.end();
+    let mut components = vec![name];
+
+    loop {
+        let next = next_token(source, cursor, "expected . or ; in import declaration")?;
+        cursor = next.range.end();
+        match &next.value {
+            TokenValue::Semicolon => break,
+            TokenValue::Period => {
+                let (name, provenance) = word(source, cursor, "expected word after . in import")?;
+                cursor = provenance.end();
+                components.push(name);
+            }
+            _ => {
+                return Err(ParseError::UnexpectedToken(
+                    Box::new(next),
+                    "expected . or ; in import declaration",
+                ))
+            }
+        }
+    }
 
     Ok(AstNode::new(
-        AstNodeValue::Import(name),
-        SourceRange::new(cursor, provenance.end()),
+        AstNodeValue::Import(components),
+        SourceRange::new(start, provenance.end()),
     ))
 }
 

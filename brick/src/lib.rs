@@ -1,12 +1,9 @@
 #![allow(clippy::result_large_err)]
 
-use declaration_context::Module;
+use declaration_context::FileDeclarations;
 pub use declaration_context::{DeclarationContext, TypeID};
 use multi_error::merge_results;
-use std::{
-    collections::{HashMap, HashSet},
-    fs, io,
-};
+use std::{collections::HashMap, io};
 
 use borrowck::LifetimeError;
 use hir::HirModule;
@@ -16,7 +13,7 @@ pub use linear_ir::{
     PhysicalCollection, PhysicalPrimitive, PhysicalType, RuntimeFunction, TypeLayoutValue,
 };
 use linear_ir::{layout_types, LinearContext};
-use parser::{AstNode, AstNodeValue};
+use parser::AstNode;
 use thiserror::Error;
 use typecheck::typecheck;
 pub use typecheck::{ExpressionType, FuncType, TypeDeclaration};
@@ -62,28 +59,14 @@ pub enum CompileError {
     LifetimeError(#[from] LifetimeError),
 }
 
-pub fn eval(source: &str) -> Result<Vec<Value>, IntepreterError> {
-    let (val, _) = interpret_code("eval", source.to_string(), Default::default())?;
-
-    Ok(val)
-}
-
-pub fn eval_preserve_vm(source: &str) -> Result<(Vec<Value>, Vec<u8>), IntepreterError> {
-    interpret_code("eval", source.to_string(), Default::default())
-}
-
-pub fn eval_with_bindings(
-    source: &str,
-    bindings: Vec<(&str, ExternBinding)>,
-) -> Result<Vec<Value>, IntepreterError> {
-    let (val, _) = interpret_code("eval", source.to_string(), bindings)?;
-
-    Ok(val)
+pub struct SourceFile {
+    pub filename: &'static str,
+    pub module_name: &'static str,
+    pub contents: String,
 }
 
 pub fn interpret_code(
-    source_name: &'static str,
-    contents: String,
+    sources: Vec<SourceFile>,
     bindings: Vec<(&str, ExternBinding)>,
 ) -> Result<(Vec<Value>, Vec<u8>), IntepreterError> {
     let LowerResults {
@@ -93,13 +76,7 @@ pub fn interpret_code(
         declarations,
         type_layouts: ty_declarations,
         constant_data,
-    } = lower_code(
-        "main",
-        source_name,
-        contents,
-        1,
-        std::mem::size_of::<usize>(),
-    )?;
+    } = lower_code(sources, 1, std::mem::size_of::<usize>())?;
     let mut functions: HashMap<_, _> = functions
         .into_iter()
         .map(|func| (func.id, Function::Ir(func)))
@@ -133,19 +110,29 @@ pub struct LowerResults {
 }
 
 pub fn lower_code(
-    module_name: &str,
-    source_name: &'static str,
-    contents: String,
+    sources: Vec<SourceFile>,
     byte_size: usize,
     pointer_size: usize,
 ) -> Result<LowerResults, CompileError> {
     let parse_arena = Arena::new();
-    let modules = parse_files(&parse_arena, module_name.to_string(), source_name, contents)?;
+    // TODO: return more than one parse error
+    let modules: Vec<_> = sources
+        .into_iter()
+        .map(
+            |SourceFile {
+                 filename,
+                 module_name,
+                 contents,
+             }| {
+                parse_file(&parse_arena, filename, contents).map(|ast| (module_name, ast))
+            },
+        )
+        .collect::<Result<_, _>>()?;
 
     let CompilationResults {
         modules,
         mut declarations,
-    } = typecheck_module(&modules)?;
+    } = typecheck_module(&modules[..])?;
 
     let mut type_layouts = HashMap::new();
     layout_types(
@@ -166,7 +153,7 @@ pub fn lower_code(
         indirect_function_types: &mut indirect_function_types,
         byte_size,
         pointer_size,
-        module: Module::new(),
+        module: FileDeclarations::new(),
     };
 
     for (name, module) in modules {
@@ -218,31 +205,40 @@ pub fn lower_code(
 }
 
 pub struct CompilationResults {
-    pub modules: HashMap<String, HirModule>,
+    pub modules: HashMap<&'static str, HirModule>,
     pub declarations: DeclarationContext,
 }
 
 pub fn check_types(source: &str) -> Result<CompilationResults, CompileError> {
     let parse_arena = Arena::new();
-    let modules = parse_files(&parse_arena, "main".to_string(), "eval", source.to_string())?;
+    let main = parse_file(&parse_arena, "main", source.to_string())?;
 
-    typecheck_module(&modules)
+    typecheck_module(&[("main", main)])
 }
 
 pub fn typecheck_module<'a>(
-    modules: &'a HashMap<String, Vec<AstNode<'a>>>,
+    contents: &'a [(&'static str, Vec<AstNode<'a>>)],
 ) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
-    let declarations = collect_declarations(modules)?;
+    let mut declarations = DeclarationContext::new();
+    let mut decl_results = Ok(());
+    for (name, source) in contents.iter() {
+        merge_results(
+            &mut decl_results,
+            declarations.insert_file(name, &source[..]),
+        );
+    }
+    declarations.propagate_viral_types();
+    decl_results?;
 
-    let module_results = modules
+    let module_results = contents
         .par_iter()
         .map(
-            |(name, contents)| -> Result<(String, HirModule), TypecheckError> {
-                let types = typecheck(contents.iter(), name, &declarations)?;
+            |(name, contents)| -> Result<(&'static str, HirModule), TypecheckError> {
+                let types = typecheck(&contents[..], name, &declarations)?;
                 let ir = lower_module(types, &declarations);
-                Ok((name.clone(), ir))
+                Ok((name, ir))
             },
         )
         .collect::<Vec<_>>();
@@ -272,86 +268,13 @@ pub fn typecheck_module<'a>(
     })
 }
 
-pub fn typecheck_file(
-    module_name: &str,
-    source_name: &'static str,
-    contents: String,
-) -> Result<(HirModule, DeclarationContext), CompileError> {
-    let parse_arena = Arena::new();
-    let modules = parse_files(&parse_arena, module_name.to_string(), source_name, contents)?;
-
-    let declarations = collect_declarations(&modules)?;
-
-    let parsed_module = &modules[module_name];
-    let types = typecheck(parsed_module.iter(), module_name, &declarations)?;
-    let ir = lower_module(types, &declarations);
-
-    Ok((ir, declarations))
-}
-
-fn collect_declarations(
-    modules: &HashMap<String, Vec<AstNode>>,
-) -> Result<DeclarationContext, TypecheckError> {
-    let mut ctx = DeclarationContext::new();
-    let mut result = Ok(());
-    for (name, source) in modules.iter() {
-        let name = name.clone();
-        merge_results(&mut result, ctx.insert_file(name.leak(), source));
-    }
-    result?;
-    ctx.propagate_viral_types();
-    Ok(ctx)
-}
-
-struct ParseQueueEntry {
-    name: String,
-    source_name: &'static str,
-    contents: String,
-}
-
-pub fn parse_files<'a>(
+pub fn parse_file<'a>(
     arena: &'a Arena<AstNode<'a>>,
-    module_name: String,
-    source_name: &'static str,
+    filename: &'static str,
     contents: String,
-) -> Result<HashMap<String, Vec<AstNode<'a>>>, CompileError> {
-    let mut modules_seen = HashSet::new();
-    modules_seen.insert(module_name.clone());
-    let mut modules_to_parse = vec![ParseQueueEntry {
-        name: module_name,
-        source_name,
-        contents,
-    }];
-    let mut parsed_modules = HashMap::new();
+) -> Result<Vec<AstNode<'a>>, CompileError> {
+    let tokens = tokenizer::lex(filename, contents);
+    let parsed_module = parser::parse(arena, tokens)?;
 
-    while let Some(ParseQueueEntry {
-        name,
-        source_name,
-        contents,
-    }) = modules_to_parse.pop()
-    {
-        let tokens = tokenizer::lex(source_name, contents);
-        let parsed_module = parser::parse(arena, tokens)?;
-
-        for node in parsed_module.iter() {
-            if let AstNodeValue::Import(name) = &node.value {
-                if modules_seen.contains(name) {
-                    continue;
-                }
-                let source_path = format!("{}.brick", &name[..]);
-                //resolve_file_path(name.as_str());
-                let contents = fs::read_to_string(source_path.as_str()).unwrap();
-                modules_to_parse.push(ParseQueueEntry {
-                    name: name.to_string(),
-                    source_name: source_path.leak(),
-                    contents,
-                });
-                modules_seen.insert(name.to_string());
-            }
-        }
-
-        parsed_modules.insert(name, parsed_module);
-    }
-
-    Ok(parsed_modules)
+    Ok(parsed_module)
 }

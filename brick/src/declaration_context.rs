@@ -8,8 +8,8 @@ use crate::{
         UnionDeclarationVariant,
     },
     typecheck::{
-        CollectionType, FuncType, InterfaceType, PointerKind, PrimitiveType, StructType,
-        TypecheckError, UnionType,
+        CollectionType, FuncType, InterfaceType, ModuleType, PointerKind, PrimitiveType,
+        StructType, TypecheckError, UnionType,
     },
     ExpressionType, TypeDeclaration,
 };
@@ -19,8 +19,8 @@ use std::{
 };
 
 pub struct DeclarationContext {
-    pub intrinsic_module: Module,
-    pub modules: HashMap<&'static str, Module>,
+    pub intrinsic_module: FileDeclarations,
+    pub files: HashMap<&'static str, FileDeclarations>,
     pub id_to_decl: HashMap<TypeID, TypeDeclaration>,
     pub id_to_func: HashMap<FunctionID, FuncType>,
     pub intrinsic_to_id: HashMap<IntrinsicFunction, FunctionID>,
@@ -41,8 +41,8 @@ impl Default for DeclarationContext {
 impl DeclarationContext {
     pub fn new() -> DeclarationContext {
         let mut ctx = DeclarationContext {
-            intrinsic_module: Module::new(),
-            modules: HashMap::new(),
+            intrinsic_module: FileDeclarations::new(),
+            files: HashMap::new(),
             id_to_decl: HashMap::new(),
             id_to_func: HashMap::new(),
             intrinsic_to_id: HashMap::new(),
@@ -63,11 +63,19 @@ impl DeclarationContext {
         module_name: &'static str,
         source: &[AstNode<'_>],
     ) -> Result<(), TypecheckError> {
-        let module = match self.modules.get_mut(module_name) {
+        let module = match self.files.get_mut(module_name) {
             Some(module) => module,
             None => {
-                self.modules.insert(module_name, Module::new());
-                self.modules.get_mut(module_name).unwrap()
+                let file = FileDeclarations::new();
+                self.id_to_decl.insert(
+                    file.module_id,
+                    TypeDeclaration::Module(ModuleType {
+                        id: file.module_id,
+                        exports: HashMap::new(),
+                    }),
+                );
+                self.files.insert(module_name, file);
+                self.files.get_mut(module_name).unwrap()
             }
         };
         let mut names_to_declarations = HashMap::new();
@@ -109,21 +117,21 @@ impl DeclarationContext {
     }
 }
 
-pub struct Module {
-    id: PackageID,
-    pub type_name_to_id: HashMap<String, TypeID>,
-    pub func_name_to_id: HashMap<String, FunctionID>,
+pub struct FileDeclarations {
+    id: FileID,
+    pub module_id: TypeID,
     type_id_counter: AtomicU32,
     func_id_counter: AtomicU32,
 }
 
-impl Module {
-    pub(crate) fn new() -> Module {
-        Module {
-            id: PackageID::new(),
-            type_name_to_id: HashMap::new(),
-            func_name_to_id: HashMap::new(),
-            type_id_counter: AtomicU32::new(1),
+impl FileDeclarations {
+    pub(crate) fn new() -> FileDeclarations {
+        let id = FileID::new();
+
+        FileDeclarations {
+            id,
+            module_id: TypeID(id, 1),
+            type_id_counter: AtomicU32::new(2),
             func_id_counter: AtomicU32::new(1),
         }
     }
@@ -140,9 +148,9 @@ impl Module {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct PackageID(u32);
+pub struct FileID(u32);
 
-impl PackageID {
+impl FileID {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         static PACKAGE_COUNTER: AtomicU32 = AtomicU32::new(1);
@@ -151,10 +159,10 @@ impl PackageID {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct TypeID(PackageID, u32);
+pub struct TypeID(FileID, u32);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct FunctionID(PackageID, u32);
+pub struct FunctionID(FileID, u32);
 
 unsafe impl Zeroable for FunctionID {}
 
@@ -192,7 +200,7 @@ fn is_decl_affine(
 }
 
 fn resolve_top_level_declarations(
-    module: &mut Module,
+    module: &mut FileDeclarations,
     names_to_declarations: HashMap<String, &AstNode<'_>>,
     id_to_decl: &mut HashMap<TypeID, TypeDeclaration>,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
@@ -212,7 +220,14 @@ fn resolve_top_level_declarations(
                 resolve_function(module, &name_to_type_id, node, false, id_to_func),
             );
             if let Some(fn_id) = fn_id {
-                module.func_name_to_id.insert(name.clone(), fn_id);
+                let TypeDeclaration::Module(module_decl) =
+                    id_to_decl.get_mut(&module.module_id).unwrap()
+                else {
+                    unreachable!()
+                };
+                module_decl
+                    .exports
+                    .insert(name.clone(), ExpressionType::ReferenceToFunction(fn_id));
                 if matches!(&node.value, AstNodeValue::ExternFunctionBinding(_)) {
                     extern_function_bindings.push((name.clone(), fn_id));
                 }
@@ -232,9 +247,15 @@ fn resolve_top_level_declarations(
                 resolve_declaration(module, &name_to_type_id, node, id_to_func),
             );
             if let Some(declaration) = decl {
-                module
-                    .type_name_to_id
-                    .insert(name.clone(), declaration.id());
+                let TypeDeclaration::Module(module_decl) =
+                    id_to_decl.get_mut(&module.module_id).unwrap()
+                else {
+                    unreachable!()
+                };
+                module_decl.exports.insert(
+                    name.clone(),
+                    ExpressionType::ReferenceToType(declaration.id()),
+                );
                 id_to_decl.insert(declaration.id(), declaration);
             }
         }
@@ -253,7 +274,7 @@ fn is_node_function(node: &AstNode<'_>) -> bool {
 }
 
 fn resolve_function(
-    module: &Module,
+    module: &FileDeclarations,
     names_to_type_id: &HashMap<&str, TypeID>,
     node: &AstNode<'_>,
     is_associated: bool,
@@ -311,7 +332,7 @@ fn resolve_function(
 }
 
 fn resolve_declaration(
-    module: &Module,
+    module: &FileDeclarations,
     names_to_type_id: &HashMap<&str, TypeID>,
     node: &AstNode<'_>,
     id_to_func: &mut HashMap<FunctionID, FuncType>,

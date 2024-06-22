@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bytemuck::Zeroable;
 
 use crate::{
-    declaration_context::{IntrinsicFunction, Module, TypeID},
+    declaration_context::{FileDeclarations, IntrinsicFunction, TypeID},
     hir::{
         ArithmeticOp, BinaryLogicalOp, ComparisonOp, GeneratorProperties, HirFunction, HirNode,
         HirNodeValue, UnaryLogicalOp,
@@ -524,7 +524,7 @@ pub struct LinearContext<'a> {
     pub indirect_function_types: &'a mut HashMap<ExpressionType, FunctionID>,
     pub byte_size: usize,
     pub pointer_size: usize,
-    pub module: Module,
+    pub module: FileDeclarations,
 }
 
 impl<'a> LinearContext<'a> {

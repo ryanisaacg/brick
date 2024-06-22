@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::bail;
-use brick::{check_types, interpret_code, Value};
+use brick::{check_types, interpret_code, SourceFile, Value};
 use data_test_driver::TestValue;
 
 #[test]
@@ -23,8 +23,11 @@ fn data() {
 
             let func_counter = counter.clone();
             let (mut results, memory) = interpret_code(
-                "eval",
-                contents.to_string(),
+                vec![SourceFile {
+                    module_name: "main",
+                    filename: "main.brick",
+                    contents: contents.to_string(),
+                }],
                 vec![(
                     "incr_test_counter",
                     Box::new(move |_, _| {

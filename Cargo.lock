@@ -152,6 +152,7 @@ name = "brick-wasmtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "brick",
  "brick-runtime",
  "brick-wasm-backend",
  "data-test-driver",

@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::{
-    declaration_context::{resolve_type_expr, DeclarationContext, Module, TypeID},
+    declaration_context::{resolve_type_expr, DeclarationContext, FileDeclarations, TypeID},
     id::{AnyID, FunctionID},
     multi_error::{merge_results, merge_results_or_value, print_multi_errors, MultiError},
     parser::{
@@ -236,6 +236,15 @@ impl TypeDeclaration {
             }
         }
     }
+
+    pub fn as_module(&self) -> Option<&ModuleType> {
+        match self {
+            TypeDeclaration::Struct(_)
+            | TypeDeclaration::Interface(_)
+            | TypeDeclaration::Union(_) => None,
+            TypeDeclaration::Module(module) => Some(module),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -349,6 +358,12 @@ pub enum TypecheckError {
     CantAssignToReference(SourceRange),
     #[error("illegal assignment to a shared reference: {0}")]
     IllegalSharedRefMutation(SourceRange),
+    #[error("illegal import: {0}")]
+    IllegalImport(SourceRange),
+    #[error("import path items must be modules: {0}")]
+    ImportPathMustBeModule(SourceRange),
+    #[error("file \"{1}\" not found: {0}")]
+    FileNotFound(SourceRange, String),
 }
 
 impl MultiError for TypecheckError {
@@ -384,7 +399,7 @@ impl<'a> TypecheckContext<'a> {
 pub struct TypecheckedFile<'ast, 'decl> {
     pub functions: Vec<TypecheckedFunction<'ast>>,
     pub top_level_statements: Vec<&'ast AstNode<'ast>>,
-    pub module: &'decl Module,
+    pub module: &'decl FileDeclarations,
 }
 
 #[derive(Clone, Debug)]
@@ -396,33 +411,132 @@ pub struct TypecheckedFunction<'a> {
 
 // TODO: pass import namespace in
 pub fn typecheck<'ast, 'decl>(
-    file: impl Iterator<Item = &'ast AstNode<'ast>>,
+    file: &'ast [AstNode<'ast>],
     current_module_name: &str,
     declarations: &'decl DeclarationContext,
 ) -> Result<TypecheckedFile<'ast, 'decl>, TypecheckError> {
     let mut top_level_type_names = HashMap::new();
     let mut top_level_function_names = HashMap::new();
     let mut top_level_name_to_expr_type = HashMap::new();
+    let mut results = Ok(());
 
-    let module = &declarations.modules[current_module_name];
+    let module = &declarations.files[current_module_name];
 
     // Insert the module's top-level
-    for (name, ty_id) in module.type_name_to_id.iter() {
-        let value = &declarations.id_to_decl[ty_id];
-        top_level_type_names.insert(name.as_str(), *ty_id);
-        top_level_name_to_expr_type
-            .insert(name.clone(), (value.fn_id_or_type_id(), value.ref_to()));
+    let top_level = declarations.id_to_decl[&module.module_id]
+        .as_module()
+        .unwrap();
+    for (name, ty) in top_level.exports.iter() {
+        match ty {
+            ExpressionType::Void
+            | ExpressionType::Unreachable
+            | ExpressionType::Primitive(_)
+            | ExpressionType::Pointer(_, _)
+            | ExpressionType::Collection(_)
+            | ExpressionType::Null
+            | ExpressionType::Nullable(_)
+            | ExpressionType::TypeParameterReference(_)
+            | ExpressionType::Generator { .. }
+            | ExpressionType::FunctionReference { .. }
+            | ExpressionType::InstanceOf(_) => unreachable!(),
+            ExpressionType::ReferenceToType(ty_id) => {
+                let value = &declarations.id_to_decl[ty_id];
+                top_level_type_names.insert(name.as_str(), *ty_id);
+                top_level_name_to_expr_type
+                    .insert(name.clone(), (value.fn_id_or_type_id(), value.ref_to()));
+            }
+            ExpressionType::ReferenceToFunction(fn_id) => {
+                let value = &declarations.id_to_func[fn_id];
+                top_level_function_names.insert(name.as_str(), *fn_id);
+                top_level_name_to_expr_type.insert(
+                    name.clone(),
+                    (
+                        value.id.into(),
+                        ExpressionType::ReferenceToFunction(value.id),
+                    ),
+                );
+            }
+        }
     }
-    for (name, fn_id) in module.func_name_to_id.iter() {
-        let value = &declarations.id_to_func[fn_id];
-        top_level_function_names.insert(name.as_str(), *fn_id);
-        top_level_name_to_expr_type.insert(
-            name.clone(),
-            (
-                value.id.into(),
-                ExpressionType::ReferenceToFunction(value.id),
-            ),
-        );
+
+    // Insert all the imports
+    for statement in file {
+        let AstNodeValue::Import(path) = &statement.value else {
+            continue;
+        };
+        let mut path_iter = path.iter().peekable();
+        let (mut imported_name, module_id) = if path_iter.next().unwrap() == "self" {
+            let Some(filename) = merge_results_or_value(
+                &mut results,
+                path_iter
+                    .next()
+                    .ok_or(TypecheckError::IllegalImport(statement.provenance.clone())),
+            ) else {
+                continue;
+            };
+            let file = &declarations.files.get(filename.as_str());
+            let Some(file) = merge_results_or_value(
+                &mut results,
+                file.ok_or_else(|| {
+                    TypecheckError::FileNotFound(statement.provenance.clone(), filename.clone())
+                }),
+            ) else {
+                continue;
+            };
+            let module_id = &file.module_id;
+            (filename, module_id)
+        } else {
+            // Should non-self imports grab from local modules? should it work only for packages? not sure
+            todo!("package imports")
+        };
+        let mut imported_value = &declarations.id_to_decl[module_id];
+        let mut was_fn = false;
+        while let Some(current_path) = path_iter.next() {
+            let Some(current_module) = merge_results_or_value(
+                &mut results,
+                imported_value.as_module().ok_or_else(|| {
+                    TypecheckError::ImportPathMustBeModule(statement.provenance.clone())
+                }),
+            ) else {
+                break;
+            };
+            match &current_module.exports[current_path.as_str()] {
+                ExpressionType::ReferenceToType(ty_id) => {
+                    imported_value = &declarations.id_to_decl[ty_id];
+                }
+                ExpressionType::ReferenceToFunction(fn_id) => {
+                    was_fn = true;
+                    // If there are further components in the import path, that's illegal
+                    if path_iter.peek().is_some() {
+                        merge_results(
+                            &mut results,
+                            Err(TypecheckError::ImportPathMustBeModule(
+                                statement.provenance.clone(),
+                            )),
+                        );
+                        break;
+                    } else {
+                        let fn_id = *fn_id;
+                        top_level_function_names.insert(current_path.as_str(), fn_id);
+                        top_level_name_to_expr_type.insert(
+                            current_path.clone(),
+                            (fn_id.into(), ExpressionType::ReferenceToFunction(fn_id)),
+                        );
+                    }
+                }
+                _ => todo!("can't import that yet"),
+            }
+            imported_name = current_path;
+        }
+        // If a function wasn't imported, bring the last type traversed into scope
+        if !was_fn {
+            let ty_id = imported_value.id();
+            top_level_type_names.insert(imported_name.as_str(), ty_id);
+            top_level_name_to_expr_type.insert(
+                imported_name.to_string(),
+                (ty_id.into(), ExpressionType::ReferenceToType(ty_id)),
+            );
+        }
     }
 
     let context = TypecheckContext {
@@ -435,7 +549,6 @@ pub fn typecheck<'ast, 'decl>(
     let mut functions = Vec::new();
     let mut top_level_statements = Vec::new();
     let mut top_level_scope = HashMap::new();
-    let mut results = Ok(());
 
     for statement in file {
         merge_results(
@@ -792,11 +905,9 @@ fn typecheck_expression<'a>(
                             ExpressionType::InstanceOf(*id)
                         }
                     }
-                    // TODO: module dot operator
+                    TypeDeclaration::Module(module) => module.exports[name].clone(),
                     // TODO: static functions on structs?
-                    TypeDeclaration::Struct(_)
-                    | TypeDeclaration::Module(_)
-                    | TypeDeclaration::Interface(_) => {
+                    TypeDeclaration::Struct(_) | TypeDeclaration::Interface(_) => {
                         return Err(TypecheckError::IllegalDotLHS(left.provenance.clone()));
                     }
                 },

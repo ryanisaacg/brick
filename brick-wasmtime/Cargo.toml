@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 wasmtime = "20"
+brick = { path = "../brick" }
 brick-wasm-backend = { path = "../brick-wasm-backend" }
 brick-runtime = { path = "../brick-runtime" }
 sdl2 = { version = "0.36.0", features = ["bundled"] }

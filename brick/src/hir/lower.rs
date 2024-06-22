@@ -4,7 +4,7 @@ use super::{
 };
 
 use crate::{
-    declaration_context::Module,
+    declaration_context::FileDeclarations,
     id::{NodeID, VariableID},
     parser::{AstNode, AstNodeValue, BinOp, IfDeclaration, UnaryOp},
     typecheck::{
@@ -54,7 +54,7 @@ pub fn lower_module(
 
 fn lower_coroutine(
     decls: &DeclarationContext,
-    module: &Module,
+    module: &FileDeclarations,
     func: TypecheckedFunction<'_>,
     func_ty: &FuncType,
 ) -> [HirFunction; 2] {
@@ -258,7 +258,14 @@ fn lower_node(decls: &DeclarationContext, node: &AstNode<'_>) -> HirNode {
             if let Some(TypeDeclaration::Module(module)) =
                 expr_ty.type_id().and_then(|id| decls.id_to_decl.get(id))
             {
-                HirNodeValue::VariableReference((*module.exports[name].type_id().unwrap()).into())
+                let export = &module.exports[name];
+                HirNodeValue::VariableReference(match export {
+                    ExpressionType::InstanceOf(id) | ExpressionType::ReferenceToType(id) => {
+                        (*id).into()
+                    }
+                    ExpressionType::ReferenceToFunction(id) => (*id).into(),
+                    _ => todo!("non-type, non-function module exports"),
+                })
             } else {
                 let left = lower_node_alloc(decls, left);
                 HirNodeValue::Access(left, name.clone())

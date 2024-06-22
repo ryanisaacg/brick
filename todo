@@ -1,6 +1,7 @@
 borrow checker and lifetimes:
 - allow disjoint borrows of struct fields, collection indices
 - clone support
+- switch from "Move is viral" to "types that have Move must be marked Move"
 - must-use-type support
 - can't dereference pointers to Move types
 - drop:
@@ -41,16 +42,14 @@ wasm backend:
 - figure out and fix issue with dictionaries
 - trailing return statements in functions cause miscompilations
 
-import support:
-- allow imports to have nested paths (sugar for recursively expanding?)
-- allow imports to include a list of things, with an optional catch-all
+diagnostics:
+- parsing recovery during errors
+- "unknown type" placeholder for better error reporting
 
 modules:
 - modules can be indexed in a type expression context
 - modules can be indexed in a struct / variant literal context
 - modules can be declared explicitly
-- do files have to import each other?
-- how are modules declared?
 
 misc:
 - short-circuiting boolean evaluation
@@ -95,6 +94,11 @@ type parameters:
 - monomorphizing
 - generic types can be constrained by interfaces
 
+build system:
+- cargo-like "build" command that automatically passes source files to the compiler
+- packages have a defined compiled format
+- packages can depend on other packages
+
 coroutines / generators / async:
 - stackless coroutines
     - alloc the generator to match its proper size
@@ -106,9 +110,6 @@ coroutines / generators / async:
 - error guardrails:
     - require coroutines to return generators
     - prevent calling coroutine through immutable references
-
-hot reloading:
-- struct field order should be deterministic
 
 compilation resume and reload:
 - rework the hashmaps into an actual environment data structure that allows for generational indexing?
@@ -213,3 +214,5 @@ syntax:
 - there's an ambiguity between dereference / multiplication in if { body } * a += 1;
 - decide on whether variables can shadow
 
+import support:
+- allow imports to include a list of things, with an optional catch-all

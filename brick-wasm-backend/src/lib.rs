@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use brick::{
     expr_ty_to_physical, lower_code, CompileError, ExpressionType, LinearFunction, LowerResults,
+    SourceFile,
 };
 use function_bodies::{walk_vals_write_order, FunctionEncoder};
 use wasm_encoder::{
@@ -31,12 +32,7 @@ const WASM_USIZE: usize = 4;
 const HEAP_SIZE: i32 = 1024 * 1024 * 2;
 const STACK_SIZE: i32 = 1024;
 
-pub fn compile(
-    module_name: &str,
-    source_name: &'static str,
-    contents: String,
-    is_start_function: bool,
-) -> Result<Module, CompileError> {
+pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Module, CompileError> {
     let LowerResults {
         statements,
         statements_ty,
@@ -44,13 +40,7 @@ pub fn compile(
         declarations,
         type_layouts,
         constant_data,
-    } = lower_code(
-        module_name,
-        source_name,
-        contents,
-        WASM_BOOL_SIZE,
-        WASM_USIZE,
-    )?;
+    } = lower_code(sources, WASM_BOOL_SIZE, WASM_USIZE)?;
 
     let mut function_return_types = HashMap::new();
     for func in declarations.id_to_func.values() {

@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use brick::id::AnyID;
+use brick::CompilationResults;
 use brick::HirNodeValue;
 use brick::SourceRange;
 use lsp_types::{
@@ -113,34 +114,32 @@ fn find_definition(params: &GotoDefinitionParams) -> anyhow::Result<Option<Sourc
     let contents = std::fs::read_to_string(path)?;
     let position = params.text_document_position_params.position;
 
-    let module_name = path.file_stem().unwrap().to_str().unwrap();
-    let filename = path
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string()
-        .leak();
-    let (module, decls) = brick::typecheck_file(module_name, filename, contents)?;
+    let CompilationResults {
+        modules,
+        declarations,
+    } = brick::check_types(&contents)?;
+
     let mut found = None;
-    module.visit(|_, node| {
-        if found.is_some() {
-            return;
-        }
-        let HirNodeValue::VariableReference(id) = &node.value else {
-            return;
-        };
-        let Some(provenance) = &node.provenance else {
-            return;
-        };
-        if provenance.contains(position.line + 1, position.character + 1) {
-            found = Some(*id);
-        }
-    });
+    for module in modules.values() {
+        module.visit(|_, node| {
+            if found.is_some() {
+                return;
+            }
+            let HirNodeValue::VariableReference(id) = &node.value else {
+                return;
+            };
+            let Some(provenance) = &node.provenance else {
+                return;
+            };
+            if provenance.contains(position.line + 1, position.character + 1) {
+                found = Some(*id);
+            }
+        });
+    }
 
     Ok(match found {
         Some(id) => match id {
-            AnyID::Function(fn_id) => decls.id_to_func[&fn_id].provenance.clone(),
+            AnyID::Function(fn_id) => declarations.id_to_func[&fn_id].provenance.clone(),
             AnyID::Type(_) => todo!(),
             AnyID::Variable(_) => todo!(),
         },

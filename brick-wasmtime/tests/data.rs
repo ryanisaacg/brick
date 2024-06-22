@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context};
+use brick::SourceFile;
 use brick_wasm_backend::compile;
 use brick_wasmtime::add_runtime_functions;
 use data_test_driver::TestValue;
@@ -14,13 +15,28 @@ fn data() {
     data_test_driver::test_folder(
         working_dir,
         |contents| -> anyhow::Result<()> {
-            compile("main", "main.brick", contents.to_string(), false)?;
+            compile(
+                vec![SourceFile {
+                    module_name: "main",
+                    filename: "main.brick",
+                    contents: contents.to_string(),
+                }],
+                false,
+            )?;
             Ok(())
         },
         |contents, expected| -> anyhow::Result<TestValue> {
             let counter = Arc::new(Mutex::new(0));
 
-            let binary = compile("main", "main.brick", contents.to_string(), false)?.finish();
+            let binary = compile(
+                vec![SourceFile {
+                    module_name: "main",
+                    filename: "main.brick",
+                    contents: contents.to_string(),
+                }],
+                false,
+            )?
+            .finish();
             let engine = Engine::default();
             let mut store = Store::new(&engine, ());
             let mut linker = Linker::new(&engine);
