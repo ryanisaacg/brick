@@ -1,4 +1,5 @@
 use crate::{
+    id::NodeID,
     typecheck::{
         fully_dereference, CollectionType, ExpressionType, InterfaceType, PointerKind,
         PrimitiveType, StructType, TypeDeclaration,
@@ -36,7 +37,29 @@ pub fn rewrite(declarations: &DeclarationContext, root: &mut HirNode) {
                         let HirNodeValue::Access(lhs, _) = call_lhs.value else {
                             unreachable!();
                         };
-                        args.insert(0, *lhs);
+                        let mut lhs = *lhs;
+                        // Automatically take a reference if necessary
+                        let func_ty = &declarations.id_to_func[func_id];
+                        if let ExpressionType::Pointer(kind, _) = &func_ty.params[0] {
+                            if !matches!(&lhs.ty, ExpressionType::Pointer(_, _)) {
+                                let inner_ty = lhs.ty.clone();
+                                let provenance = lhs.provenance.clone();
+                                lhs = HirNode {
+                                    id: NodeID::new(),
+                                    value: match kind {
+                                        PointerKind::Shared => {
+                                            HirNodeValue::TakeShared(Box::new(lhs))
+                                        }
+                                        PointerKind::Unique => {
+                                            HirNodeValue::TakeUnique(Box::new(lhs))
+                                        }
+                                    },
+                                    ty: ExpressionType::Pointer(*kind, Box::new(inner_ty)),
+                                    provenance,
+                                };
+                            }
+                        }
+                        args.insert(0, lhs);
                     }
                 }
                 Some(TypeDeclaration::Interface(InterfaceType {

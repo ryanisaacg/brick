@@ -1,0 +1,14 @@
+// Int | 5
+
+struct Number {
+    value: i32,
+
+    fn add(self: ref Number, x: i32, y: i32): Number {
+        Number {
+            value: self.value + x + y,
+        }
+    }
+}
+
+let two = Number { value: 2 };
+two.add(1, 2).value
