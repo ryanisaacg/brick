@@ -104,11 +104,16 @@ fn main() -> anyhow::Result<()> {
                     tick_func = instance
                         .get_func(&mut store, "tick")
                         .context("failed to find tick")?;
-                    let memory = instance
-                        .get_memory(&mut store, "memory")
-                        .context("failed to find memory")?;
-                    memory.data_mut(&mut store).copy_from_slice(&data[..]);
-                    println!("reloaded!");
+                    let keys = down_keys.lock().unwrap();
+                    if keys.contains(&(Keycode::LCtrl as i32)) {
+                        println!("hard reloaded!");
+                    } else {
+                        let memory = instance
+                            .get_memory(&mut store, "memory")
+                            .context("failed to find memory")?;
+                        memory.data_mut(&mut store).copy_from_slice(&data[..]);
+                        println!("reloaded!");
+                    }
                 }
                 Event::KeyDown {
                     keycode: Some(keycode),
