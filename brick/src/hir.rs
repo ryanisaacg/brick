@@ -364,13 +364,19 @@ impl HirNode {
                     callback(None, value);
                 }
             }
-            // TODO: heterogenous collections
             HirNodeValue::ArrayLiteral(children) => {
+                let ExpressionType::Collection(CollectionType::Array(value_ty)) = &self.ty else {
+                    unreachable!()
+                };
                 for child in children.iter() {
-                    callback(None, child);
+                    callback(Some(value_ty.as_ref()), child);
                 }
             }
-            HirNodeValue::ArrayLiteralLength(_, len) => {
+            HirNodeValue::ArrayLiteralLength(value, len) => {
+                let ExpressionType::Collection(CollectionType::Array(value_ty)) = &self.ty else {
+                    unreachable!()
+                };
+                callback(Some(value_ty.as_ref()), value);
                 callback(
                     Some(&ExpressionType::Primitive(PrimitiveType::PointerSize)),
                     len,
@@ -578,13 +584,19 @@ impl HirNode {
                     callback(None, value);
                 }
             }
-            // TODO: heterogenous collections
             HirNodeValue::ArrayLiteral(children) => {
+                let ExpressionType::Collection(CollectionType::Array(value_ty)) = &self.ty else {
+                    unreachable!()
+                };
                 for child in children.iter_mut() {
-                    callback(None, child);
+                    callback(Some(value_ty.as_ref()), child);
                 }
             }
-            HirNodeValue::ArrayLiteralLength(_, len) => {
+            HirNodeValue::ArrayLiteralLength(value, len) => {
+                let ExpressionType::Collection(CollectionType::Array(value_ty)) = &self.ty else {
+                    unreachable!()
+                };
+                callback(Some(value_ty.as_ref()), value);
                 callback(
                     Some(&ExpressionType::Primitive(PrimitiveType::PointerSize)),
                     len,

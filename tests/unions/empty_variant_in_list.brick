@@ -1,0 +1,6 @@
+// Compile
+union Option {
+    Some(i32),
+    None
+}
+let values = list[Option.None; 1];
