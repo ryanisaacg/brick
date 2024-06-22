@@ -58,6 +58,7 @@ fn lower_coroutine(
     func: TypecheckedFunction<'_>,
     func_ty: &FuncType,
 ) -> [HirFunction; 2] {
+    // TODO: insert this generator function into the declaration context
     let generator_function_id = module.new_func_id();
 
     let coroutine_start = HirFunction {
@@ -74,8 +75,6 @@ fn lower_coroutine(
             )]),
             func_ty.returns.clone(),
         ),
-        // TODO: pass param types down
-        params: Vec::new(),
         generator: None,
     };
 
@@ -135,7 +134,6 @@ fn lower_coroutine(
             param_var_id,
             ty: generator_ty.clone(),
         }),
-        params: param_types,
     };
 
     [coroutine_start, coroutine_body]
@@ -166,7 +164,6 @@ fn lower_function(
         name: Some(func.name),
         body,
         generator: None,
-        params: func_ty.params.clone(),
     }
 }
 

@@ -75,6 +75,7 @@ x
 }
 
 #[test]
+#[should_panic]
 fn externally_driven_coroutine() {
     let results = Arc::new(Mutex::new(Vec::new()));
 

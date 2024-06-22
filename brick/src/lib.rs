@@ -162,7 +162,7 @@ pub fn lower_code(
             statements.push(module.top_level_statements);
         }
         for function in module.functions {
-            functions.push(linear_context.linearize_function(function));
+            functions.push(linear_context.linearize_function(&declarations, function));
         }
     }
 

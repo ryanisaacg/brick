@@ -101,6 +101,7 @@ build system:
 - packages can depend on other packages
 
 coroutines / generators / async:
+- insert generator functions into declaration context
 - stackless coroutines
     - alloc the generator to match its proper size
 - support arguments to coroutines

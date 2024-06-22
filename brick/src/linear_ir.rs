@@ -13,6 +13,7 @@ use crate::{
     typecheck::{
         shallow_dereference, CollectionType, ExpressionType, PrimitiveType, TypeDeclaration,
     },
+    DeclarationContext,
 };
 
 mod generator_local_storage;
@@ -528,7 +529,11 @@ pub struct LinearContext<'a> {
 }
 
 impl<'a> LinearContext<'a> {
-    pub fn linearize_function(&mut self, function: HirFunction) -> LinearFunction {
+    pub fn linearize_function(
+        &mut self,
+        declarations: &DeclarationContext,
+        function: HirFunction,
+    ) -> LinearFunction {
         let HirNodeValue::Sequence(block) = function.body.value else {
             unreachable!()
         };
@@ -547,11 +552,13 @@ impl<'a> LinearContext<'a> {
             );
         }
 
+        let fn_ty = &declarations.id_to_func[&function.id];
+
         LinearFunction {
             id: function.id,
             body,
-            params: function.params.iter().map(expr_ty_to_physical).collect(),
-            returns: match &function.body.ty {
+            params: fn_ty.params.iter().map(expr_ty_to_physical).collect(),
+            returns: match &fn_ty.returns {
                 ExpressionType::Void | ExpressionType::Unreachable => None,
                 return_ty => Some(expr_ty_to_physical(return_ty)),
             },

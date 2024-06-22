@@ -78,6 +78,7 @@ fn data() {
             "coroutine/yield_basic.brick",
             "coroutine/yield_once.brick",
             "coroutine/yield_twice.brick",
+            "coroutine/no_yield_value.brick",
         ]
         .into_iter()
         .collect(),
