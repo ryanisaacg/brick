@@ -56,7 +56,7 @@ fn main() -> anyhow::Result<()> {
     let module = get_module(&engine, &files)?;
     let mut instance = linker.instantiate(&mut store, &module)?;
 
-    let init_func = instance
+    let mut init_func = instance
         .get_func(&mut store, "init")
         .context("failed to find init")?;
     let mut tick_func = instance
@@ -84,7 +84,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut last_frame = SystemTime::UNIX_EPOCH;
 
-    while running {
+    'game_loop: while running {
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => {
@@ -99,20 +99,35 @@ fn main() -> anyhow::Result<()> {
                         .get_memory(&mut store, "memory")
                         .context("failed to find memory")?;
                     let data = memory.data(&store).to_vec();
-                    let module = get_module(&engine, &files)?;
-                    instance = linker.instantiate(&mut store, &module)?;
-                    tick_func = instance
-                        .get_func(&mut store, "tick")
-                        .context("failed to find tick")?;
-                    let keys = down_keys.lock().unwrap();
-                    if keys.contains(&(Keycode::LCtrl as i32)) {
-                        println!("hard reloaded!");
-                    } else {
-                        let memory = instance
-                            .get_memory(&mut store, "memory")
-                            .context("failed to find memory")?;
-                        memory.data_mut(&mut store).copy_from_slice(&data[..]);
-                        println!("reloaded!");
+                    match get_module(&engine, &files) {
+                        Ok(module) => {
+                            instance = linker.instantiate(&mut store, &module)?;
+                            tick_func = instance
+                                .get_func(&mut store, "tick")
+                                .context("failed to find tick")?;
+                            let keys = down_keys.lock().unwrap();
+                            if keys.contains(&(Keycode::LCtrl as i32)) {
+                                init_func = instance
+                                    .get_func(&mut store, "init")
+                                    .context("failed to find init")?;
+                                init_func.call(&mut store, &[], &mut results)?;
+                                println!("hard reloaded!");
+                            } else {
+                                let memory = instance
+                                    .get_memory(&mut store, "memory")
+                                    .context("failed to find memory")?;
+                                memory.data_mut(&mut store).copy_from_slice(&data[..]);
+                                println!("reloaded!");
+                            }
+                        }
+                        Err(error) => {
+                            eprintln!("{}", error);
+                            canvas.set_draw_color(Color::RGB(255, 0, 0));
+                            canvas.clear();
+                            canvas.present();
+                            last_frame = SystemTime::now();
+                            continue 'game_loop;
+                        }
                     }
                 }
                 Event::KeyDown {
