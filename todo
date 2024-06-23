@@ -1,8 +1,13 @@
+destructuring:
+- destructuring syntax in let-statement
+- allow destructuring values
+- allow destructuring borrows
+- destructuring sugar in parameter position, and case statements
+
 borrow checker and lifetimes:
-- allow disjoint borrows of struct fields, collection indices
 - clone support
 - switch from "Move is viral" to "types that have Move must be marked Move"
-- must-use-type support
+- must-use-type support (requires destructuring)
 - can't dereference pointers to Move types
 - drop:
     - detect drops when a value is conditionally moved
@@ -14,6 +19,7 @@ borrow checker and lifetimes:
     - automatically run the drop of all children when dropping
     - drop values when the variable is assigned
     - non-affine types may not define a drop
+- (maybe) allow disjoint borrows of struct fields, collection indices
 
 collections:
 - prevent references being stored in collections
