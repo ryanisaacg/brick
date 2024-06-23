@@ -1,8 +1,8 @@
 destructuring:
 - destructuring syntax in let-statement
-- allow destructuring values
-- allow destructuring borrows
-- destructuring sugar in parameter position, and case statements
+- destructuring semantics
+- allow destructuring borrows (and maybe destructuring existing borrows?)
+- sugar: allow destructuring in parameter, case statements
 
 borrow checker and lifetimes:
 - clone support
