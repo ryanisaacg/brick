@@ -160,7 +160,11 @@ struct BorrowState {
 #[derive(Clone, Debug)]
 enum BorrowLifeState {
     Initialized,
-    Assigned(VariableID, NodeID, Option<SourceRange>),
+    Assigned {
+        lender_id: VariableID,
+        node_id: NodeID,
+        provenance: Option<SourceRange>,
+    },
     ValueMoved(NodeID, Option<SourceRange>),
     ValueReassigned(NodeID, Option<SourceRange>),
     MutableRefTaken(NodeID, Option<SourceRange>),
@@ -349,8 +353,11 @@ fn borrow_check_node(
                 } else if let ExpressionType::Pointer(ref_ty, _) = &lhs.ty {
                     let lender_id = find_variable_for_lvalue(rhs).as_var();
                     let var_state = variable_state.get_mut(&lender_id).unwrap();
-                    borrow_state.get_mut(var_id).unwrap().state =
-                        BorrowLifeState::Assigned(lender_id, node.id, node.provenance.clone());
+                    borrow_state.get_mut(var_id).unwrap().state = BorrowLifeState::Assigned {
+                        lender_id,
+                        node_id: node.id,
+                        provenance: node.provenance.clone(),
+                    };
 
                     invalidate_borrowers(
                         var_state,
@@ -463,7 +470,7 @@ fn borrow_check_node(
                     }
                     HirNodeValue::VariableReference(AnyID::Variable(var_id)) => {
                         if let Some(BorrowState {
-                            state: BorrowLifeState::Assigned(lender_id, _, _),
+                            state: BorrowLifeState::Assigned { lender_id, .. },
                         }) = borrow_state.get(var_id)
                         {
                             let lender_id = (*lender_id).into();
@@ -574,10 +581,14 @@ fn update_borrow_state(
         BorrowLifeState::Initialized => {
             Err(LifetimeError::UsedUninitBorrow(node.provenance.clone()))
         }
-        BorrowLifeState::Assigned(var_id, id, provenance) => {
-            *id = node.id;
+        BorrowLifeState::Assigned {
+            lender_id,
+            node_id,
+            provenance,
+        } => {
+            *node_id = node.id;
             *provenance = node.provenance.clone();
-            let var_state = variable_state.get_mut(var_id).unwrap();
+            let var_state = variable_state.get_mut(lender_id).unwrap();
             var_state.state = VariableLifeState::Used(node.id, node.provenance.clone());
             Ok(())
         }
