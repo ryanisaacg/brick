@@ -163,11 +163,17 @@ enum BorrowLifeState {
     Assigned {
         lender_id: VariableID,
         node_id: NodeID,
+        path: Vec<PathSegment>,
         provenance: Option<SourceRange>,
     },
     ValueMoved(NodeID, Option<SourceRange>),
     ValueReassigned(NodeID, Option<SourceRange>),
     MutableRefTaken(NodeID, Option<SourceRange>),
+}
+
+#[derive(Clone, PartialEq, Debug)]
+enum PathSegment {
+    Access(String),
 }
 
 struct Context<'a> {
@@ -300,6 +306,7 @@ fn borrow_check_node(
                 invalidate_borrowers(
                     existing_state,
                     borrow_state,
+                    &[],
                     BorrowLifeState::ValueMoved(node.id, node.provenance.clone()),
                     InvalidateType::AllBorrows,
                 );
@@ -347,21 +354,19 @@ fn borrow_check_node(
                     invalidate_borrowers(
                         existing_state,
                         borrow_state,
+                        &[],
                         BorrowLifeState::ValueReassigned(node.id, node.provenance.clone()),
                         InvalidateType::AllBorrows,
                     );
                 } else if let ExpressionType::Pointer(ref_ty, _) = &lhs.ty {
                     let lender_id = find_variable_for_lvalue(rhs).as_var();
+                    let path = find_path_for_lvalue(rhs);
                     let var_state = variable_state.get_mut(&lender_id).unwrap();
-                    borrow_state.get_mut(var_id).unwrap().state = BorrowLifeState::Assigned {
-                        lender_id,
-                        node_id: node.id,
-                        provenance: node.provenance.clone(),
-                    };
 
                     invalidate_borrowers(
                         var_state,
                         borrow_state,
+                        &path[..],
                         BorrowLifeState::MutableRefTaken(node.id, node.provenance.clone()),
                         if *ref_ty == PointerKind::Unique {
                             InvalidateType::AllBorrows
@@ -369,6 +374,13 @@ fn borrow_check_node(
                             InvalidateType::MutableBorrows
                         },
                     );
+
+                    borrow_state.get_mut(var_id).unwrap().state = BorrowLifeState::Assigned {
+                        lender_id,
+                        node_id: node.id,
+                        path,
+                        provenance: node.provenance.clone(),
+                    };
 
                     var_state.borrows.push((*ref_ty, *var_id));
                 }
@@ -413,7 +425,8 @@ fn borrow_check_node(
         | HirNodeValue::VtableCall(_, _, params)
         | HirNodeValue::IntrinsicCall(_, params) => {
             let mut unique_params = HashMap::new();
-            let mut shared_params: HashMap<AnyID, Option<SourceRange>> = HashMap::new();
+            let mut shared_params: HashMap<AnyID, (Vec<PathSegment>, Option<SourceRange>)> =
+                HashMap::new();
             for param in params.iter() {
                 merge_results(
                     &mut results,
@@ -422,70 +435,25 @@ fn borrow_check_node(
                 match &param.value {
                     HirNodeValue::TakeUnique(inner) => {
                         let id = *find_variable_for_lvalue(inner);
+                        let path = find_path_for_lvalue(inner);
+
                         let previous_mut_borrow =
-                            unique_params.insert(id, param.provenance.clone());
-                        if let Some(previous_mut_borrow) = previous_mut_borrow {
-                            merge_results(
-                                &mut results,
-                                Err(LifetimeError::BorrowUseAfterMutableRefTaken {
-                                    use_point: param.provenance.clone(),
-                                    ref_point: previous_mut_borrow.clone(),
-                                }),
-                            );
-                        }
-                        if let Some(previous_shared_borrow) = shared_params.get(&id) {
-                            merge_results(
-                                &mut results,
-                                Err(LifetimeError::UniqueBorrowUseAfterSharedRefTaken {
-                                    use_point: param.provenance.clone(),
-                                    ref_point: previous_shared_borrow.clone(),
-                                }),
-                            );
-                        }
-                        invalidate_borrowers(
-                            &variable_state[&id.as_var()],
-                            borrow_state,
-                            BorrowLifeState::MutableRefTaken(node.id, node.provenance.clone()),
-                            InvalidateType::AllBorrows,
-                        );
-                    }
-                    HirNodeValue::TakeShared(inner) => {
-                        let id = *find_variable_for_lvalue(inner);
-                        shared_params.insert(id, param.provenance.clone());
-                        if let Some(previous_mut_borrow) = unique_params.get(&id) {
-                            merge_results(
-                                &mut results,
-                                Err(LifetimeError::BorrowUseAfterMutableRefTaken {
-                                    use_point: param.provenance.clone(),
-                                    ref_point: previous_mut_borrow.clone(),
-                                }),
-                            );
-                        }
-                        invalidate_borrowers(
-                            &variable_state[&id.as_var()],
-                            borrow_state,
-                            BorrowLifeState::MutableRefTaken(node.id, node.provenance.clone()),
-                            InvalidateType::MutableBorrows,
-                        );
-                    }
-                    HirNodeValue::VariableReference(AnyID::Variable(var_id)) => {
-                        if let Some(BorrowState {
-                            state: BorrowLifeState::Assigned { lender_id, .. },
-                        }) = borrow_state.get(var_id)
-                        {
-                            let lender_id = (*lender_id).into();
-                            let previous_mut_borrow =
-                                unique_params.insert(lender_id, param.provenance.clone());
-                            if let Some(previous_mut_borrow) = previous_mut_borrow {
+                            unique_params.insert(id, (path.clone(), param.provenance.clone()));
+                        if let Some((previous_path, previous_provenance)) = previous_mut_borrow {
+                            if !are_paths_disjoint(&path[..], &previous_path[..]) {
                                 merge_results(
                                     &mut results,
                                     Err(LifetimeError::BorrowUseAfterMutableRefTaken {
                                         use_point: param.provenance.clone(),
-                                        ref_point: previous_mut_borrow.clone(),
+                                        ref_point: previous_provenance.clone(),
                                     }),
                                 );
                             }
-                            if let Some(previous_shared_borrow) = shared_params.get(&lender_id) {
+                        }
+                        if let Some((previous_path, previous_shared_borrow)) =
+                            shared_params.get(&id)
+                        {
+                            if !are_paths_disjoint(&path[..], &previous_path[..]) {
                                 merge_results(
                                     &mut results,
                                     Err(LifetimeError::UniqueBorrowUseAfterSharedRefTaken {
@@ -493,6 +461,76 @@ fn borrow_check_node(
                                         ref_point: previous_shared_borrow.clone(),
                                     }),
                                 );
+                            }
+                        }
+
+                        invalidate_borrowers(
+                            &variable_state[&id.as_var()],
+                            borrow_state,
+                            &path[..],
+                            BorrowLifeState::MutableRefTaken(node.id, node.provenance.clone()),
+                            InvalidateType::AllBorrows,
+                        );
+                    }
+                    HirNodeValue::TakeShared(inner) => {
+                        let id = *find_variable_for_lvalue(inner);
+                        let path = find_path_for_lvalue(inner);
+
+                        shared_params.insert(id, (path.clone(), param.provenance.clone()));
+                        if let Some((previous_path, previous_provenance)) = unique_params.get(&id) {
+                            if !are_paths_disjoint(&path[..], &previous_path[..]) {
+                                merge_results(
+                                    &mut results,
+                                    Err(LifetimeError::BorrowUseAfterMutableRefTaken {
+                                        use_point: param.provenance.clone(),
+                                        ref_point: previous_provenance.clone(),
+                                    }),
+                                );
+                            }
+                        }
+                        invalidate_borrowers(
+                            &variable_state[&id.as_var()],
+                            borrow_state,
+                            &path[..],
+                            BorrowLifeState::MutableRefTaken(node.id, node.provenance.clone()),
+                            InvalidateType::MutableBorrows,
+                        );
+                    }
+                    HirNodeValue::VariableReference(AnyID::Variable(var_id)) => {
+                        if let Some(BorrowState {
+                            state:
+                                BorrowLifeState::Assigned {
+                                    lender_id, path, ..
+                                },
+                        }) = borrow_state.get(var_id)
+                        {
+                            let lender_id = (*lender_id).into();
+                            let previous_mut_borrow = unique_params
+                                .insert(lender_id, (path.clone(), param.provenance.clone()));
+                            if let Some((previous_path, previous_mut_borrow)) = previous_mut_borrow
+                            {
+                                if !are_paths_disjoint(&path[..], &previous_path[..]) {
+                                    merge_results(
+                                        &mut results,
+                                        Err(LifetimeError::BorrowUseAfterMutableRefTaken {
+                                            use_point: param.provenance.clone(),
+                                            ref_point: previous_mut_borrow.clone(),
+                                        }),
+                                    );
+                                }
+                            }
+                            if let Some((previous_path, previous_shared_borrow)) =
+                                shared_params.get(&lender_id)
+                            {
+                                if !are_paths_disjoint(&path[..], &previous_path[..]) {
+                                    merge_results(
+                                        &mut results,
+                                        Err(LifetimeError::UniqueBorrowUseAfterSharedRefTaken {
+                                            use_point: param.provenance.clone(),
+                                            ref_point: previous_shared_borrow.clone(),
+                                        }),
+                                    );
+                                }
                             }
                         }
                     }
@@ -585,6 +623,7 @@ fn update_borrow_state(
             lender_id,
             node_id,
             provenance,
+            path: _,
         } => {
             *node_id = node.id;
             *provenance = node.provenance.clone();
@@ -620,6 +659,7 @@ enum InvalidateType {
 fn invalidate_borrowers(
     variable_state: &VariableState,
     borrow_state: &mut HashMap<VariableID, BorrowState>,
+    borrower_path: &[PathSegment],
     new_state: BorrowLifeState,
     invalidate_type: InvalidateType,
 ) {
@@ -628,8 +668,21 @@ fn invalidate_borrowers(
             continue;
         }
         let existing_borrow_state = borrow_state.get_mut(borrow_id).unwrap();
+        if let BorrowLifeState::Assigned { path, .. } = &existing_borrow_state.state {
+            if are_paths_disjoint(borrower_path, path) {
+                continue;
+            }
+        }
         existing_borrow_state.state = new_state.clone();
     }
+}
+
+/**
+ * Check if two paths are disjoint, which means they may be borrowed at the same time
+ */
+fn are_paths_disjoint(a: &[PathSegment], b: &[PathSegment]) -> bool {
+    let len = a.len().min(b.len());
+    (0..len).any(|i| a[i] != b[i])
 }
 
 fn is_copy(declarations: &HashMap<TypeID, TypeDeclaration>, ty: &ExpressionType) -> bool {
@@ -646,6 +699,35 @@ fn find_variable_for_lvalue(lvalue: &HirNode) -> &AnyID {
         | HirNodeValue::Dereference(child)
         | HirNodeValue::TakeUnique(child)
         | HirNodeValue::TakeShared(child) => find_variable_for_lvalue(child),
+        other => panic!("ICE: illegal lvalue: {other:?}"),
+    }
+}
+
+fn find_path_for_lvalue(lvalue: &HirNode) -> Vec<PathSegment> {
+    let mut path = Vec::new();
+    build_path_for_lvalue(lvalue, &mut path);
+    path
+}
+
+fn build_path_for_lvalue(lvalue: &HirNode, path: &mut Vec<PathSegment>) {
+    match &lvalue.value {
+        HirNodeValue::VariableReference(_) => {}
+        HirNodeValue::NullableTraverse(lhs, fields) => {
+            build_path_for_lvalue(lhs, path);
+            for field in fields.iter() {
+                path.push(PathSegment::Access(field.clone()));
+            }
+        }
+        HirNodeValue::Access(lhs, field) => {
+            build_path_for_lvalue(lhs, path);
+            path.push(PathSegment::Access(field.clone()));
+        }
+        HirNodeValue::ArrayIndex(_, _)
+        | HirNodeValue::DictIndex(_, _)
+        | HirNodeValue::Dereference(_) => todo!(),
+        HirNodeValue::TakeUnique(child) | HirNodeValue::TakeShared(child) => {
+            build_path_for_lvalue(child, path);
+        }
         other => panic!("ICE: illegal lvalue: {other:?}"),
     }
 }

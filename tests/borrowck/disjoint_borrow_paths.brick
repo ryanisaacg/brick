@@ -1,0 +1,12 @@
+// Int | 11
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+let p = Point { x: 1, y: 5 };
+borrow x = unique p.x;
+borrow y = unique p.y;
+*x += 2;
+*y += 3;
+p.x + p.y

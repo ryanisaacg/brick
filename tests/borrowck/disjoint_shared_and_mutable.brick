@@ -1,0 +1,11 @@
+// Int | 7
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+let p = Point { x: 4, y: 1 };
+borrow x = unique p.x;
+borrow y = ref p.y;
+*x += 2;
+p.x + *y

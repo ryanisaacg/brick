@@ -1,9 +1,3 @@
-destructuring:
-- destructuring syntax in let-statement
-- destructuring semantics
-- allow destructuring borrows (and maybe destructuring existing borrows?)
-- sugar: allow destructuring in parameter, case statements
-
 borrow checker and lifetimes:
 - clone support
 - switch from "Move is viral" to "types that have Move must be marked Move"
@@ -19,7 +13,13 @@ borrow checker and lifetimes:
     - automatically run the drop of all children when dropping
     - drop values when the variable is assigned
     - non-affine types may not define a drop
-- (maybe) allow disjoint borrows of struct fields, collection indices
+- allow disjoint borrows of collection indices
+
+destructuring:
+- destructuring syntax in let-statement: store vec of paths and bindings
+- destructuring semantics: node that takes the thing that's being destructured and then a list of assignments, just a marker for the borrowchecker to know that it all happens at once
+- (maybe) allow destructuring borrows (and maybe destructuring existing borrows?)
+- sugar: allow destructuring in parameter, case statements
 
 collections:
 - prevent references being stored in collections
