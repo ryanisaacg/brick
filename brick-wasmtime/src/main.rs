@@ -55,6 +55,7 @@ fn main() -> anyhow::Result<()> {
     linker.func_wrap("bindings", "print", move |value: i32| {
         println!("{value}");
     })?;
+    linker.func_wrap("bindings", "truncate", move |value: f32| value as i32)?;
 
     let module = get_module(&engine, &files)?;
     let mut instance = linker.instantiate(&mut store, &module)?;
