@@ -722,10 +722,10 @@ fn build_path_for_lvalue(lvalue: &HirNode, path: &mut Vec<PathSegment>) {
             build_path_for_lvalue(lhs, path);
             path.push(PathSegment::Access(field.clone()));
         }
-        HirNodeValue::ArrayIndex(_, _)
-        | HirNodeValue::DictIndex(_, _)
-        | HirNodeValue::Dereference(_) => todo!(),
-        HirNodeValue::TakeUnique(child) | HirNodeValue::TakeShared(child) => {
+        HirNodeValue::ArrayIndex(_, _) | HirNodeValue::DictIndex(_, _) => todo!("{lvalue:?}"),
+        HirNodeValue::Dereference(child)
+        | HirNodeValue::TakeUnique(child)
+        | HirNodeValue::TakeShared(child) => {
             build_path_for_lvalue(child, path);
         }
         other => panic!("ICE: illegal lvalue: {other:?}"),
