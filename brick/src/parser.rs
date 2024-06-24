@@ -4,7 +4,7 @@ use thiserror::Error;
 use typed_arena::Arena;
 
 use crate::{
-    id::{AnyID, VariableID},
+    id::{AnyID, ConstantID, VariableID},
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
     typecheck::ExpressionType,
@@ -78,7 +78,12 @@ impl<'a> AstNode<'a> {
                     callback(else_branch);
                 }
             }
-            Declaration(_, type_hint, child, _) => {
+            ConstDeclaration {
+                type_hint,
+                value: child,
+                ..
+            }
+            | Declaration(_, type_hint, child, _) => {
                 if let Some(type_hint) = type_hint {
                     callback(type_hint);
                 }
@@ -277,6 +282,12 @@ pub enum AstNodeValue<'a> {
         VariableID,
     ),
     BorrowDeclaration(String, &'a mut AstNode<'a>, VariableID),
+    ConstDeclaration {
+        name: String,
+        type_hint: Option<&'a mut AstNode<'a>>,
+        value: &'a mut AstNode<'a>,
+        variable_id: ConstantID,
+    },
     Import(Vec<String>),
     Return(Option<&'a mut AstNode<'a>>),
     Yield(Option<&'a mut AstNode<'a>>),
@@ -451,6 +462,7 @@ fn statement<'a>(
     Ok(
         match peek_token(source, cursor, "expected let, fn, or expression")?.value {
             TokenValue::Let
+            | TokenValue::Const
             | TokenValue::Borrow
             | TokenValue::Import
             | TokenValue::Function
@@ -465,6 +477,7 @@ fn statement<'a>(
                 match value {
                     TokenValue::Let => variable_declaration(source, context, cursor)?,
                     TokenValue::Borrow => borrow_declaration(source, context, cursor)?,
+                    TokenValue::Const => const_declaration(source, context, cursor)?,
                     TokenValue::Import => {
                         let statement = import_declaration(source, cursor)?;
                         if let Some(Token {
@@ -1070,6 +1083,48 @@ fn borrow_declaration<'a>(
     Ok(AstNode::new(
         AstNodeValue::BorrowDeclaration(name, rhs, VariableID::new()),
         SourceRange::new(start, cursor),
+    ))
+}
+
+fn const_declaration<'a>(
+    source: &mut TokenIter,
+    context: &'a Arena<AstNode<'a>>,
+    cursor: SourceMarker,
+) -> Result<AstNode<'a>, ParseError> {
+    let (name, mut provenance, type_hint) = name_and_type_hint(
+        source,
+        context,
+        cursor,
+        "expected word after 'let' in declaration",
+    )?;
+    let cursor = assert_next_lexeme_eq(
+        source,
+        TokenValue::Assign,
+        provenance.end(),
+        "expected = after let binding target",
+    )?
+    .range
+    .end();
+    let value = expression(source, context, cursor, true)?;
+    provenance.set_end(value.provenance.end());
+
+    let type_hint = type_hint.map(|type_hint| add_node(context, type_hint));
+
+    assert_next_lexeme_eq(
+        source,
+        TokenValue::Semicolon,
+        provenance.end(),
+        "expected ; after 'let' statement",
+    )?;
+
+    Ok(AstNode::new(
+        AstNodeValue::ConstDeclaration {
+            name,
+            type_hint,
+            value: add_node(context, value),
+            variable_id: ConstantID::new(),
+        },
+        provenance,
     ))
 }
 
@@ -2143,10 +2198,14 @@ fn try_decimal<'a>(
             }
         };
         let num = num as f64;
-        let num = if decimal != 0.0 {
-            num + decimal.copysign(num) * (10f64).powf(-decimal.log(10.0).ceil())
-        } else {
+        let num = if decimal == 0.0 {
+            // can't get the log of 0
             num
+        } else if decimal == 1.0 {
+            // log of 1 is 0, special-case it
+            num + 0.1f64.copysign(num)
+        } else {
+            num + decimal.copysign(num) * (10f64).powf(-decimal.log(10.0).ceil())
         };
         let mut provenance = range.clone();
         provenance.set_end(end);

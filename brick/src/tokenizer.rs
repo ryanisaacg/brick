@@ -96,6 +96,7 @@ pub enum TokenValue {
     Void,
     Case,
     Borrow,
+    Const,
 
     // Comments
     LineComment(String),
@@ -160,6 +161,7 @@ impl TokenValue {
             | TokenValue::CloseBracket
             | TokenValue::CloseSquare
             | TokenValue::Let
+            | TokenValue::Const
             | TokenValue::Borrow
             | TokenValue::Function
             | TokenValue::Gen
@@ -218,6 +220,7 @@ impl fmt::Display for TokenValue {
             CaseRocket => write!(f, "=>"),
             VerticalPipe => write!(f, "|"),
             Let => write!(f, "keyword let"),
+            Const => write!(f, "keyword const"),
             Borrow => write!(f, "keyword borrow"),
             If => write!(f, "keyword if"),
             While => write!(f, "keyword while"),
@@ -359,6 +362,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                         "true" => TokenValue::True,
                         "false" => TokenValue::False,
                         "let" => TokenValue::Let,
+                        "const" => TokenValue::Const,
                         "borrow" => TokenValue::Borrow,
                         "fn" => TokenValue::Function,
                         "gen" => TokenValue::Gen,

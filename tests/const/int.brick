@@ -1,0 +1,3 @@
+// Int | 2468
+const value = 1234;
+value + value

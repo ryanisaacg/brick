@@ -14,6 +14,7 @@ use crate::{
 
 mod auto_deref_dot;
 mod auto_numeric_cast;
+mod constant_inlining;
 mod coroutines;
 mod create_temp_vars_for_lvalues;
 mod discard_unused_values;
@@ -28,10 +29,14 @@ pub fn lower_module<'dest>(
     module: TypecheckedFile<'_, 'dest>,
     declarations: &'dest DeclarationContext,
 ) -> HirModule {
+    let constant_values = constant_inlining::extract_constant_values(&module, declarations);
+
     let mut module = lower::lower_module(module, declarations);
 
     // Important that this comes before ANY pass that uses the declarations
     coroutines::rewrite_generator_calls(&mut module);
+
+    constant_inlining::inline_constants(&mut module, constant_values);
 
     // This should come before anyone looks too hard at dot operators and function calls
     unions::convert_calls_to_union_literals(&mut module, declarations);
@@ -95,7 +100,7 @@ impl HirModule {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct HirFunction {
     pub id: FunctionID,
     pub name: Option<String>,
@@ -110,12 +115,23 @@ pub struct GeneratorProperties {
     pub ty: ExpressionType,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct HirNode {
     pub id: NodeID,
     pub value: HirNodeValue,
     pub ty: ExpressionType,
     pub provenance: Option<SourceRange>,
+}
+
+impl Clone for HirNode {
+    fn clone(&self) -> Self {
+        HirNode {
+            id: NodeID::new(),
+            value: self.value.clone(),
+            ty: self.ty.clone(),
+            provenance: self.provenance.clone(),
+        }
+    }
 }
 
 impl Default for HirNode {

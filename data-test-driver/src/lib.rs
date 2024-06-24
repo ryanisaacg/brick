@@ -18,7 +18,7 @@ pub enum TestExpectation {
     ProducesValue(TestValue),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum TestValue {
     Void,
     Null,
@@ -27,6 +27,22 @@ pub enum TestValue {
     Float(f64),
     String(String),
     Counter(u32),
+}
+
+impl PartialEq for TestValue {
+    fn eq(&self, other: &Self) -> bool {
+        use TestValue::*;
+        match (self, other) {
+            (Void, Void) => true,
+            (Null, Null) => true,
+            (Nullable(a), Nullable(b)) => a == b,
+            (Int(a), Int(b)) => a == b,
+            (String(a), String(b)) => a == b,
+            (Counter(a), Counter(b)) => a == b,
+            (Float(a), Float(b)) => (a - b).abs() < 0.000001,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug)]

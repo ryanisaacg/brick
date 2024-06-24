@@ -142,6 +142,7 @@ fn find_definition(params: &GotoDefinitionParams) -> anyhow::Result<Option<Sourc
             AnyID::Function(fn_id) => declarations.id_to_func[&fn_id].provenance.clone(),
             AnyID::Type(_) => todo!(),
             AnyID::Variable(_) => todo!(),
+            AnyID::Constant(_) => todo!(),
         },
         None => None,
     })

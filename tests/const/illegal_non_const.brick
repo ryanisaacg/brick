@@ -1,0 +1,2 @@
+// NoCompile
+const value = 1 + 1;

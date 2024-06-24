@@ -1,0 +1,6 @@
+// Int | 5678
+const value = 5678;
+fn get(): i32 {
+    value
+}
+value

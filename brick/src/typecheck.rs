@@ -364,6 +364,8 @@ pub enum TypecheckError {
     ImportPathMustBeModule(SourceRange),
     #[error("file \"{1}\" not found: {0}")]
     FileNotFound(SourceRange, String),
+    #[error("non-constant value in const: {0}")]
+    NonConstantInConst(SourceRange),
 }
 
 impl MultiError for TypecheckError {
@@ -539,12 +541,21 @@ pub fn typecheck<'ast, 'decl>(
         }
     }
 
-    let context = TypecheckContext {
+    let mut context = TypecheckContext {
         declarations,
         top_level_name_to_expr_type,
         top_level_function_names,
         top_level_type_names,
     };
+
+    // Insert all the constants
+    let mut constants = HashMap::new();
+    for statement in file {
+        if let AstNodeValue::ConstDeclaration { .. } = &statement.value {
+            typecheck_const(&context, &[], &mut constants, statement)?;
+        }
+    }
+    context.top_level_name_to_expr_type.extend(constants);
 
     let mut functions = Vec::new();
     let mut top_level_statements = Vec::new();
@@ -636,6 +647,11 @@ fn typecheck_node<'a>(
         AstNodeValue::Import(_)
         | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_) => {}
+        // Constants are extracted and type-checked earlier in the process, but still need
+        // to be present so we can locate them in the HIR
+        AstNodeValue::ConstDeclaration { .. } => {
+            top_level_statements.push(statement);
+        }
         _ => {
             typecheck_expression(
                 statement,
@@ -815,6 +831,9 @@ fn typecheck_expression<'a>(
             results?;
 
             ExpressionType::Void
+        }
+        AstNodeValue::ConstDeclaration { .. } => {
+            return typecheck_const(context, outer_scopes, current_scope, node);
         }
         AstNodeValue::Return(returned) => {
             if let Some(returned) = returned {
@@ -1941,6 +1960,7 @@ fn validate_assignment_lhs(lhs: &AstNode<'_>) -> Result<(), TypecheckError> {
         | AstNodeValue::InterfaceDeclaration(_)
         | AstNodeValue::RequiredFunction(_)
         | AstNodeValue::Declaration(_, _, _, _)
+        | AstNodeValue::ConstDeclaration { .. }
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
         | AstNodeValue::Yield(_)
@@ -1978,6 +1998,101 @@ fn validate_assignment_lhs(lhs: &AstNode<'_>) -> Result<(), TypecheckError> {
         | AstNodeValue::CellLiteral(_) => {
             Err(TypecheckError::IllegalAssignmentLHS(lhs.provenance.clone()))
         }
+    }
+}
+
+// Factored into its own function so it can be called at the top levle
+fn typecheck_const<'a>(
+    context: &TypecheckContext,
+    outer_scopes: &[&HashMap<String, (AnyID, ExpressionType)>],
+    current_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
+    node: &'a AstNode<'a>,
+) -> Result<&'a ExpressionType, TypecheckError> {
+    let AstNodeValue::ConstDeclaration {
+        name,
+        type_hint,
+        value,
+        variable_id,
+    } = &node.value
+    else {
+        unreachable!()
+    };
+    let value_ty = typecheck_expression(value, outer_scopes, current_scope, context, None)?;
+    let mut result = Ok(());
+    if !validate_is_const(value) {
+        merge_results(
+            &mut result,
+            Err(TypecheckError::NonConstantInConst(value.provenance.clone())),
+        );
+    }
+    if let Some(type_hint) = type_hint {
+        let hint_ty = resolve_type_expr(&context.top_level_type_names, type_hint)?;
+        merge_results(
+            &mut result,
+            assert_assignable_to(context.declarations, &hint_ty, value_ty),
+        );
+        type_hint.ty.set(hint_ty.clone()).unwrap();
+        current_scope.insert(name.clone(), ((*variable_id).into(), hint_ty));
+    } else {
+        current_scope.insert(name.clone(), ((*variable_id).into(), value_ty.clone()));
+    }
+    result?;
+
+    node.ty
+        .set(ExpressionType::Void)
+        .expect("each constant should be visited once");
+
+    Ok(node.ty.get().expect("just set"))
+}
+
+fn validate_is_const(node: &AstNode) -> bool {
+    match &node.value {
+        AstNodeValue::FunctionDeclaration(_)
+        | AstNodeValue::ExternFunctionBinding(_)
+        | AstNodeValue::StructDeclaration(_)
+        | AstNodeValue::UnionDeclaration(_)
+        | AstNodeValue::InterfaceDeclaration(_)
+        | AstNodeValue::RequiredFunction(_)
+        | AstNodeValue::Declaration(_, _, _, _)
+        | AstNodeValue::BorrowDeclaration(_, _, _)
+        | AstNodeValue::ConstDeclaration { .. }
+        | AstNodeValue::Import(_)
+        | AstNodeValue::Return(_)
+        | AstNodeValue::Yield(_)
+        | AstNodeValue::Null
+        | AstNodeValue::Statement(_)
+        | AstNodeValue::UnaryExpr(_, _)
+        | AstNodeValue::BinExpr(_, _, _)
+        | AstNodeValue::If(_)
+        | AstNodeValue::While(_, _)
+        | AstNodeValue::Loop(_)
+        | AstNodeValue::Call(_, _)
+        | AstNodeValue::TakeUnique(_)
+        | AstNodeValue::TakeRef(_)
+        | AstNodeValue::ReferenceCountLiteral(_)
+        | AstNodeValue::CellLiteral(_)
+        | AstNodeValue::Block(_)
+        | AstNodeValue::Deref(_)
+        | AstNodeValue::Match(_)
+        | AstNodeValue::VoidType
+        | AstNodeValue::UniqueType(_)
+        | AstNodeValue::SharedType(_)
+        | AstNodeValue::ArrayType(_)
+        | AstNodeValue::DictType(_, _)
+        | AstNodeValue::RcType(_)
+        | AstNodeValue::NullableType(_)
+        | AstNodeValue::CellType(_)
+        | AstNodeValue::GeneratorType { .. }
+        | AstNodeValue::Name { .. } => false,
+        AstNodeValue::Int(_)
+        | AstNodeValue::Float(_)
+        | AstNodeValue::Bool(_)
+        | AstNodeValue::CharLiteral(_)
+        | AstNodeValue::StringLiteral(_)
+        | AstNodeValue::RecordLiteral { .. }
+        | AstNodeValue::DictLiteral(_)
+        | AstNodeValue::ArrayLiteral(_)
+        | AstNodeValue::ArrayLiteralLength(_, _) => true,
     }
 }
 
@@ -2052,6 +2167,7 @@ fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
         | AstNodeValue::InterfaceDeclaration(_)
         | AstNodeValue::RequiredFunction(_)
         | AstNodeValue::Declaration(_, _, _, _)
+        | AstNodeValue::ConstDeclaration { .. }
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
         | AstNodeValue::Yield(_)

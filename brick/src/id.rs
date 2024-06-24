@@ -10,6 +10,7 @@ pub enum AnyID {
     Type(TypeID),
     Variable(VariableID),
     Function(FunctionID),
+    Constant(ConstantID),
 }
 
 impl AnyID {
@@ -53,6 +54,12 @@ impl From<FunctionID> for AnyID {
     }
 }
 
+impl From<ConstantID> for AnyID {
+    fn from(value: ConstantID) -> Self {
+        AnyID::Constant(value)
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NodeID(u32);
 
@@ -84,6 +91,17 @@ impl VariableID {
     pub fn new() -> Self {
         static VARIABLE_COUNTER: AtomicUsize = AtomicUsize::new(1);
         Self(VARIABLE_COUNTER.fetch_add(1, Ordering::Relaxed) as u32)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ConstantID(u32);
+
+impl ConstantID {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        static CONSTANT_COUNTER: AtomicUsize = AtomicUsize::new(1);
+        Self(CONSTANT_COUNTER.fetch_add(1, Ordering::Relaxed) as u32)
     }
 }
 

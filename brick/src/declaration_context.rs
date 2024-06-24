@@ -540,6 +540,7 @@ pub fn resolve_type_expr(
         | AstNodeValue::UnionDeclaration(_)
         | AstNodeValue::InterfaceDeclaration(_)
         | AstNodeValue::Declaration(_, _, _, _)
+        | AstNodeValue::ConstDeclaration { .. }
         | AstNodeValue::Import(_)
         | AstNodeValue::Return(_)
         | AstNodeValue::Yield(_)

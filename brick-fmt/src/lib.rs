@@ -159,6 +159,22 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             write_node(value, result, indent);
             result.push(';');
         }
+        AstNodeValue::ConstDeclaration {
+            name,
+            type_hint,
+            value,
+            variable_id: _,
+        } => {
+            result.push_str("const ");
+            result.push_str(name.as_str());
+            if let Some(ty) = type_hint {
+                result.push_str(": ");
+                write_node(ty, result, indent);
+            }
+            result.push_str(" = ");
+            write_node(value, result, indent);
+            result.push(';');
+        }
         AstNodeValue::BorrowDeclaration(name, value, _) => {
             result.push_str("borrow ");
             result.push_str(name.as_str());

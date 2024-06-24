@@ -167,7 +167,7 @@ fn lower_function(
     }
 }
 
-fn lower_node(decls: &DeclarationContext, node: &AstNode<'_>) -> HirNode {
+pub fn lower_node(decls: &DeclarationContext, node: &AstNode<'_>) -> HirNode {
     let value = match &node.value {
         AstNodeValue::Int(x) => HirNodeValue::Int(*x),
         AstNodeValue::Float(x) => HirNodeValue::Float(*x),
@@ -573,6 +573,9 @@ fn lower_node(decls: &DeclarationContext, node: &AstNode<'_>) -> HirNode {
             ];
             HirNodeValue::Sequence(statements)
         }
+
+        // Essentially strip constant declarations out when lowering
+        AstNodeValue::ConstDeclaration { .. } => HirNodeValue::Sequence(vec![]),
 
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::ExternFunctionBinding(_)
