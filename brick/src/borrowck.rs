@@ -190,6 +190,7 @@ fn borrow_check_block<'a>(
 ) -> Result<(), LifetimeError> {
     // Merge parent states into a new state
     let mut var_state = HashMap::new();
+    let mut borrow_state = HashMap::new();
     let first_node_in_child = cfg.node_weight(block_idx).unwrap().first_node();
     for incoming_edge in cfg.edges_directed(block_idx, Direction::Incoming) {
         let parent = cfg
@@ -204,9 +205,16 @@ fn borrow_check_block<'a>(
                 })
                 .or_insert(parent_state.clone());
         }
+        for (var_id, parent_state) in parent.borrow_state.iter() {
+            borrow_state
+                .entry(*var_id)
+                .and_modify(|child_state| merge_borrow_states(parent_state, child_state))
+                .or_insert(parent_state.clone());
+        }
     }
     let block = cfg.node_weight_mut(block_idx).unwrap();
     block.life_state_mut().var_state = var_state;
+    block.life_state_mut().borrow_state = borrow_state;
     // Analyze contained blocks
     let result = match block {
         CfgNode::Block {
@@ -263,6 +271,27 @@ fn merge_var_states(
         (VariableLifeState::Moved(_, _), VariableLifeState::Used(_, _)) => {
             *child = parent.clone();
         }
+    }
+}
+
+fn merge_borrow_states(parent: &BorrowState, child: &mut BorrowState) {
+    match (&parent.state, &mut child.state) {
+        (_, BorrowLifeState::ValueMoved(_) | BorrowLifeState::ValueReassigned(_)) => {
+            // already invalidated
+        }
+        (
+            BorrowLifeState::ValueMoved(_)
+            | BorrowLifeState::ValueReassigned(_)
+            | BorrowLifeState::MutableRefTaken(_),
+            _,
+        ) => {
+            *child = parent.clone();
+        }
+        (BorrowLifeState::Initialized, _) | (_, BorrowLifeState::Initialized) => unreachable!(),
+        (
+            BorrowLifeState::Assigned { .. },
+            BorrowLifeState::Assigned { .. } | BorrowLifeState::MutableRefTaken(_),
+        ) => {}
     }
 }
 

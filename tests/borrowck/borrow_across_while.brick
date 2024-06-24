@@ -1,0 +1,18 @@
+// Int | 1
+
+struct Outer {
+    inner: Inner,
+}
+
+struct Inner {
+    value: i32,
+}
+
+fn tick(state: unique Outer) {
+    borrow inner = ref state.inner;
+    let tile_x = 0;
+    while tile_x < inner.value{
+    }
+}
+
+1
