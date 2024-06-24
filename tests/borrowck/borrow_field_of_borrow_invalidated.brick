@@ -1,0 +1,13 @@
+// NoCompile
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+let p = Point { x: 10, y: 20 };
+borrow p1 = unique p;
+borrow p2 = unique p;
+borrow x = unique p1.x;
+borrow y = ref p1.y;
+*x -= 5;
+p.x + p.y

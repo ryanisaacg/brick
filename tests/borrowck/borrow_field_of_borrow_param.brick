@@ -1,0 +1,14 @@
+// Int | 25
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+fn length(x: unique i32, y: ref i32): i32 {
+    *x -= 5;
+    *x + *y
+}
+
+let p = Point { x: 10, y: 20 };
+borrow p_ = unique p;
+length(unique p_.x, ref p_.y)

@@ -1,3 +1,4 @@
+// Int | 25
 struct Point {
     x: i32,
     y: i32,

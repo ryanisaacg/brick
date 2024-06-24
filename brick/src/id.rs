@@ -76,6 +76,10 @@ impl NodeID {
 pub struct VariableID(u32);
 
 impl VariableID {
+    pub fn dummy() -> VariableID {
+        VariableID(0)
+    }
+
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         static VARIABLE_COUNTER: AtomicUsize = AtomicUsize::new(1);
