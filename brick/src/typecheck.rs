@@ -864,7 +864,8 @@ fn typecheck_expression<'a>(
             }
         }
         AstNodeValue::Float(constant) => {
-            if *constant as f32 as f64 == *constant {
+            const ACCEPTABLE_DIFF: f64 = 0.0000001;
+            if (*constant as f32 as f64 - *constant).abs() <= ACCEPTABLE_DIFF {
                 ExpressionType::Primitive(PrimitiveType::Float32)
             } else {
                 ExpressionType::Primitive(PrimitiveType::Float64)
