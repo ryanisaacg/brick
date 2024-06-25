@@ -1,15 +1,15 @@
+use std::env;
+
 use brick::SourceFile;
 use brick_wasm_backend::compile;
 
 fn main() {
-    let module = compile(
-        vec![SourceFile {
-            filename: "example.brick",
-            module_name: "main",
-            contents: std::fs::read_to_string("example.brick").unwrap(),
-        }],
-        true,
-    )
-    .unwrap();
-    std::fs::write("example.wasm", module.as_slice()).unwrap();
+    let mut args = env::args();
+    args.next(); // skip binary name
+    let sources: Vec<_> = args
+        .map(|arg| SourceFile::from_filename(String::leak(arg) as &'static str).unwrap())
+        .collect();
+
+    let module = compile(sources, true).unwrap();
+    std::fs::write("out.wasm", module.as_slice()).unwrap();
 }

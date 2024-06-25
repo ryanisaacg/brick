@@ -9,3 +9,10 @@ edition = "2021"
 wasm-encoder = "0.206.0"
 brick = { path = "../brick" }
 
+[lib]
+name = "brick_wasm_backend"
+path = "src/lib.rs"
+
+[[bin]]
+name = "brick_wasmc"
+path = "src/main.rs"

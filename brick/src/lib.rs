@@ -65,6 +65,23 @@ pub struct SourceFile {
     pub contents: String,
 }
 
+impl SourceFile {
+    pub fn from_filename(filename: &'static str) -> io::Result<SourceFile> {
+        let after_last_slash = filename
+            .rfind(std::path::MAIN_SEPARATOR)
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        let dot = filename.find('.').unwrap_or(filename.len());
+        let module_name = &filename[after_last_slash..dot];
+        let contents = std::fs::read_to_string(filename)?;
+        Ok(SourceFile {
+            filename,
+            module_name,
+            contents,
+        })
+    }
+}
+
 pub fn interpret_code(
     sources: Vec<SourceFile>,
     bindings: Vec<(&str, ExternBinding)>,

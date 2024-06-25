@@ -190,20 +190,7 @@ fn main() -> anyhow::Result<()> {
 fn get_module(engine: &Engine, files: &[&'static str]) -> anyhow::Result<Module> {
     let source_files = files
         .iter()
-        .map(|filename| -> anyhow::Result<SourceFile> {
-            let after_last_slash = filename
-                .rfind(std::path::MAIN_SEPARATOR)
-                .map(|idx| idx + 1)
-                .unwrap_or(0);
-            let dot = filename.find('.').unwrap_or(filename.len());
-            let module_name = &filename[after_last_slash..dot];
-            let contents = std::fs::read_to_string(filename)?;
-            Ok(SourceFile {
-                filename,
-                module_name,
-                contents,
-            })
-        })
+        .map(|filename| -> anyhow::Result<SourceFile> { Ok(SourceFile::from_filename(filename)?) })
         .collect::<Result<Vec<_>, _>>()?;
     let binary = compile(source_files, true)?;
     Module::from_binary(engine, binary.as_slice())
