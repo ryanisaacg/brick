@@ -1,0 +1,13 @@
+[package]
+name = "brick-wasmc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+brick = { path = "../brick" }
+brick-wasm-backend = { path = "../brick-wasm-backend" }
+
+[build-dependencies]
+brick-browser-runtime = { path = "../brick-browser-runtime" }

@@ -6,7 +6,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use linked_list_allocator::LockedHeap as Heap;
 
 #[no_mangle]
-pub unsafe fn brick_runtime_init(heap_start: *mut u8, size: usize) -> *mut Heap {
+pub unsafe extern "C" fn brick_runtime_init(heap_start: *mut u8, size: usize) -> *mut Heap {
     let heap = Heap::empty();
     heap.lock().init(heap_start, size);
 
@@ -15,12 +15,12 @@ pub unsafe fn brick_runtime_init(heap_start: *mut u8, size: usize) -> *mut Heap 
             .unwrap(),
     ) as *mut Heap;
     *memory_region = heap;
+
     memory_region
 }
 
 const LAYOUT_SIZE: usize = core::mem::size_of::<Layout>();
 
-// TODO: take alignment as a parameter?
 #[no_mangle]
 pub unsafe extern "C" fn brick_runtime_alloc(
     allocator: *mut u8,
@@ -81,6 +81,7 @@ pub unsafe extern "C" fn brick_runtime_dealloc(allocator: *mut u8, region: *mut 
     heap.dealloc(region, layout)
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn brick_string_concat(
     allocator: *mut u8,
     a_ptr: *const u8,
@@ -100,6 +101,7 @@ pub unsafe extern "C" fn brick_string_concat(
     memory_region
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn brick_memcpy(dest: *mut u8, src: *const u8, len: usize) {
     let dest_slice = core::slice::from_raw_parts_mut(dest, len);
     let src_slice = core::slice::from_raw_parts(src, len);

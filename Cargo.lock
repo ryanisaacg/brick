@@ -111,6 +111,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "brick-browser-runtime"
+version = "0.1.0"
+dependencies = [
+ "brick-runtime",
+]
+
+[[package]]
 name = "brick-fmt"
 version = "0.1.0"
 dependencies = [
@@ -145,6 +152,15 @@ version = "0.1.0"
 dependencies = [
  "brick",
  "wasm-encoder 0.206.0",
+]
+
+[[package]]
+name = "brick-wasmc"
+version = "0.1.0"
+dependencies = [
+ "brick",
+ "brick-browser-runtime",
+ "brick-wasm-backend",
 ]
 
 [[package]]
