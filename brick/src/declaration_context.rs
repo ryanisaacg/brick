@@ -11,7 +11,7 @@ use crate::{
         CollectionType, FuncType, InterfaceType, ModuleType, PointerKind, PrimitiveType,
         StructType, TypecheckError, UnionType,
     },
-    ExpressionType, TypeDeclaration,
+    ExpressionType, SourceRange, TypeDeclaration,
 };
 use std::{
     collections::HashMap,
@@ -33,8 +33,8 @@ pub struct DeclarationContext {
 }
 
 impl DeclarationContext {
-    pub fn new<'a>(
-        files: impl Iterator<Item = (&'static str, &'a [AstNode<'a>])>,
+    pub fn new(
+        files: &[(&'static str, Vec<AstNode<'_>>)],
     ) -> Result<DeclarationContext, TypecheckError> {
         let mut ctx = DeclarationContext {
             intrinsic_module: FileDeclarations::new(),
@@ -49,10 +49,16 @@ impl DeclarationContext {
             extern_function_bindings: Vec::new(),
             extern_function_exports: Vec::new(),
         };
+
+        for (name, source) in files {
+            ctx.assign_ids_to_names(name, source);
+        }
+
         let mut results = Ok(());
         for (name, source) in files {
-            merge_results(&mut results, ctx.insert_file(name, source));
+            merge_results(&mut results, ctx.fill_in_file_type_info(name, source));
         }
+
         add_intrinsics(&mut ctx);
         ctx.propagate_viral_types();
 
@@ -60,11 +66,7 @@ impl DeclarationContext {
         Ok(ctx)
     }
 
-    fn insert_file(
-        &mut self,
-        module_name: &'static str,
-        source: &[AstNode<'_>],
-    ) -> Result<(), TypecheckError> {
+    fn assign_ids_to_names(&mut self, module_name: &'static str, source: &[AstNode<'_>]) {
         let module = match self.files.get_mut(module_name) {
             Some(module) => module,
             None => {
@@ -80,28 +82,114 @@ impl DeclarationContext {
                 self.files.get_mut(module_name).unwrap()
             }
         };
-        let mut names_to_declarations = HashMap::new();
+        let TypeDeclaration::Module(module_decl) =
+            self.id_to_decl.get_mut(&module.module_id).unwrap()
+        else {
+            unreachable!()
+        };
+
         for statement in source.iter() {
             match &statement.value {
                 AstNodeValue::StructDeclaration(StructDeclarationValue { name, .. })
                 | AstNodeValue::UnionDeclaration(UnionDeclarationValue { name, .. })
-                | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue { name, .. })
-                | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
+                | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue { name, .. }) => {
+                    module_decl.exports.insert(
+                        name.clone(),
+                        ExpressionType::ReferenceToType(module.new_type_id()),
+                    );
+                }
+                AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
                 | AstNodeValue::ExternFunctionBinding(FunctionHeaderValue { name, .. }) => {
-                    names_to_declarations.insert(name.clone(), statement);
+                    module_decl.exports.insert(
+                        name.clone(),
+                        ExpressionType::ReferenceToFunction(module.new_func_id()),
+                    );
                 }
                 _ => {}
             }
         }
+    }
 
-        resolve_top_level_declarations(
-            module,
-            names_to_declarations,
-            &mut self.id_to_decl,
-            &mut self.id_to_func,
-            &mut self.extern_function_bindings,
-            &mut self.extern_function_exports,
-        )
+    fn fill_in_file_type_info(
+        &mut self,
+        module_name: &'static str,
+        source: &[AstNode<'_>],
+    ) -> Result<(), TypecheckError> {
+        let file = self.files.get_mut(module_name).unwrap();
+        let mut names_to_type_id = HashMap::new();
+        let TypeDeclaration::Module(module) = &self.id_to_decl[&file.module_id] else {
+            unreachable!()
+        };
+        for (name, expr) in module.exports.iter() {
+            if let ExpressionType::ReferenceToType(ty_id) = expr {
+                names_to_type_id.insert(name.as_str(), *ty_id);
+            }
+        }
+
+        let mut result = Ok(());
+        let mut declarations = Vec::new();
+        for statement in source.iter() {
+            let decl = match &statement.value {
+                AstNodeValue::StructDeclaration(decl) => merge_results_or_value(
+                    &mut result,
+                    fill_in_struct_info(
+                        &names_to_type_id,
+                        file,
+                        &mut self.id_to_func,
+                        decl,
+                        &statement.provenance,
+                    ),
+                ),
+                AstNodeValue::UnionDeclaration(decl) => merge_results_or_value(
+                    &mut result,
+                    fill_in_union_decl(&names_to_type_id, decl, &statement.provenance),
+                ),
+                AstNodeValue::InterfaceDeclaration(decl) => merge_results_or_value(
+                    &mut result,
+                    fill_in_interface_decl(&names_to_type_id, file, &mut self.id_to_func, decl),
+                ),
+                _ => None,
+            };
+            if let Some(decl) = decl {
+                declarations.push(decl);
+            }
+            let func = match &statement.value {
+                AstNodeValue::ExternFunctionBinding(func) => {
+                    let id = get_id_for_func_name(file, &self.id_to_decl, func.name.as_str());
+                    self.extern_function_bindings.push((func.name.clone(), id));
+                    merge_results_or_value(
+                        &mut result,
+                        fill_in_fn_header(
+                            &names_to_type_id,
+                            id,
+                            func,
+                            false,
+                            &statement.provenance,
+                        ),
+                    )
+                }
+                AstNodeValue::FunctionDeclaration(func) => {
+                    let id = get_id_for_func_name(file, &self.id_to_decl, func.name.as_str());
+                    if func.is_extern {
+                        self.extern_function_exports.push((func.name.clone(), id));
+                    }
+                    merge_results_or_value(
+                        &mut result,
+                        fill_in_fn_decl(&names_to_type_id, id, func, false, &statement.provenance),
+                    )
+                }
+                _ => None,
+            };
+            if let Some(func) = func {
+                self.id_to_func.insert(func.id, func);
+            }
+        }
+
+        for decl in declarations {
+            self.id_to_decl.insert(decl.id(), decl);
+        }
+
+        result
     }
 
     fn propagate_viral_types(&mut self) {
@@ -201,288 +289,230 @@ fn is_decl_affine(
     is_children_affine
 }
 
-fn resolve_top_level_declarations(
-    module: &mut FileDeclarations,
-    names_to_declarations: HashMap<String, &AstNode<'_>>,
-    id_to_decl: &mut HashMap<TypeID, TypeDeclaration>,
-    id_to_func: &mut HashMap<FunctionID, FuncType>,
-    extern_function_bindings: &mut Vec<(String, FunctionID)>,
-    extern_function_exports: &mut Vec<(String, FunctionID)>,
-) -> Result<(), TypecheckError> {
-    let name_to_type_id = names_to_declarations
-        .keys()
-        .map(|name| (name.as_str(), module.new_type_id()))
-        .collect();
-    let mut decl_result = Ok(());
+fn get_id_for_func_name(
+    module: &FileDeclarations,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
+    name: &str,
+) -> FunctionID {
+    let TypeDeclaration::Module(module) = &id_to_decl[&module.module_id] else {
+        unreachable!()
+    };
+    let ExpressionType::ReferenceToFunction(func_id) = &module.exports[name] else {
+        unreachable!()
+    };
+    *func_id
+}
 
-    for (name, node) in names_to_declarations.iter() {
-        if is_node_function(node) {
-            let fn_id = merge_results_or_value(
-                &mut decl_result,
-                resolve_function(module, &name_to_type_id, node, false, id_to_func),
-            );
-            if let Some(fn_id) = fn_id {
-                let TypeDeclaration::Module(module_decl) =
-                    id_to_decl.get_mut(&module.module_id).unwrap()
-                else {
-                    unreachable!()
-                };
-                module_decl
-                    .exports
-                    .insert(name.clone(), ExpressionType::ReferenceToFunction(fn_id));
-                if matches!(&node.value, AstNodeValue::ExternFunctionBinding(_)) {
-                    extern_function_bindings.push((name.clone(), fn_id));
-                }
-                if matches!(
-                    &node.value,
-                    AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-                        is_extern: true,
-                        ..
-                    })
+fn fill_in_struct_info(
+    names_to_type_id: &HashMap<&str, TypeID>,
+    module: &FileDeclarations,
+    id_to_func: &mut HashMap<FunctionID, FuncType>,
+    decl: &StructDeclarationValue,
+    provenance: &SourceRange,
+) -> Result<TypeDeclaration, TypecheckError> {
+    let fields: HashMap<_, _> = merge_result_list(decl.fields.iter().map(
+        |NameAndType {
+             name,
+             ty,
+             provenance,
+         }| {
+            let ty = resolve_type_expr(names_to_type_id, ty)?;
+            if matches!(ty, ExpressionType::Pointer(_, _)) {
+                return Err(TypecheckError::IllegalReferenceInsideDataType(
+                    provenance.clone(),
+                ));
+            }
+            Ok((name.clone(), ty))
+        },
+    ))?;
+
+    let mut result = Ok(());
+
+    let mut associated_functions = HashMap::new();
+    for node in decl.associated_functions.iter() {
+        match &node.value {
+            AstNodeValue::FunctionDeclaration(func) => {
+                let func_id = module.new_func_id();
+                associated_functions.insert(func.name.clone(), func_id);
+                if let Some(func_type) = merge_results_or_value(
+                    &mut result,
+                    fill_in_fn_decl(names_to_type_id, func_id, func, true, &node.provenance),
                 ) {
-                    extern_function_exports.push((name.clone(), fn_id));
+                    id_to_func.insert(func_id, func_type);
                 }
             }
-        } else {
-            let decl = merge_results_or_value(
-                &mut decl_result,
-                resolve_declaration(module, &name_to_type_id, node, id_to_func),
-            );
-            if let Some(declaration) = decl {
-                let TypeDeclaration::Module(module_decl) =
-                    id_to_decl.get_mut(&module.module_id).unwrap()
-                else {
-                    unreachable!()
-                };
-                module_decl.exports.insert(
-                    name.clone(),
-                    ExpressionType::ReferenceToType(declaration.id()),
+            _ => panic!("Associated function should not be anything but function declaration"),
+        }
+    }
+
+    let mut is_affine = false;
+    for property in decl.properties.iter() {
+        match property.as_str() {
+            "Move" => is_affine = true,
+            _ => {
+                merge_results(
+                    &mut result,
+                    Err(TypecheckError::UnknownProperty(
+                        property.clone(),
+                        provenance.clone(),
+                    )),
                 );
-                id_to_decl.insert(declaration.id(), declaration);
             }
         }
     }
 
-    decl_result
+    result?;
+
+    Ok(TypeDeclaration::Struct(StructType {
+        id: names_to_type_id[decl.name.as_str()],
+        fields,
+        associated_functions,
+        is_affine,
+    }))
 }
 
-fn is_node_function(node: &AstNode<'_>) -> bool {
-    matches!(
-        &node.value,
-        AstNodeValue::FunctionDeclaration(_)
-            | AstNodeValue::RequiredFunction(_)
-            | AstNodeValue::ExternFunctionBinding(_)
-    )
-}
-
-fn resolve_function(
-    module: &FileDeclarations,
+fn fill_in_interface_decl(
     names_to_type_id: &HashMap<&str, TypeID>,
-    node: &AstNode<'_>,
-    is_associated: bool,
-    id_to_func: &mut HashMap<FunctionID, FuncType>,
-) -> Result<FunctionID, TypecheckError> {
-    let func_type = match &node.value {
-        AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-            params,
-            returns,
-            is_coroutine,
-            ..
-        }) => FuncType {
-            id: module.new_func_id(),
-            type_param_count: 0,
-            params: params
-                .iter()
-                .map(|(_, NameAndType { ty: type_, .. })| {
-                    resolve_type_expr(names_to_type_id, type_)
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-            returns: returns
-                .as_ref()
-                .map(|returns| resolve_type_expr(names_to_type_id, returns))
-                .unwrap_or(Ok(ExpressionType::Void))?,
-            is_associated,
-            is_coroutine: *is_coroutine,
-            provenance: Some(node.provenance.clone()),
-        },
-        AstNodeValue::RequiredFunction(FunctionHeaderValue {
-            params, returns, ..
-        })
-        | AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
-            params, returns, ..
-        }) => FuncType {
-            id: module.new_func_id(),
-            type_param_count: 0,
-            params: params
-                .iter()
-                .map(|NameAndType { ty: type_, .. }| resolve_type_expr(names_to_type_id, type_))
-                .collect::<Result<Vec<_>, _>>()?,
-            returns: returns
-                .as_ref()
-                .map(|returns| resolve_type_expr(names_to_type_id, returns))
-                .unwrap_or(Ok(ExpressionType::Void))?,
-            is_associated,
-            is_coroutine: false,
-            provenance: Some(node.provenance.clone()),
-        },
-        other => panic!("ICE: illegal non-function decl {other:?}"),
-    };
-    let id = func_type.id;
-    id_to_func.insert(func_type.id, func_type);
-
-    Ok(id)
-}
-
-fn resolve_declaration(
     module: &FileDeclarations,
-    names_to_type_id: &HashMap<&str, TypeID>,
-    node: &AstNode<'_>,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
+    interface: &InterfaceDeclarationValue,
 ) -> Result<TypeDeclaration, TypecheckError> {
-    Ok(match &node.value {
-        AstNodeValue::StructDeclaration(StructDeclarationValue {
-            fields,
-            associated_functions,
-            name,
-            properties,
-        }) => {
-            let fields: HashMap<_, _> = merge_result_list(fields.iter().map(
-                |NameAndType {
-                     name,
-                     ty,
-                     provenance,
-                 }| {
-                    let ty = resolve_type_expr(names_to_type_id, ty)?;
-                    if matches!(ty, ExpressionType::Pointer(_, _)) {
-                        return Err(TypecheckError::IllegalReferenceInsideDataType(
-                            provenance.clone(),
-                        ));
-                    }
-                    Ok((name.clone(), ty))
-                },
-            ))?;
-            let associated_functions = associated_functions
-                .iter()
-                .map(|node| {
-                    Ok(match &node.value {
-                        AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-                            name,
-                            ..
-                        }) => (
-                            name.clone(),
-                            resolve_function(module, names_to_type_id, node, true, id_to_func)?,
-                        ),
-                        _ => panic!(
-                            "Associated function should not be anything but function declaration"
-                        ),
-                    })
-                })
-                .collect::<Result<HashMap<_, _>, _>>()?;
-            let mut is_affine = false;
-            for property in properties.iter() {
-                match property.as_str() {
-                    "Move" => is_affine = true,
-                    _ => {
-                        return Err(TypecheckError::UnknownProperty(
-                            property.clone(),
-                            node.provenance.clone(),
-                        ))
-                    }
-                }
+    let mut associated_functions = HashMap::new();
+
+    let mut results = Ok(());
+    for node in interface.associated_functions.iter() {
+        let func_id = module.new_func_id();
+
+        let func_type = match &node.value {
+            AstNodeValue::RequiredFunction(func) => {
+                associated_functions.insert(func.name.clone(), func_id);
+                fill_in_fn_header(names_to_type_id, func_id, func, true, &node.provenance)
             }
-
-            TypeDeclaration::Struct(StructType {
-                id: names_to_type_id[name.as_str()],
-                fields,
-                associated_functions,
-                is_affine,
-            })
-        }
-        AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
-            associated_functions,
-            name,
-            ..
-        }) => {
-            let associated_functions = associated_functions
-                .iter()
-                .map(|node| {
-                    Ok(match &node.value {
-                        AstNodeValue::RequiredFunction(FunctionHeaderValue { name, .. }) => (
-                            name.clone(),
-                            resolve_function(module, names_to_type_id, node, true, id_to_func)?,
-                        ),
-                        AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
-                            name,
-                            ..
-                        }) => (
-                            name.clone(),
-                            resolve_function(module, names_to_type_id, node, true, id_to_func)?,
-                        ),
-                        _ => panic!(
-                            "Associated function should not be anything but function declaration"
-                        ),
-                    })
-                })
-                .collect::<Result<HashMap<_, _>, _>>()?;
-
-            TypeDeclaration::Interface(InterfaceType {
-                id: names_to_type_id[name.as_str()],
-                associated_functions,
-            })
-        }
-        AstNodeValue::UnionDeclaration(UnionDeclarationValue {
-            variants: variant_ast,
-            name,
-            properties,
-        }) => {
-            let variants = merge_result_list(variant_ast.iter().map(|variant| {
-                Ok(match variant {
-                    UnionDeclarationVariant::WithValue(NameAndType {
-                        name,
-                        ty,
-                        provenance,
-                    }) => {
-                        let ty = resolve_type_expr(names_to_type_id, ty)?;
-                        if matches!(ty, ExpressionType::Pointer(_, _)) {
-                            return Err(TypecheckError::IllegalReferenceInsideDataType(
-                                provenance.clone(),
-                            ));
-                        }
-                        (name.clone(), Some(ty))
-                    }
-                    UnionDeclarationVariant::WithoutValue(name) => (name.clone(), None),
-                })
-            }))?;
-
-            let mut is_affine = false;
-            for property in properties.iter() {
-                match property.as_str() {
-                    "Move" => is_affine = true,
-                    _ => {
-                        return Err(TypecheckError::UnknownProperty(
-                            property.clone(),
-                            node.provenance.clone(),
-                        ))
-                    }
-                }
+            AstNodeValue::FunctionDeclaration(func) => {
+                associated_functions.insert(func.name.clone(), func_id);
+                fill_in_fn_decl(names_to_type_id, func_id, func, true, &node.provenance)
             }
-
-            TypeDeclaration::Union(UnionType {
-                id: names_to_type_id[name.as_str()],
-                variant_order: variant_ast
-                    .iter()
-                    .map(|variant| match variant {
-                        UnionDeclarationVariant::WithValue(name_and_type) => {
-                            name_and_type.name.clone()
-                        }
-                        UnionDeclarationVariant::WithoutValue(name) => name.clone(),
-                    })
-                    .collect(),
-                variants,
-                is_affine,
-            })
+            _ => panic!("Associated function should not be anything but function declaration"),
+        };
+        if let Some(func_type) = merge_results_or_value(&mut results, func_type) {
+            id_to_func.insert(func_id, func_type);
         }
-        _ => panic!("internal compiler error: unexpected decl node"),
+    }
+
+    results?;
+    Ok(TypeDeclaration::Interface(InterfaceType {
+        id: names_to_type_id[interface.name.as_str()],
+        associated_functions,
+    }))
+}
+
+fn fill_in_union_decl(
+    names_to_type_id: &HashMap<&str, TypeID>,
+    UnionDeclarationValue {
+        variants: variant_ast,
+        name,
+        properties,
+    }: &UnionDeclarationValue,
+    provenance: &SourceRange,
+) -> Result<TypeDeclaration, TypecheckError> {
+    let variants = merge_result_list(variant_ast.iter().map(|variant| {
+        Ok(match variant {
+            UnionDeclarationVariant::WithValue(NameAndType {
+                name,
+                ty,
+                provenance,
+            }) => {
+                let ty = resolve_type_expr(names_to_type_id, ty)?;
+                if matches!(ty, ExpressionType::Pointer(_, _)) {
+                    return Err(TypecheckError::IllegalReferenceInsideDataType(
+                        provenance.clone(),
+                    ));
+                }
+                (name.clone(), Some(ty))
+            }
+            UnionDeclarationVariant::WithoutValue(name) => (name.clone(), None),
+        })
+    }))?;
+
+    let mut is_affine = false;
+    for property in properties.iter() {
+        match property.as_str() {
+            "Move" => is_affine = true,
+            _ => {
+                return Err(TypecheckError::UnknownProperty(
+                    property.clone(),
+                    provenance.clone(),
+                ))
+            }
+        }
+    }
+
+    Ok(TypeDeclaration::Union(UnionType {
+        id: names_to_type_id[name.as_str()],
+        variant_order: variant_ast
+            .iter()
+            .map(|variant| match variant {
+                UnionDeclarationVariant::WithValue(name_and_type) => name_and_type.name.clone(),
+                UnionDeclarationVariant::WithoutValue(name) => name.clone(),
+            })
+            .collect(),
+        variants,
+        is_affine,
+    }))
+}
+
+fn fill_in_fn_decl(
+    names_to_type_id: &HashMap<&str, TypeID>,
+    id: FunctionID,
+    FunctionDeclarationValue {
+        params,
+        returns,
+        is_coroutine,
+        ..
+    }: &FunctionDeclarationValue,
+    is_associated: bool,
+    provenance: &SourceRange,
+) -> Result<FuncType, TypecheckError> {
+    Ok(FuncType {
+        id,
+        type_param_count: 0,
+        params: params
+            .iter()
+            .map(|(_, NameAndType { ty: type_, .. })| resolve_type_expr(names_to_type_id, type_))
+            .collect::<Result<Vec<_>, _>>()?,
+        returns: returns
+            .as_ref()
+            .map(|returns| resolve_type_expr(names_to_type_id, returns))
+            .unwrap_or(Ok(ExpressionType::Void))?,
+        is_associated,
+        is_coroutine: *is_coroutine,
+        provenance: Some(provenance.clone()),
+    })
+}
+
+fn fill_in_fn_header(
+    names_to_type_id: &HashMap<&str, TypeID>,
+    id: FunctionID,
+    FunctionHeaderValue {
+        params, returns, ..
+    }: &FunctionHeaderValue,
+    is_associated: bool,
+    provenance: &SourceRange,
+) -> Result<FuncType, TypecheckError> {
+    Ok(FuncType {
+        id,
+        type_param_count: 0,
+        params: params
+            .iter()
+            .map(|NameAndType { ty: type_, .. }| resolve_type_expr(names_to_type_id, type_))
+            .collect::<Result<Vec<_>, _>>()?,
+        returns: returns
+            .as_ref()
+            .map(|returns| resolve_type_expr(names_to_type_id, returns))
+            .unwrap_or(Ok(ExpressionType::Void))?,
+        is_associated,
+        is_coroutine: false,
+        provenance: Some(provenance.clone()),
     })
 }
 

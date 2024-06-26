@@ -237,8 +237,7 @@ pub fn typecheck_module<'a>(
 ) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
-    let declarations =
-        DeclarationContext::new(contents.iter().map(|(name, source)| (*name, &source[..])))?;
+    let declarations = DeclarationContext::new(contents)?;
 
     let module_results = contents
         .par_iter()
