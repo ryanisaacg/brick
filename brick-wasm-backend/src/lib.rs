@@ -108,7 +108,7 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
             mutable: true,
             shared: false,
         },
-        &ConstExpr::i32_const(constant_data_offset),
+        &ConstExpr::i32_const(constant_data_offset + 4),
     );
 
     let mut function_id_to_fn_idx = HashMap::new();
