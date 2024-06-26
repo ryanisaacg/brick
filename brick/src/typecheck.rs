@@ -462,82 +462,25 @@ pub fn typecheck<'ast, 'decl>(
     }
 
     // Insert all the imports
-    for statement in file {
-        let AstNodeValue::Import(path) = &statement.value else {
-            continue;
-        };
-        let mut path_iter = path.iter().peekable();
-        let (mut imported_name, module_id) = if path_iter.next().unwrap() == "self" {
-            let Some(filename) = merge_results_or_value(
-                &mut results,
-                path_iter
-                    .next()
-                    .ok_or(TypecheckError::IllegalImport(statement.provenance.clone())),
-            ) else {
-                continue;
-            };
-            let file = &declarations.files.get(filename.as_str());
-            let Some(file) = merge_results_or_value(
-                &mut results,
-                file.ok_or_else(|| {
-                    TypecheckError::FileNotFound(statement.provenance.clone(), filename.clone())
-                }),
-            ) else {
-                continue;
-            };
-            let module_id = &file.module_id;
-            (filename, module_id)
-        } else {
-            // Should non-self imports grab from local modules? should it work only for packages? not sure
-            todo!("package imports")
-        };
-        let mut imported_value = &declarations.id_to_decl[module_id];
-        let mut was_fn = false;
-        while let Some(current_path) = path_iter.next() {
-            let Some(current_module) = merge_results_or_value(
-                &mut results,
-                imported_value.as_module().ok_or_else(|| {
-                    TypecheckError::ImportPathMustBeModule(statement.provenance.clone())
-                }),
-            ) else {
-                break;
-            };
-            match &current_module.exports[current_path.as_str()] {
-                ExpressionType::ReferenceToType(ty_id) => {
-                    imported_value = &declarations.id_to_decl[ty_id];
-                }
-                ExpressionType::ReferenceToFunction(fn_id) => {
-                    was_fn = true;
-                    // If there are further components in the import path, that's illegal
-                    if path_iter.peek().is_some() {
-                        merge_results(
-                            &mut results,
-                            Err(TypecheckError::ImportPathMustBeModule(
-                                statement.provenance.clone(),
-                            )),
-                        );
-                        break;
-                    } else {
-                        let fn_id = *fn_id;
-                        top_level_function_names.insert(current_path.as_str(), fn_id);
-                        top_level_name_to_expr_type.insert(
-                            current_path.clone(),
-                            (fn_id.into(), ExpressionType::ReferenceToFunction(fn_id)),
-                        );
-                    }
-                }
-                _ => todo!("can't import that yet"),
+    for (name, expr) in module.imports() {
+        match expr {
+            ExpressionType::ReferenceToFunction(fn_id) => {
+                let fn_id = *fn_id;
+                top_level_function_names.insert(name, fn_id);
+                top_level_name_to_expr_type.insert(
+                    name.to_string(),
+                    (fn_id.into(), ExpressionType::ReferenceToFunction(fn_id)),
+                );
             }
-            imported_name = current_path;
-        }
-        // If a function wasn't imported, bring the last type traversed into scope
-        if !was_fn {
-            let ty_id = imported_value.id();
-            top_level_type_names.insert(imported_name.as_str(), ty_id);
-            top_level_name_to_expr_type.insert(
-                imported_name.to_string(),
-                (ty_id.into(), ExpressionType::ReferenceToType(ty_id)),
-            );
+            ExpressionType::ReferenceToType(ty_id) => {
+                let ty_id = *ty_id;
+                top_level_type_names.insert(name, ty_id);
+                top_level_name_to_expr_type.insert(
+                    name.to_string(),
+                    (ty_id.into(), ExpressionType::ReferenceToType(ty_id)),
+                );
+            }
+            _ => unreachable!(),
         }
     }
 

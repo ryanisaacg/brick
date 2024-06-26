@@ -115,7 +115,26 @@ impl DeclarationContext {
         module_name: &'static str,
         source: &[AstNode<'_>],
     ) -> Result<(), TypecheckError> {
+        let mut result = Ok(());
+
+        let mut imports = Vec::new();
+        for statement in source.iter() {
+            let AstNodeValue::Import(path) = &statement.value else {
+                continue;
+            };
+            if let Some((name, expr)) = merge_results_or_value(
+                &mut result,
+                resolve_import(self, path, &statement.provenance),
+            ) {
+                imports.push((name, expr));
+            }
+        }
+
         let file = self.files.get_mut(module_name).unwrap();
+        for (name, expr) in imports {
+            file.imports.insert(name, expr);
+        }
+
         let mut names_to_type_id = HashMap::new();
         let TypeDeclaration::Module(module) = &self.id_to_decl[&file.module_id] else {
             unreachable!()
@@ -125,8 +144,12 @@ impl DeclarationContext {
                 names_to_type_id.insert(name.as_str(), *ty_id);
             }
         }
+        for (name, expr) in file.imports.iter() {
+            if let ExpressionType::ReferenceToType(ty_id) = expr {
+                names_to_type_id.insert(name.as_str(), *ty_id);
+            }
+        }
 
-        let mut result = Ok(());
         let mut declarations = Vec::new();
         for statement in source.iter() {
             let decl = match &statement.value {
@@ -212,6 +235,7 @@ pub struct FileDeclarations {
     pub module_id: TypeID,
     type_id_counter: AtomicU32,
     func_id_counter: AtomicU32,
+    imports: HashMap<String, ExpressionType>,
 }
 
 impl FileDeclarations {
@@ -223,6 +247,7 @@ impl FileDeclarations {
             module_id: TypeID(id, 1),
             type_id_counter: AtomicU32::new(2),
             func_id_counter: AtomicU32::new(1),
+            imports: HashMap::new(),
         }
     }
 
@@ -234,6 +259,10 @@ impl FileDeclarations {
     pub fn new_func_id(&self) -> FunctionID {
         let func_id = self.func_id_counter.fetch_add(1, Ordering::Relaxed);
         FunctionID(self.id, func_id)
+    }
+
+    pub fn imports(&self) -> &HashMap<String, ExpressionType> {
+        &self.imports
     }
 }
 
@@ -301,6 +330,78 @@ fn get_id_for_func_name(
         unreachable!()
     };
     *func_id
+}
+
+fn resolve_import(
+    declarations: &DeclarationContext,
+    path: &[String],
+    provenance: &SourceRange,
+) -> Result<(String, ExpressionType), TypecheckError> {
+    let mut path_iter = path.iter().peekable();
+    let (mut imported_name, module_id) = if path_iter.next().unwrap() == "self" {
+        let filename = path_iter
+            .next()
+            .ok_or(TypecheckError::IllegalImport(provenance.clone()))?;
+        let file = &declarations.files.get(filename.as_str());
+        let file =
+            file.ok_or_else(|| TypecheckError::FileNotFound(provenance.clone(), filename.clone()))?;
+        let module_id = &file.module_id;
+        (filename, module_id)
+    } else {
+        // Should non-self imports grab from local modules? should it work only for packages? not sure
+        todo!("package imports")
+    };
+    let mut imported_value = &declarations.id_to_decl[module_id];
+
+    while let Some(current_path) = path_iter.next() {
+        let current_module = imported_value
+            .as_module()
+            .ok_or_else(|| TypecheckError::ImportPathMustBeModule(provenance.clone()))?;
+        match &current_module.exports[current_path.as_str()] {
+            ExpressionType::ReferenceToType(ty_id) => {
+                match declarations.id_to_decl.get(ty_id) {
+                    Some(decl) => {
+                        imported_value = decl;
+                    }
+                    None => {
+                        // If the given type doesn't have a declaration yet, we can assume it's not
+                        // a module
+                        if path_iter.peek().is_some() {
+                            return Err(TypecheckError::ImportPathMustBeModule(provenance.clone()));
+                        } else {
+                            let ty_id = *ty_id;
+
+                            return Ok((
+                                current_path.clone(),
+                                ExpressionType::ReferenceToType(ty_id),
+                            ));
+                        }
+                    }
+                }
+            }
+            ExpressionType::ReferenceToFunction(fn_id) => {
+                // If there are further components in the import path, that's illegal
+                if path_iter.peek().is_some() {
+                    return Err(TypecheckError::ImportPathMustBeModule(provenance.clone()));
+                } else {
+                    let fn_id = *fn_id;
+
+                    return Ok((
+                        current_path.clone(),
+                        ExpressionType::ReferenceToFunction(fn_id),
+                    ));
+                }
+            }
+            _ => todo!("can't import that yet"),
+        }
+        imported_name = current_path;
+    }
+    // If a function wasn't imported, bring the last type traversed into scope
+    let ty_id = imported_value.id();
+    Ok((
+        imported_name.to_string(),
+        ExpressionType::ReferenceToType(ty_id),
+    ))
 }
 
 fn fill_in_struct_info(
