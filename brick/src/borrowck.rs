@@ -148,8 +148,6 @@ struct VariableState {
 enum VariableLifeState {
     Used(NodeID, Option<SourceRange>),
     Moved(NodeID, Option<SourceRange>),
-    //MovedInParents(HashSet<NodeIndex>),
-    //ParentReferenced,
 }
 
 #[derive(Clone, Debug)]

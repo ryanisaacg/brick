@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use petgraph::stable_graph::NodeIndex;
+use petgraph::{stable_graph::NodeIndex, Direction};
 
 use crate::{
     declaration_context::IntrinsicFunction,
@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     control_flow_graph::{CfgNode, ControlFlowGraph},
-    VariableLifeState,
+    VariableLifeState, VariableState,
 };
 
 #[derive(Debug)]
@@ -22,6 +22,16 @@ pub struct DropPoint {
 }
 
 pub fn calculate_drop_points(
+    cfg: &ControlFlowGraph<'_>,
+    exit: NodeIndex,
+) -> HashMap<NodeID, Vec<DropPoint>> {
+    let mut drop_points = calculate_non_move_drops(cfg, exit);
+    calculate_move_drops(cfg, &mut drop_points);
+
+    drop_points
+}
+
+fn calculate_non_move_drops(
     cfg: &ControlFlowGraph<'_>,
     exit: NodeIndex,
 ) -> HashMap<NodeID, Vec<DropPoint>> {
@@ -47,6 +57,54 @@ pub fn calculate_drop_points(
     }
 
     drop_points
+}
+
+fn calculate_move_drops(
+    cfg: &ControlFlowGraph<'_>,
+    drop_points: &mut HashMap<NodeID, Vec<DropPoint>>,
+) {
+    for node_id in cfg.node_indices() {
+        let node = cfg.node_weight(node_id).unwrap();
+        let node_states = node.life_state();
+        for (var_id, variable) in node_states.var_state.iter() {
+            let var_id = *var_id;
+            let any_parents_move = parent_states_for_var(cfg, node_id, var_id)
+                .any(|parent_var| matches!(parent_var.state, VariableLifeState::Moved(_, _)));
+            let any_parents_dont_move = parent_states_for_var(cfg, node_id, var_id)
+                .any(|parent_var| matches!(parent_var.state, VariableLifeState::Used(_, _)));
+            if any_parents_move && any_parents_dont_move {
+                for parent_var_state in parent_states_for_var(cfg, node_id, var_id) {
+                    let VariableLifeState::Used(last_used, _) = &parent_var_state.state else {
+                        continue;
+                    };
+                    let drop_point = DropPoint {
+                        var_id,
+                        ty: variable.ty.clone(),
+                    };
+                    if let Some(points) = drop_points.get_mut(last_used) {
+                        points.push(drop_point);
+                    } else {
+                        drop_points.insert(*last_used, vec![drop_point]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn parent_states_for_var<'a>(
+    cfg: &'a ControlFlowGraph<'a>,
+    node_id: NodeIndex,
+    var_id: VariableID,
+) -> impl Iterator<Item = &'a VariableState> {
+    cfg.neighbors_directed(node_id, Direction::Incoming)
+        .filter_map(move |parent| {
+            cfg.node_weight(parent)
+                .unwrap()
+                .life_state()
+                .var_state
+                .get(&var_id)
+        })
 }
 
 pub fn insert_drops(

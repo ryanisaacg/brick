@@ -1,0 +1,27 @@
+// Counter | 2
+extern fn incr_test_counter();
+
+struct Data: Move {
+    fn drop(self: unique Data) {
+        incr_test_counter();
+    }
+}
+
+fn drop(x: Data) {}
+
+fn calculate(): Data {
+    let x = Data{};
+
+    let i = 0;
+    while i < 3 {
+        i += 1;
+
+        if i >= 4 {
+            return x;
+        }
+    }
+
+    Data {}
+}
+
+let y = calculate();

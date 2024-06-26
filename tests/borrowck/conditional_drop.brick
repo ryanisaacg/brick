@@ -1,0 +1,16 @@
+// Counter | 1
+extern fn incr_test_counter();
+
+struct Data: Move {
+    fn drop(self: unique Data) {
+        incr_test_counter();
+    }
+}
+
+fn drop(x: Data) {}
+
+let x = Data{};
+
+if false {
+    drop(x);
+}
