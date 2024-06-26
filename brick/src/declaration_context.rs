@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use crate::{
-    multi_error::{merge_result_list, merge_results_or_value},
+    multi_error::{merge_result_list, merge_results, merge_results_or_value},
     parser::{
         AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
         InterfaceDeclarationValue, NameAndType, StructDeclarationValue, UnionDeclarationValue,
@@ -32,14 +32,10 @@ pub struct DeclarationContext {
     pub extern_function_exports: Vec<(String, FunctionID)>,
 }
 
-impl Default for DeclarationContext {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl DeclarationContext {
-    pub fn new() -> DeclarationContext {
+    pub fn new<'a>(
+        files: impl Iterator<Item = (&'static str, &'a [AstNode<'a>])>,
+    ) -> Result<DeclarationContext, TypecheckError> {
         let mut ctx = DeclarationContext {
             intrinsic_module: FileDeclarations::new(),
             files: HashMap::new(),
@@ -53,12 +49,18 @@ impl DeclarationContext {
             extern_function_bindings: Vec::new(),
             extern_function_exports: Vec::new(),
         };
+        let mut results = Ok(());
+        for (name, source) in files {
+            merge_results(&mut results, ctx.insert_file(name, source));
+        }
         add_intrinsics(&mut ctx);
-        ctx
+        ctx.propagate_viral_types();
+
+        results?;
+        Ok(ctx)
     }
 
-    // at some point this interface may have to evolve to support replacing existing contents
-    pub fn insert_file(
+    fn insert_file(
         &mut self,
         module_name: &'static str,
         source: &[AstNode<'_>],
@@ -102,7 +104,7 @@ impl DeclarationContext {
         )
     }
 
-    pub fn propagate_viral_types(&mut self) {
+    fn propagate_viral_types(&mut self) {
         let mut affinity = HashMap::new();
         for decl in self.id_to_decl.values() {
             is_decl_affine(&self.id_to_decl, decl, &mut affinity);

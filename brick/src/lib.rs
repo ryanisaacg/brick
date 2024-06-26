@@ -2,7 +2,6 @@
 
 use declaration_context::FileDeclarations;
 pub use declaration_context::{DeclarationContext, TypeID};
-use multi_error::merge_results;
 use std::{collections::HashMap, io};
 
 use borrowck::LifetimeError;
@@ -238,16 +237,8 @@ pub fn typecheck_module<'a>(
 ) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
-    let mut declarations = DeclarationContext::new();
-    let mut decl_results = Ok(());
-    for (name, source) in contents.iter() {
-        merge_results(
-            &mut decl_results,
-            declarations.insert_file(name, &source[..]),
-        );
-    }
-    declarations.propagate_viral_types();
-    decl_results?;
+    let declarations =
+        DeclarationContext::new(contents.iter().map(|(name, source)| (*name, &source[..])))?;
 
     let module_results = contents
         .par_iter()
