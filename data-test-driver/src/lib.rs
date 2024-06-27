@@ -117,7 +117,7 @@ fn path_display(path: &Path) -> String {
 }
 
 pub fn test_folder(
-    mut path: PathBuf,
+    path: PathBuf,
     check_does_compile: impl Fn(&[&'static str]) -> anyhow::Result<()>
         + Send
         + Sync
@@ -132,43 +132,69 @@ pub fn test_folder(
 ) {
     use rayon::prelude::*;
 
-    path.push("**");
-    path.push("*.brick");
-    let paths: Vec<_> = glob(path.to_str().unwrap()).unwrap().collect();
+    let mut source_files = path.clone();
+    source_files.push("**");
+    source_files.push("*.brick");
+    let mut paths: Vec<_> = glob(source_files.to_str().unwrap())
+        .unwrap()
+        .filter_map(|path| {
+            let path = path.unwrap();
+            if path.to_str().unwrap().contains("package") {
+                None
+            } else {
+                Some((path.clone(), vec![path]))
+            }
+        })
+        .collect();
+
+    let mut packages = path.clone();
+    packages.push("packages");
+    packages.push("**");
+    packages.push("main.brick");
+    for root in glob(packages.to_str().unwrap()).unwrap() {
+        let root = root.unwrap();
+        let sources = std::fs::read_dir(root.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        paths.push((root, sources));
+    }
 
     let results: Vec<_> = paths
         .into_par_iter()
-        .map(|entry| {
-            let path = entry.unwrap();
-            let contents = fs::read_to_string(&path).unwrap();
-            let cloned_path = path.clone();
-            let sources = &[path.to_str().unwrap().to_string().leak() as &'static str];
+        .map(|(root, sources)| {
+            let contents = fs::read_to_string(&root).unwrap();
+            let cloned_path = root.clone();
+            let sources: Vec<_> = sources
+                .into_iter()
+                .map(|path| path.to_str().unwrap().to_string().leak() as &'static str)
+                .collect();
             let result = panic::catch_unwind(|| match parse_intended_result(&contents) {
-                TestExpectation::Compiles => match check_does_compile(sources) {
-                    Ok(_) => TestSuccessOrFailure::Succeeded(path),
-                    Err(error) => TestSuccessOrFailure::FailsToCompile(path, error),
+                TestExpectation::Compiles => match check_does_compile(&sources) {
+                    Ok(_) => TestSuccessOrFailure::Succeeded(root),
+                    Err(error) => TestSuccessOrFailure::FailsToCompile(root, error),
                 },
-                TestExpectation::DoesNotCompile => match check_does_compile(sources) {
-                    Ok(_) => TestSuccessOrFailure::CompiledButShouldnt(path),
-                    Err(_) => TestSuccessOrFailure::Succeeded(path),
+                TestExpectation::DoesNotCompile => match check_does_compile(&sources) {
+                    Ok(_) => TestSuccessOrFailure::CompiledButShouldnt(root),
+                    Err(_) => TestSuccessOrFailure::Succeeded(root),
                 },
                 TestExpectation::Aborts => {
-                    if check_does_compile(sources).is_ok()
-                        && execute(sources, &TestValue::Void).is_err()
+                    if check_does_compile(&sources).is_ok()
+                        && execute(&sources, &TestValue::Void).is_err()
                     {
-                        TestSuccessOrFailure::Succeeded(path)
+                        TestSuccessOrFailure::Succeeded(root)
                     } else {
-                        TestSuccessOrFailure::RanButShouldnt(path)
+                        TestSuccessOrFailure::RanButShouldnt(root)
                     }
                 }
-                TestExpectation::ProducesValue(expected) => match execute(sources, &expected) {
-                    Ok(received) if expected == received => TestSuccessOrFailure::Succeeded(path),
+                TestExpectation::ProducesValue(expected) => match execute(&sources, &expected) {
+                    Ok(received) if expected == received => TestSuccessOrFailure::Succeeded(root),
                     Ok(received) => TestSuccessOrFailure::MismatchedResult {
-                        path,
+                        path: root,
                         expected,
                         received,
                     },
-                    Err(error) => TestSuccessOrFailure::ErroredWhenRun(path, error),
+                    Err(error) => TestSuccessOrFailure::ErroredWhenRun(root, error),
                 },
             });
             let result = match result {

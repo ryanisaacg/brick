@@ -55,7 +55,7 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     }
 
     let mut main_fn_results = Vec::new();
-    if let Some(return_ty) = &statements_ty {
+    if let Some(return_ty) = dbg!(&statements_ty) {
         walk_vals_write_order(&type_layouts, return_ty, 0, &mut |p, _| {
             main_fn_results.push(p)
         });

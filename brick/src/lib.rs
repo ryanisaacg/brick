@@ -130,6 +130,8 @@ pub fn lower_code(
     byte_size: usize,
     pointer_size: usize,
 ) -> Result<LowerResults, CompileError> {
+    let single_source = sources.len() == 1;
+
     let CompilationResults {
         modules,
         mut declarations,
@@ -157,8 +159,10 @@ pub fn lower_code(
         module: FileDeclarations::new(),
     };
 
-    for (_name, module) in modules {
-        statements.push(module.top_level_statements);
+    for (name, module) in modules {
+        if name == "main" || single_source {
+            statements.push(module.top_level_statements);
+        }
         for function in module.functions {
             functions.push(linear_context.linearize_function(&declarations, function));
         }

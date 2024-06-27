@@ -1,0 +1,4 @@
+// Int | 12345
+import self.helper;
+
+helper.helper_fn(12345)
