@@ -130,25 +130,10 @@ pub fn lower_code(
     byte_size: usize,
     pointer_size: usize,
 ) -> Result<LowerResults, CompileError> {
-    let parse_arena = Arena::new();
-    // TODO: return more than one parse error
-    let modules: Vec<_> = sources
-        .into_iter()
-        .map(
-            |SourceFile {
-                 filename,
-                 module_name,
-                 contents,
-             }| {
-                parse_file(&parse_arena, filename, contents).map(|ast| (module_name, ast))
-            },
-        )
-        .collect::<Result<_, _>>()?;
-
     let CompilationResults {
         modules,
         mut declarations,
-    } = typecheck_module(&modules[..])?;
+    } = check_types(sources)?;
 
     let mut type_layouts = HashMap::new();
     layout_types(
@@ -172,11 +157,8 @@ pub fn lower_code(
         module: FileDeclarations::new(),
     };
 
-    for (name, module) in modules {
-        // TODO: execute imported statements?
-        if name == "main" {
-            statements.push(module.top_level_statements);
-        }
+    for (_name, module) in modules {
+        statements.push(module.top_level_statements);
         for function in module.functions {
             functions.push(linear_context.linearize_function(&declarations, function));
         }
@@ -225,11 +207,23 @@ pub struct CompilationResults {
     pub declarations: DeclarationContext,
 }
 
-pub fn check_types(source: &str) -> Result<CompilationResults, CompileError> {
+pub fn check_types(sources: Vec<SourceFile>) -> Result<CompilationResults, CompileError> {
     let parse_arena = Arena::new();
-    let main = parse_file(&parse_arena, "main", source.to_string())?;
+    // TODO: return more than one parse error
+    let modules: Vec<_> = sources
+        .into_iter()
+        .map(
+            |SourceFile {
+                 filename,
+                 module_name,
+                 contents,
+             }| {
+                parse_file(&parse_arena, filename, contents).map(|ast| (module_name, ast))
+            },
+        )
+        .collect::<Result<_, _>>()?;
 
-    typecheck_module(&[("main", main)])
+    typecheck_module(&modules[..])
 }
 
 pub fn typecheck_module<'a>(

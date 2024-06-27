@@ -16,11 +16,10 @@ fn data() {
         working_dir,
         |contents| -> anyhow::Result<()> {
             compile(
-                vec![SourceFile {
-                    module_name: "main",
-                    filename: "main.brick",
-                    contents: contents.to_string(),
-                }],
+                contents
+                    .iter()
+                    .map(|path| SourceFile::from_filename(path).unwrap())
+                    .collect(),
                 false,
             )?;
             Ok(())
@@ -29,11 +28,10 @@ fn data() {
             let counter = Arc::new(Mutex::new(0));
 
             let binary = compile(
-                vec![SourceFile {
-                    module_name: "main",
-                    filename: "main.brick",
-                    contents: contents.to_string(),
-                }],
+                contents
+                    .iter()
+                    .map(|path| SourceFile::from_filename(path).unwrap())
+                    .collect(),
                 false,
             )?
             .finish();

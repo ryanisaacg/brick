@@ -118,8 +118,12 @@ fn path_display(path: &Path) -> String {
 
 pub fn test_folder(
     mut path: PathBuf,
-    check_does_compile: impl Fn(&str) -> anyhow::Result<()> + Send + Sync + UnwindSafe + RefUnwindSafe,
-    execute: impl (Fn(&str, &TestValue) -> anyhow::Result<TestValue>)
+    check_does_compile: impl Fn(&[&'static str]) -> anyhow::Result<()>
+        + Send
+        + Sync
+        + UnwindSafe
+        + RefUnwindSafe,
+    execute: impl (Fn(&[&'static str], &TestValue) -> anyhow::Result<TestValue>)
         + Send
         + Sync
         + UnwindSafe
@@ -138,25 +142,26 @@ pub fn test_folder(
             let path = entry.unwrap();
             let contents = fs::read_to_string(&path).unwrap();
             let cloned_path = path.clone();
+            let sources = &[path.to_str().unwrap().to_string().leak() as &'static str];
             let result = panic::catch_unwind(|| match parse_intended_result(&contents) {
-                TestExpectation::Compiles => match check_does_compile(&contents) {
+                TestExpectation::Compiles => match check_does_compile(sources) {
                     Ok(_) => TestSuccessOrFailure::Succeeded(path),
                     Err(error) => TestSuccessOrFailure::FailsToCompile(path, error),
                 },
-                TestExpectation::DoesNotCompile => match check_does_compile(&contents) {
+                TestExpectation::DoesNotCompile => match check_does_compile(sources) {
                     Ok(_) => TestSuccessOrFailure::CompiledButShouldnt(path),
                     Err(_) => TestSuccessOrFailure::Succeeded(path),
                 },
                 TestExpectation::Aborts => {
-                    if check_does_compile(&contents).is_ok()
-                        && execute(&contents, &TestValue::Void).is_err()
+                    if check_does_compile(sources).is_ok()
+                        && execute(sources, &TestValue::Void).is_err()
                     {
                         TestSuccessOrFailure::Succeeded(path)
                     } else {
                         TestSuccessOrFailure::RanButShouldnt(path)
                     }
                 }
-                TestExpectation::ProducesValue(expected) => match execute(&contents, &expected) {
+                TestExpectation::ProducesValue(expected) => match execute(sources, &expected) {
                     Ok(received) if expected == received => TestSuccessOrFailure::Succeeded(path),
                     Ok(received) => TestSuccessOrFailure::MismatchedResult {
                         path,

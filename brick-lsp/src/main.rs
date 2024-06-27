@@ -5,6 +5,7 @@ use std::path::Path;
 use brick::id::AnyID;
 use brick::CompilationResults;
 use brick::HirNodeValue;
+use brick::SourceFile;
 use brick::SourceRange;
 use lsp_types::{
     request::GotoDefinition, GotoDefinitionResponse, InitializeParams, ServerCapabilities,
@@ -111,13 +112,15 @@ fn find_definition(params: &GotoDefinitionParams) -> anyhow::Result<Option<Sourc
             .uri
             .path(),
     );
-    let contents = std::fs::read_to_string(path)?;
     let position = params.text_document_position_params.position;
+
+    let file =
+        SourceFile::from_filename(path.to_str().unwrap().to_string().leak() as &'static str)?;
 
     let CompilationResults {
         modules,
         declarations,
-    } = brick::check_types(&contents)?;
+    } = brick::check_types(vec![file])?;
 
     let mut found = None;
     for module in modules.values() {

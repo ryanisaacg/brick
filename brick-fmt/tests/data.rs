@@ -13,31 +13,42 @@ fn data() {
     data_test_driver::test_folder(
         working_dir,
         |contents| -> anyhow::Result<()> {
-            // This doesn't support multiple modules in a single test yet
-            let first_pass_contents = format_str(contents)?;
-            let second_pass_contents = format_str(first_pass_contents.as_str())?;
+            let mut contents: Vec<_> = contents
+                .iter()
+                .map(|path| SourceFile::from_filename(path).unwrap())
+                .collect();
 
-            if first_pass_contents != second_pass_contents {
-                bail!("Formatting differed in second pass")
+            for content in contents.iter_mut() {
+                // This doesn't support multiple modules in a single test yet
+                let first_pass_contents = format_str(content.contents.as_str())?;
+                let second_pass_contents = format_str(first_pass_contents.as_str())?;
+
+                if first_pass_contents != second_pass_contents {
+                    bail!("Formatting differed in second pass")
+                }
+
+                content.contents = second_pass_contents;
             }
 
-            check_types(&second_pass_contents)?;
+            check_types(contents)?;
 
             Ok(())
         },
         |contents, expected| -> anyhow::Result<TestValue> {
-            // This doesn't support multiple modules in a single test yet
-            let contents = format_str(contents)?;
+            let mut contents: Vec<_> = contents
+                .iter()
+                .map(|path| SourceFile::from_filename(path).unwrap())
+                .collect();
+
+            for content in contents.iter_mut() {
+                content.contents = format_str(content.contents.as_str())?;
+            }
 
             let counter = Arc::new(Mutex::new(0));
 
             let func_counter = counter.clone();
             let (mut results, memory) = interpret_code(
-                vec![SourceFile {
-                    module_name: "main",
-                    filename: "main.brick",
-                    contents: contents.to_string(),
-                }],
+                contents,
                 vec![(
                     "incr_test_counter",
                     Box::new(move |_, _| {

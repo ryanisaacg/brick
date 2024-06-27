@@ -12,7 +12,12 @@ fn data() {
     data_test_driver::test_folder(
         working_dir,
         |contents| -> anyhow::Result<()> {
-            check_types(contents)?;
+            check_types(
+                contents
+                    .iter()
+                    .map(|path| SourceFile::from_filename(path).unwrap())
+                    .collect(),
+            )?;
             Ok(())
         },
         |contents, expected| -> anyhow::Result<TestValue> {
@@ -20,11 +25,10 @@ fn data() {
 
             let func_counter = counter.clone();
             let (mut results, memory) = interpret_code(
-                vec![SourceFile {
-                    module_name: "main",
-                    filename: "main.brick",
-                    contents: contents.to_string(),
-                }],
+                contents
+                    .iter()
+                    .map(|path| SourceFile::from_filename(path).unwrap())
+                    .collect(),
                 vec![(
                     "incr_test_counter",
                     Box::new(move |_, _| {
