@@ -1,0 +1,8 @@
+// Int | 5678
+import self.helper.Value;
+
+let val = Value {
+    data: 5678
+};
+
+val.data

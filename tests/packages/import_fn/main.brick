@@ -1,0 +1,5 @@
+// Int | 5
+
+import self.helper.a;
+
+a()
