@@ -2,7 +2,7 @@
 
 extern fn incr_test_counter();
 
-struct Data {
+struct Data: Affine {
     fn drop(self: unique Data) {
         incr_test_counter();
     }

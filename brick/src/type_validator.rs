@@ -3,6 +3,7 @@ use thiserror::Error;
 
 use crate::{
     multi_error::{merge_results, print_multi_errors, MultiError},
+    typecheck::{InterfaceType, PointerKind, StructType},
     DeclarationContext, ExpressionType, FuncType, SourceRange, TypeDeclaration,
 };
 
@@ -11,7 +12,17 @@ pub enum TypeValidationError {
     #[error("{}", print_multi_errors(&.0[..]))]
     MultiError(Vec<TypeValidationError>),
     #[error("illegal return of a reference from a function: {0}")]
-    IllegalReferenceReturn(SourceRange),
+    ReferenceReturn(SourceRange),
+    #[error("drop may not be defined on normal types: {0}")]
+    DropOnNormalType(SourceRange),
+    #[error("drop may not be defined on interfaces: {0}")]
+    DropOnInterface(SourceRange),
+    #[error("drop must return void: {0}")]
+    NonVoidDrop(SourceRange),
+    #[error("drop must have one parameter: {0}")]
+    WrongDropParamCount(SourceRange),
+    #[error("parameter to drop must be a mutable self pointer: {0}")]
+    IllegalDropParam(SourceRange),
 }
 
 impl MultiError for TypeValidationError {
@@ -34,7 +45,7 @@ pub fn validate_types(decls: &DeclarationContext) -> Result<(), TypeValidationEr
         decls
             .id_to_decl
             .par_iter()
-            .map(|(_, decl)| validate_decl(decl))
+            .map(|(_, decl)| validate_decl(decls, decl))
             .reduce(
                 || Ok(()),
                 |mut acc, result| {
@@ -61,7 +72,100 @@ pub fn validate_types(decls: &DeclarationContext) -> Result<(), TypeValidationEr
     validate_results
 }
 
-fn validate_decl(_ty: &TypeDeclaration) -> Result<(), TypeValidationError> {
+fn validate_decl(
+    decls: &DeclarationContext,
+    ty: &TypeDeclaration,
+) -> Result<(), TypeValidationError> {
+    let mut results = Ok(());
+
+    merge_results(&mut results, validate_drop(decls, ty));
+
+    results
+}
+
+fn validate_drop(
+    decls: &DeclarationContext,
+    ty: &TypeDeclaration,
+) -> Result<(), TypeValidationError> {
+    match ty {
+        TypeDeclaration::Module(_) | TypeDeclaration::Union(_) => {}
+        TypeDeclaration::Struct(StructType {
+            associated_functions,
+            ..
+        }) => {
+            if let Some((_, fn_id)) = associated_functions
+                .iter()
+                .find(|(name, _)| name.as_str() == "drop")
+            {
+                let fn_ty = &decls.id_to_func[fn_id];
+                let provenance = fn_ty
+                    .provenance
+                    .clone()
+                    .expect("all non-intrinsic functions have a provenance");
+
+                let mut results = Ok(());
+
+                if !ty.is_affine() {
+                    merge_results(
+                        &mut results,
+                        Err(TypeValidationError::DropOnNormalType(provenance.clone())),
+                    );
+                }
+
+                if fn_ty.returns != ExpressionType::Void {
+                    merge_results(
+                        &mut results,
+                        Err(TypeValidationError::NonVoidDrop(provenance.clone())),
+                    );
+                }
+
+                if fn_ty.params.len() != 1 {
+                    merge_results(
+                        &mut results,
+                        Err(TypeValidationError::WrongDropParamCount(provenance.clone())),
+                    );
+                } else {
+                    let is_self_unique_ptr =
+                        if let ExpressionType::Pointer(PointerKind::Unique, inner) =
+                            &fn_ty.params[0]
+                        {
+                            match inner.as_ref() {
+                                ExpressionType::InstanceOf(ty_id) => *ty_id == ty.id(),
+                                _ => false,
+                            }
+                        } else {
+                            false
+                        };
+                    if !is_self_unique_ptr {
+                        merge_results(
+                            &mut results,
+                            Err(TypeValidationError::IllegalDropParam(provenance.clone())),
+                        );
+                    }
+                }
+
+                return results;
+            }
+        }
+        TypeDeclaration::Interface(InterfaceType {
+            associated_functions,
+            ..
+        }) => {
+            if let Some((_, fn_id)) = associated_functions
+                .iter()
+                .find(|(name, _)| name.as_str() == "drop")
+            {
+                let fn_ty = &decls.id_to_func[fn_id];
+                return Err(TypeValidationError::DropOnInterface(
+                    fn_ty
+                        .provenance
+                        .clone()
+                        .expect("all non-intrinsic functions have a provenance"),
+                ));
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -71,7 +175,7 @@ fn validate_fn(fn_ty: &FuncType) -> Result<(), TypeValidationError> {
     if matches!(&fn_ty.returns, ExpressionType::Pointer(_, _)) {
         merge_results(
             &mut result,
-            Err(TypeValidationError::IllegalReferenceReturn(
+            Err(TypeValidationError::ReferenceReturn(
                 fn_ty
                     .provenance
                     .clone()

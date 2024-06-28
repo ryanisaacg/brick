@@ -4,14 +4,12 @@ borrow checker and lifetimes:
 - must-use-type support (requires destructuring)
 - can't dereference pointers to Move types
 - drop:
-    - validate the drop method has the correct arguments and no return value
     - drop dicts
     - drop strings (may require string buffer vs string view types?)
     - drop generators
     - drop nullables
     - automatically run the drop of all children when dropping
     - drop values when the variable is assigned
-    - non-affine types may not define a drop
 - allow disjoint borrows of collection indices
 
 destructuring:

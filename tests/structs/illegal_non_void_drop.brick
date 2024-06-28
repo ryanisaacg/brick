@@ -1,0 +1,7 @@
+// NoCompile
+
+struct NonVoidDrop: Affine {
+    fn drop(self: unique NonVoidDrop): i32 {
+        5
+    }
+}

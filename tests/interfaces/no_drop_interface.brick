@@ -1,0 +1,5 @@
+// NoCompile
+
+interface HasDrop {
+    fn drop(self: unique HasDrop),
+}
