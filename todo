@@ -54,7 +54,8 @@ diagnostics:
 packages:
 - packages can declare dependencies on one another
 - packages can be imported
-- packages can include some Rust code
+- packages can include a WASM blob
+- investigate: wasm-bindgen and dylib with wasm blob
 
 modules:
 - modules can be indexed in a type expression context
