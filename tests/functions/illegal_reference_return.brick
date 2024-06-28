@@ -1,0 +1,4 @@
+// NoCompile
+fn illegal_reference_return(): unique i32 {
+    unique 5
+}

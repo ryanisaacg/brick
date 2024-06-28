@@ -3,6 +3,7 @@
 use declaration_context::FileDeclarations;
 pub use declaration_context::{DeclarationContext, TypeID};
 use std::{collections::HashMap, io};
+use type_validator::TypeValidationError;
 
 use borrowck::LifetimeError;
 use hir::HirModule;
@@ -26,12 +27,13 @@ mod multi_error;
 pub mod parser;
 mod provenance;
 mod tokenizer;
+mod type_validator;
 mod typecheck;
 
 use parser::ParseError;
 use typed_arena::Arena;
 
-use crate::{hir::lower_module, typecheck::TypecheckError};
+use crate::{hir::lower_module, type_validator::validate_types, typecheck::TypecheckError};
 
 pub mod id;
 pub use hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirNodeValue, UnaryLogicalOp};
@@ -52,6 +54,8 @@ pub enum CompileError {
     ParseError(#[from] ParseError),
     #[error("filesystem error: {0} {1}")]
     FilesystemError(io::Error, String),
+    #[error("type error: {0}")]
+    TypeValidationError(#[from] TypeValidationError),
     #[error("typecheck errors: {0}")]
     TypecheckError(#[from] TypecheckError),
     #[error("lifetime errors: {0}")]
@@ -236,6 +240,7 @@ pub fn typecheck_module<'a>(
     use rayon::prelude::*;
 
     let declarations = DeclarationContext::new(contents)?;
+    validate_types(&declarations)?;
 
     let module_results = contents
         .par_iter()
