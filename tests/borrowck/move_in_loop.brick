@@ -1,5 +1,5 @@
 // NoCompile
-struct Data: Move {}
+struct Data: Affine {}
 
 fn drop(x: Data) {}
 

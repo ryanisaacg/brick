@@ -1,6 +1,6 @@
 // NoCompile
 
-struct Data: Move {}
+struct Data: Affine {}
 fn take_two_data(a: ref Data, b: unique Data) {}
 
 

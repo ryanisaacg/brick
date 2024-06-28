@@ -1,5 +1,5 @@
 // NoCompile
-struct Affine: Move {}
+struct Affine: Affine {}
 struct ViralAffinity {
     inner: Affine,
 }

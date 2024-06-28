@@ -1,6 +1,6 @@
 // NoCompile
 
-struct Data: Move {}
+struct Data: Affine {}
 fn drop(a: unique Data) {}
 
 

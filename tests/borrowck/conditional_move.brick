@@ -1,5 +1,5 @@
 // NoCompile
-struct Data: Move {}
+struct Data: Affine {}
 
 let x = Data{};
 if 1 > 5 {
