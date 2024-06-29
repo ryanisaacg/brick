@@ -303,22 +303,23 @@ pub enum TypecheckError {
     MultiError(Vec<TypecheckError>),
     #[error("arithmetic")]
     ArithmeticMismatch(SourceRange),
-    #[error("mismatched types: received {received:?}, expected {expected:?}")]
+    #[error("mismatched types at {provenance}: received {received:?}, expected {expected:?}")]
     TypeMismatch {
+        provenance: SourceRange,
         expected: ExpressionType,
         received: ExpressionType,
     },
     #[error("declaration for {0:?} not found")]
     NameNotFound(SourceRange),
-    #[error("can't call")]
+    #[error("can't call: {0}")]
     CantCall(SourceRange),
-    #[error("wrong args count")]
+    #[error("wrong args count: {0}")]
     WrongArgsCount(SourceRange),
-    #[error("missing field")]
+    #[error("missing field: {0}")]
     MissingField(SourceRange),
-    #[error("insufficient type info: null variables must have a type annotation")]
+    #[error("insufficient type info: null variables must have a type annotation {0}")]
     NoNullDeclarations(SourceRange),
-    #[error("expected nullable left-hand-side to ?? operator")]
+    #[error("expected nullable left-hand-side to ?? operator: {0}")]
     ExpectedNullableLHS(SourceRange),
     #[error("cannot yield outside of a generator: {0}")]
     CannotYield(SourceRange),
@@ -638,6 +639,7 @@ fn typecheck_function<'a>(
 
         if return_ty != &ExpressionType::Void && return_ty != &ExpressionType::Unreachable {
             return Err(TypecheckError::TypeMismatch {
+                provenance: function.body.provenance.clone(),
                 expected: ExpressionType::Void,
                 received: return_ty.clone(),
             });
@@ -650,7 +652,12 @@ fn typecheck_function<'a>(
             context,
             None,
         )?;
-        assert_assignable_to(context.declarations, &function_type.returns, return_ty)?;
+        assert_assignable_to(
+            context.declarations,
+            &function.body.provenance,
+            &function_type.returns,
+            return_ty,
+        )?;
 
         typecheck_returns(context, &function_type.returns, function.body)?;
     }
@@ -727,7 +734,12 @@ fn typecheck_expression<'a>(
 
                 merge_results(
                     &mut result,
-                    assert_assignable_to(context.declarations, &hint_ty, value_ty),
+                    assert_assignable_to(
+                        context.declarations,
+                        &type_hint.provenance,
+                        &hint_ty,
+                        value_ty,
+                    ),
                 );
                 type_hint.ty.set(hint_ty.clone()).unwrap();
                 current_scope.insert(name.clone(), ((*variable_id).into(), hint_ty));
@@ -922,6 +934,7 @@ fn typecheck_expression<'a>(
                 .and_then(|left_ty| {
                     assert_assignable_to(
                         context.declarations,
+                        &left.provenance,
                         &ExpressionType::Collection(CollectionType::String),
                         left_ty,
                     )
@@ -939,6 +952,7 @@ fn typecheck_expression<'a>(
                 .and_then(|right_ty| {
                     assert_assignable_to(
                         context.declarations,
+                        &right.provenance,
                         &ExpressionType::Collection(CollectionType::String),
                         right_ty,
                     )
@@ -990,6 +1004,7 @@ fn typecheck_expression<'a>(
                     )?;
                     assert_assignable_to(
                         context.declarations,
+                        &index.provenance,
                         &ExpressionType::Primitive(PrimitiveType::PointerSize),
                         index_ty,
                     )?;
@@ -1004,7 +1019,12 @@ fn typecheck_expression<'a>(
                         context,
                         generator_input_ty,
                     )?;
-                    assert_assignable_to(context.declarations, index_ty, key_ty)?;
+                    assert_assignable_to(
+                        context.declarations,
+                        &index.provenance,
+                        index_ty,
+                        key_ty,
+                    )?;
 
                     value_ty.as_ref().clone()
                 }
@@ -1045,14 +1065,14 @@ fn typecheck_expression<'a>(
             }
         }
         AstNodeValue::BinExpr(BinOp::BooleanAnd | BinOp::BooleanOr, left, right) => {
-            let left = typecheck_expression(
+            let left_ty = typecheck_expression(
                 left,
                 outer_scopes,
                 current_scope,
                 context,
                 generator_input_ty,
             )?;
-            let right = typecheck_expression(
+            let right_ty = typecheck_expression(
                 right,
                 outer_scopes,
                 current_scope,
@@ -1065,16 +1085,18 @@ fn typecheck_expression<'a>(
                 &mut results,
                 assert_assignable_to(
                     context.declarations,
+                    &left.provenance,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
-                    left,
+                    left_ty,
                 ),
             );
             merge_results(
                 &mut results,
                 assert_assignable_to(
                     context.declarations,
+                    &right.provenance,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
-                    right,
+                    right_ty,
                 ),
             );
             results?;
@@ -1129,7 +1151,7 @@ fn typecheck_expression<'a>(
                 &mut errors,
                 ensure_no_assignment_to_reference(left_ty, &left.provenance),
             );
-            let right = merge_results_or_value(
+            let right_ty = merge_results_or_value(
                 &mut errors,
                 typecheck_expression(
                     right,
@@ -1140,10 +1162,15 @@ fn typecheck_expression<'a>(
                 ),
             );
 
-            if let Some(right) = right {
+            if let Some(right_ty) = right_ty {
                 merge_results(
                     &mut errors,
-                    assert_assignable_to(context.declarations, left_ty, right),
+                    assert_assignable_to(
+                        context.declarations,
+                        &right.provenance,
+                        left_ty,
+                        right_ty,
+                    ),
                 );
             }
 
@@ -1169,7 +1196,7 @@ fn typecheck_expression<'a>(
                 &mut errors,
                 ensure_no_assignment_to_reference(left_ty, &left.provenance),
             );
-            let right = typecheck_expression(
+            let right_ty = typecheck_expression(
                 right,
                 outer_scopes,
                 current_scope,
@@ -1178,7 +1205,7 @@ fn typecheck_expression<'a>(
             )?;
 
             if !matches!(fully_dereference(left_ty), ExpressionType::Primitive(_))
-                || !matches!(fully_dereference(right), ExpressionType::Primitive(_))
+                || !matches!(fully_dereference(right_ty), ExpressionType::Primitive(_))
             {
                 merge_results(
                     &mut errors,
@@ -1188,7 +1215,7 @@ fn typecheck_expression<'a>(
 
             merge_results(
                 &mut errors,
-                assert_assignable_to(context.declarations, left_ty, right),
+                assert_assignable_to(context.declarations, &right.provenance, left_ty, right_ty),
             );
 
             errors?;
@@ -1214,25 +1241,26 @@ fn typecheck_expression<'a>(
                 return Err(TypecheckError::ExpectedNullableLHS(left.provenance.clone()));
             };
 
-            assert_assignable_to(context.declarations, ty, right_ty)?;
+            assert_assignable_to(context.declarations, &right.provenance, ty, right_ty)?;
 
             ty.as_ref().clone()
         }
         AstNodeValue::While(condition, body) => {
-            let condition = typecheck_expression(
+            let condition_ty = typecheck_expression(
                 condition,
                 outer_scopes,
                 current_scope,
                 context,
                 generator_input_ty,
             )?;
-            let condition_deref = fully_dereference(condition);
+            let condition_deref = fully_dereference(condition_ty);
             if !matches!(
                 condition_deref,
                 ExpressionType::Primitive(PrimitiveType::Bool)
             ) {
                 return Err(TypecheckError::TypeMismatch {
-                    received: condition.clone(),
+                    provenance: condition.provenance.clone(),
+                    received: condition_ty.clone(),
                     expected: ExpressionType::Primitive(PrimitiveType::Bool),
                 });
             }
@@ -1262,32 +1290,33 @@ fn typecheck_expression<'a>(
             if_branch,
             else_branch,
         }) => {
-            let condition = typecheck_expression(
+            let condition_ty = typecheck_expression(
                 condition,
                 outer_scopes,
                 current_scope,
                 context,
                 generator_input_ty,
             )?;
-            let condition_deref = fully_dereference(condition);
+            let condition_deref = fully_dereference(condition_ty);
             if !matches!(
                 condition_deref,
                 ExpressionType::Primitive(PrimitiveType::Bool)
             ) {
                 return Err(TypecheckError::TypeMismatch {
-                    received: condition.clone(),
+                    provenance: condition.provenance.clone(),
+                    received: condition_ty.clone(),
                     expected: ExpressionType::Primitive(PrimitiveType::Bool),
                 });
             }
 
-            let if_branch = typecheck_expression(
+            let if_ty = typecheck_expression(
                 if_branch,
                 outer_scopes,
                 current_scope,
                 context,
                 generator_input_ty,
             )?;
-            let else_branch = else_branch
+            let else_ty = else_branch
                 .as_ref()
                 .map(|else_branch| {
                     typecheck_expression(
@@ -1300,13 +1329,18 @@ fn typecheck_expression<'a>(
                 })
                 .transpose()?;
 
-            match else_branch {
-                Some(else_branch) => {
-                    if is_assignable_to(context.declarations, None, if_branch, else_branch) {
-                        if_branch.clone()
+            match else_ty {
+                Some(else_ty) => {
+                    if is_assignable_to(context.declarations, None, if_ty, else_ty) {
+                        if_ty.clone()
                     } else {
-                        assert_assignable_to(context.declarations, else_branch, if_branch)?;
-                        else_branch.clone()
+                        assert_assignable_to(
+                            context.declarations,
+                            &if_branch.provenance,
+                            else_ty,
+                            if_ty,
+                        )?;
+                        else_ty.clone()
                     }
                 }
                 None => ExpressionType::Void,
@@ -1365,6 +1399,7 @@ fn typecheck_expression<'a>(
                                     &mut results,
                                     assert_assignable_to(
                                         context.declarations,
+                                        &node.provenance,
                                         binding_ty,
                                         variant_ty,
                                     ),
@@ -1411,7 +1446,12 @@ fn typecheck_expression<'a>(
                 if let Some(return_type) = &return_type {
                     merge_results(
                         &mut results,
-                        assert_assignable_to(context.declarations, return_type, body_ty),
+                        assert_assignable_to(
+                            context.declarations,
+                            &case.body.provenance,
+                            return_type,
+                            body_ty,
+                        ),
                     );
                 } else {
                     return_type = Some(body_ty.clone());
@@ -1478,6 +1518,7 @@ fn typecheck_expression<'a>(
                     merge_results(
                         &mut result,
                         Err(TypecheckError::TypeMismatch {
+                            provenance: child.provenance.clone(),
                             expected: ExpressionType::Void,
                             received: expr_ty.clone(),
                         }),
@@ -1519,18 +1560,23 @@ fn typecheck_expression<'a>(
                     }
 
                     for (arg, param) in args.iter().zip(params.iter()) {
-                        let arg = typecheck_expression(
+                        let arg_ty = typecheck_expression(
                             arg,
                             outer_scopes,
                             current_scope,
                             context,
                             generator_input_ty,
                         )?;
-                        find_generic_bindings(&mut generic_args[..], param, arg);
-                        if !is_assignable_to(context.declarations, Some(&generic_args), param, arg)
-                        {
+                        find_generic_bindings(&mut generic_args[..], param, arg_ty);
+                        if !is_assignable_to(
+                            context.declarations,
+                            Some(&generic_args),
+                            param,
+                            arg_ty,
+                        ) {
                             return Err(TypecheckError::TypeMismatch {
-                                received: arg.clone(),
+                                provenance: arg.provenance.clone(),
+                                received: arg_ty.clone(),
                                 expected: param.clone(),
                             });
                         }
@@ -1551,7 +1597,7 @@ fn typecheck_expression<'a>(
                             return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
                         }
                         let arg = args.last().unwrap();
-                        let arg = typecheck_expression(
+                        let arg_ty = typecheck_expression(
                             arg,
                             outer_scopes,
                             current_scope,
@@ -1559,7 +1605,12 @@ fn typecheck_expression<'a>(
                             generator_input_ty,
                         )?;
                         // TODO: generic generators?
-                        assert_assignable_to(context.declarations, param_ty, arg)?;
+                        assert_assignable_to(
+                            context.declarations,
+                            &arg.provenance,
+                            param_ty,
+                            arg_ty,
+                        )?;
                     }
                     yield_ty.as_ref().clone()
                 }
@@ -1569,7 +1620,7 @@ fn typecheck_expression<'a>(
                 } => {
                     let mut results = Ok(());
                     for (arg, param) in args.iter().zip(parameters.iter()) {
-                        let arg = typecheck_expression(
+                        let arg_ty = typecheck_expression(
                             arg,
                             outer_scopes,
                             current_scope,
@@ -1578,7 +1629,12 @@ fn typecheck_expression<'a>(
                         )?;
                         merge_results(
                             &mut results,
-                            assert_assignable_to(context.declarations, param, arg),
+                            assert_assignable_to(
+                                context.declarations,
+                                &arg.provenance,
+                                param,
+                                arg_ty,
+                            ),
                         );
                     }
 
@@ -1619,13 +1675,14 @@ fn typecheck_expression<'a>(
                             context,
                             generator_input_ty,
                         ) {
-                            Ok(arg_field) => {
+                            Ok(arg_field_ty) => {
                                 merge_results(
                                     &mut results,
                                     assert_assignable_to(
                                         context.declarations,
+                                        &arg_field.provenance,
                                         param_field,
-                                        arg_field,
+                                        arg_field_ty,
                                     ),
                                 );
                             }
@@ -1660,7 +1717,12 @@ fn typecheck_expression<'a>(
                     generator_input_ty,
                 )?;
                 if let Some(expected_key_ty) = result_key_ty {
-                    assert_assignable_to(context.declarations, key_ty, expected_key_ty)?;
+                    assert_assignable_to(
+                        context.declarations,
+                        &key.provenance,
+                        key_ty,
+                        expected_key_ty,
+                    )?;
                 } else {
                     result_key_ty = Some(key_ty);
                 }
@@ -1672,7 +1734,12 @@ fn typecheck_expression<'a>(
                     generator_input_ty,
                 )?;
                 if let Some(expected_value_ty) = result_value_ty {
-                    assert_assignable_to(context.declarations, value_ty, expected_value_ty)?;
+                    assert_assignable_to(
+                        context.declarations,
+                        &value.provenance,
+                        value_ty,
+                        expected_value_ty,
+                    )?;
                 } else {
                     result_value_ty = Some(value_ty);
                 }
@@ -1769,6 +1836,7 @@ fn typecheck_expression<'a>(
                 )?;
                 if &ty != this_ty {
                     return Err(TypecheckError::TypeMismatch {
+                        provenance: remaining.provenance.clone(),
                         received: this_ty.clone(),
                         expected: ty,
                     });
@@ -1777,14 +1845,14 @@ fn typecheck_expression<'a>(
             ExpressionType::Collection(CollectionType::Array(Box::new(ty)))
         }
         AstNodeValue::ArrayLiteralLength(value, length) => {
-            let inner = typecheck_expression(
+            let value_ty = typecheck_expression(
                 value,
                 outer_scopes,
                 current_scope,
                 context,
                 generator_input_ty,
             )?;
-            let length = typecheck_expression(
+            let length_ty = typecheck_expression(
                 length,
                 outer_scopes,
                 current_scope,
@@ -1793,10 +1861,11 @@ fn typecheck_expression<'a>(
             )?;
             assert_assignable_to(
                 context.declarations,
+                &length.provenance,
                 &ExpressionType::Primitive(PrimitiveType::PointerSize),
-                length,
+                length_ty,
             )?;
-            ExpressionType::Collection(CollectionType::Array(Box::new(inner.clone())))
+            ExpressionType::Collection(CollectionType::Array(Box::new(value_ty.clone())))
         }
         AstNodeValue::UnaryExpr(op, child) => match op {
             UnaryOp::BooleanNot => {
@@ -1809,6 +1878,7 @@ fn typecheck_expression<'a>(
                 )?;
                 assert_assignable_to(
                     context.declarations,
+                    &child.provenance,
                     &ExpressionType::Primitive(PrimitiveType::Bool),
                     child_ty,
                 )?;
@@ -1860,6 +1930,7 @@ fn typecheck_returns<'a>(
             merge_results(
                 &mut results,
                 Err(TypecheckError::TypeMismatch {
+                    provenance: current.provenance.clone(),
                     expected: expected_ty.clone(),
                     received: return_ty.clone(),
                 }),
@@ -1972,7 +2043,7 @@ fn typecheck_const<'a>(
         let hint_ty = resolve_type_expr(&context.top_level_type_names, type_hint)?;
         merge_results(
             &mut result,
-            assert_assignable_to(context.declarations, &hint_ty, value_ty),
+            assert_assignable_to(context.declarations, &value.provenance, &hint_ty, value_ty),
         );
         type_hint.ty.set(hint_ty.clone()).unwrap();
         current_scope.insert(name.clone(), ((*variable_id).into(), hint_ty));
@@ -2410,6 +2481,7 @@ pub fn shallow_dereference(ty: &ExpressionType) -> &ExpressionType {
 
 fn assert_assignable_to(
     declarations: &DeclarationContext,
+    provenance: &SourceRange,
     lhs: &ExpressionType,
     rhs: &ExpressionType,
 ) -> Result<(), TypecheckError> {
@@ -2417,6 +2489,7 @@ fn assert_assignable_to(
         Ok(())
     } else {
         Err(TypecheckError::TypeMismatch {
+            provenance: provenance.clone(),
             received: lhs.clone(),
             expected: rhs.clone(),
         })
