@@ -58,6 +58,8 @@ packages:
 - investigate: wasm-bindgen and dylib with wasm blob
 
 modules:
+- `self` module is always available, contains all contents of package
+- struct literals can contain module traversal
 - modules can be indexed in a type expression context
 - modules can be indexed in a struct / variant literal context
 - modules can be declared explicitly
@@ -227,5 +229,7 @@ syntax:
 - decide on whether variables can shadow
 
 import support:
+- constants may be imported
+- import-not-found should error instead of panicking
 - alias imports
 - allow imports to include a list of things, with an optional catch-all
