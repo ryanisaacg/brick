@@ -26,6 +26,7 @@ fn main() -> anyhow::Result<()> {
 
     let (send_draw_command, recv_draw_command) = std::sync::mpsc::channel();
     let down_keys = Arc::new(Mutex::new(HashSet::new()));
+    let prev_down_keys = Arc::new(Mutex::new(HashSet::new()));
 
     let send_cmd = send_draw_command.clone();
     linker.func_wrap("bindings", "clear", move || {
@@ -46,6 +47,15 @@ fn main() -> anyhow::Result<()> {
     let keys = down_keys.clone();
     linker.func_wrap("bindings", "is_key_down", move |key: i32| {
         let keys = keys.lock().unwrap();
+        if keys.contains(&key) {
+            1
+        } else {
+            0
+        }
+    })?;
+    let prev = prev_down_keys.clone();
+    linker.func_wrap("bindings", "was_key_down", move |key: i32| {
+        let keys = prev.lock().unwrap();
         if keys.contains(&key) {
             1
         } else {
@@ -161,6 +171,12 @@ fn main() -> anyhow::Result<()> {
         {
             tick_func.call(&mut store, &[ctx_pointer.clone()], &mut [])?;
             last_frame = SystemTime::now();
+            let is_keys = down_keys.lock().unwrap();
+            let mut was_keys = prev_down_keys.lock().unwrap();
+            was_keys.clear();
+            for key in is_keys.iter() {
+                was_keys.insert(*key);
+            }
         }
 
         loop {
