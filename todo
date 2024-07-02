@@ -45,6 +45,7 @@ wasm backend:
 - handle coroutines
 - figure out and fix issue with dictionaries
 - trailing return statements in functions cause miscompilations
+- bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
 
 diagnostics:
 - parsing recovery during errors
@@ -64,10 +65,10 @@ modules:
 - modules can be indexed in a struct / variant literal context
 - modules can be declared explicitly
 
-misc:
-- short-circuiting boolean evaluation
+top-level statements:
 - disallow top-level return
-- bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
+- decide what happens when more than one file in a package defines top-level statements
+- decide what happens when a dependent package has top-level statements
 
 errors:
 - functions can define `throws`
@@ -177,6 +178,7 @@ static data:
 - handle global state in the interpreter
 
 boolean operators:
+- short-circuiting boolean evaluation
 - equality / inequality:
     - applicable to nullable values
 
