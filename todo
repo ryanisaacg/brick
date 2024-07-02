@@ -1,7 +1,10 @@
+type validation:
+- don't allow recursive types without indirection
+- prevent references being stored in collections
+
 borrow checker and lifetimes:
 - clone support
 - switch from "Move is viral" to "types that have Move must be marked Move"
-- must-use-type support (requires destructuring)
 - can't dereference pointers to Move types
 - drop:
     - drop dicts
@@ -12,14 +15,7 @@ borrow checker and lifetimes:
     - drop values when the variable is assigned
 - allow disjoint borrows of collection indices
 
-destructuring:
-- destructuring syntax in let-statement: store vec of paths and bindings
-- destructuring semantics: node that takes the thing that's being destructured and then a list of assignments, just a marker for the borrowchecker to know that it all happens at once
-- (maybe) allow destructuring borrows (and maybe destructuring existing borrows?)
-- sugar: allow destructuring in parameter, case statements
-
 collections:
-- prevent references being stored in collections
 - tuples
 - arrays:
     - allow empty arrays to typecheck (requires generic type syntax)
@@ -70,23 +66,14 @@ top-level statements:
 - decide what happens when more than one file in a package defines top-level statements
 - decide what happens when a dependent package has top-level statements
 
-errors:
-- functions can define `throws`
-- throw operator creates and returns an error
-- try operator returns an error if one exists
-- functions may optionally define a union that they throw, and all `throw`s and `try`s in the function must conform to that union
-- allow discriminating on errors with a try/catch type construct or something similar for non-throws functions
-
 interfaces:
+- fundamental rethink (*must* be behind a pointer of some kind)
 - self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
     - when making the method -> function conversion, automatically take a reference if it's required
     - mandate by-reference parameters for interfaces
-- unions:
-    - unions can be converted to interfaces
-    - unions have associated functions
 - modules can be converted to interfaces:
     - produce and consume a nullpointer for the vtable call? (might mean we need to generate shim functions)
-- interfaces can be converted between each other:
+- interfaces can be structurally converted between each other:
     - in typechecking
     - in the IR
     - in the interpreter
@@ -99,14 +86,6 @@ interfaces:
 
 interface adapters:
 - allow an interface to define an impl for itself on foreign types, limited version of Rust's traits
-
-type parameters:
-- non-reified / non-monomorphizing:
-    - generic type syntax
-    - types can be parameterized
-    - nested type parameters are correctly resolved
-- monomorphizing
-- generic types can be constrained by interfaces
 
 build system:
 - cargo-like "build" command that automatically passes source files to the compiler
@@ -137,12 +116,6 @@ compilation resume and reload:
     - print
     - loop
 
-anonymous types:
-- anonymous struct
-- anonymous union
-- anonymous module
-- anonymous interface
-
 tooling:
 - LSP
     - go-to-definition
@@ -156,12 +129,12 @@ tooling:
     - syntax highlighting
 - pretty-printer
 
-allocator:
-- intrinsic bump allocator?
-
 unions:
 - optional non-exhaustive cases?
-- faulthrough / default branch
+- faulthrough / default branch in case statement
+- ?. operator on union lvalues
+- unions have associated functions
+- unions can be converted to interfaces
 
 error reporting:
 - typecheck errors
@@ -171,64 +144,23 @@ metaprogramming:
 - proc macros? comptime? compile-time reflection (what is that even)? no metaprogramming?
 - use whatever mechanism above for ser/des
 
-static data:
-- add some syntax for declaring global state
-- handle global state in the HIR
-- handle global state in the LIR
-- handle global state in the interpreter
-
 boolean operators:
 - short-circuiting boolean evaluation
 - equality / inequality:
     - applicable to nullable values
-
-null:
-- ?. operator on union lvalues
-- ! operator, which throws if the value is an error (requires errors)
-- basic null flow analysis - maybe a special operation to de-null stuff
 
 extern:
 - opaque extern pointers
 - extern functions are unsafe
 - externs can only do C FFI stuff, for ease of wasm backend
 
-unsafe:
-- functions can be declared unsafe
-- you can have unsafe blocks (or statements?)
-- you can only call unsafe functions from within unsafe blocks
-
-units of measure:
-- design some system to separate units of measure into various domains (e.g. a "screen pixel" different from a "logical pixel")
-
-language rules:
-- don't allow recursive types without indirection
-
 returns:
 - ensure returns get expected type checked against their function in HIR
-
-static function vs method:
-    - struct associated functions support "self"
-        - self can be declared as a typeless parameter syntactically
-        - allow calls to associated functions through references (checking correct reference type)
-        - self typechecks correctly
-        - IR transforms code properly to pass self into the function
-    - union associated functions support "self"
-    - static associated functions:
-        - structs
-        - unions
-        - interfaces?
 
 strings:
 - string manipulation
 - interpolation literals
 - multiline literals
-
-syntax:
-- remove ; and , requirements?
-- keyword arguments
-- maybe separate syntax for i64 / f64 literals
-- there's an ambiguity between dereference / multiplication in if { body } * a += 1;
-- decide on whether variables can shadow
 
 import support:
 - constants may be imported
