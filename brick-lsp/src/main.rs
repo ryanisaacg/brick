@@ -1,18 +1,12 @@
 // Adapating from the example from the lsp-server repo
 
-use std::path::Path;
-
-use brick::id::AnyID;
-use brick::CompilationResults;
-use brick::HirNodeValue;
-use brick::SourceFile;
-use brick::SourceRange;
-use lsp_types::{
-    request::GotoDefinition, GotoDefinitionResponse, InitializeParams, ServerCapabilities,
-};
-use lsp_types::{GotoDefinitionParams, Location, OneOf, Position, Range};
+use lsp_types::request::{Request as _, ShowMessageRequest};
+use lsp_types::{request::GotoDefinition, InitializeParams, ServerCapabilities};
+use lsp_types::{MessageType, OneOf, ShowMessageParams};
 
 use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
+
+mod goto_definition;
 
 fn main() -> anyhow::Result<()> {
     eprintln!("brick-lsp booting up");
@@ -48,42 +42,26 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
                     return Ok(());
                 }
                 eprintln!("got request: {req:?}");
-                match cast::<GotoDefinition>(req) {
-                    Ok((id, params)) => {
-                        eprintln!("got gotoDefinition request #{id}: {params:?}\n");
-                        let provenance = find_definition(&params)?;
-                        let result = provenance.map(|provenance| {
-                            GotoDefinitionResponse::Scalar(Location {
-                                uri: params
-                                    .text_document_position_params
-                                    .text_document
-                                    .uri
-                                    .clone(),
-                                range: Range {
-                                    start: Position {
-                                        line: provenance.start_line - 1,
-                                        character: provenance.start_offset - 1,
-                                    },
-                                    end: Position {
-                                        line: provenance.end_line - 1,
-                                        character: provenance.end_offset - 1,
-                                    },
-                                },
-                            })
-                        });
-                        let result = serde_json::to_value(&result)?;
-                        let resp = Response {
-                            id,
-                            result: Some(result),
-                            error: None,
-                        };
+                match handle_request(req) {
+                    Ok(Some(resp)) => {
                         connection.sender.send(Message::Response(resp))?;
-                        continue;
                     }
-                    Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
-                    Err(ExtractError::MethodMismatch(req)) => req,
-                };
-                // ...
+                    Ok(None) => {}
+                    Err(err) => {
+                        let message = ShowMessageParams {
+                            typ: MessageType::ERROR,
+                            message: err.to_string(),
+                        };
+                        let params = serde_json::to_value(&message)?;
+                        let response = Request {
+                            // TODO: super illegal
+                            id: 0.into(),
+                            method: ShowMessageRequest::METHOD.to_string(),
+                            params,
+                        };
+                        connection.sender.send(Message::Request(response))?;
+                    }
+                }
             }
             Message::Response(resp) => {
                 eprintln!("got response: {resp:?}");
@@ -96,57 +74,30 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
     Ok(())
 }
 
+fn handle_request(req: Request) -> anyhow::Result<Option<Response>> {
+    Ok(match req.method.as_str() {
+        GotoDefinition::METHOD => match cast::<GotoDefinition>(req) {
+            Ok((id, params)) => {
+                eprintln!("got gotoDefinition request #{id}: {params:?}\n");
+                let result = goto_definition::handle_goto_definition(params)?;
+                let result = serde_json::to_value(result)?;
+                Some(Response {
+                    id,
+                    result: Some(result),
+                    error: None,
+                })
+            }
+            Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+            Err(ExtractError::MethodMismatch(_)) => unreachable!(),
+        },
+        _ => None,
+    })
+}
+
 fn cast<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
 where
     R: lsp_types::request::Request,
     R::Params: serde::de::DeserializeOwned,
 {
     req.extract(R::METHOD)
-}
-
-fn find_definition(params: &GotoDefinitionParams) -> anyhow::Result<Option<SourceRange>> {
-    let path = Path::new(
-        params
-            .text_document_position_params
-            .text_document
-            .uri
-            .path(),
-    );
-    let position = params.text_document_position_params.position;
-
-    let file =
-        SourceFile::from_filename(path.to_str().unwrap().to_string().leak() as &'static str)?;
-
-    let CompilationResults {
-        modules,
-        declarations,
-    } = brick::check_types(vec![file])?;
-
-    let mut found = None;
-    for module in modules.values() {
-        module.visit(|_, node| {
-            if found.is_some() {
-                return;
-            }
-            let HirNodeValue::VariableReference(id) = &node.value else {
-                return;
-            };
-            let Some(provenance) = &node.provenance else {
-                return;
-            };
-            if provenance.contains(position.line + 1, position.character + 1) {
-                found = Some(*id);
-            }
-        });
-    }
-
-    Ok(match found {
-        Some(id) => match id {
-            AnyID::Function(fn_id) => declarations.id_to_func[&fn_id].provenance.clone(),
-            AnyID::Type(_) => todo!(),
-            AnyID::Variable(_) => todo!(),
-            AnyID::Constant(_) => todo!(),
-        },
-        None => None,
-    })
 }
