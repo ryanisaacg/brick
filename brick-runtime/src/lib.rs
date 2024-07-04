@@ -10,10 +10,7 @@ pub unsafe extern "C" fn brick_runtime_init(heap_start: *mut u8, size: usize) ->
     let heap = Heap::empty();
     heap.lock().init(heap_start, size);
 
-    let memory_region = heap.alloc(
-        Layout::from_size_align(core::mem::size_of::<Heap>(), core::mem::align_of::<Heap>())
-            .unwrap(),
-    ) as *mut Heap;
+    let memory_region = heap.alloc(Layout::new::<Heap>()) as *mut Heap;
     *memory_region = heap;
 
     memory_region
