@@ -13,7 +13,7 @@ pub use linear_ir::{
     PhysicalCollection, PhysicalPrimitive, PhysicalType, RuntimeFunction, TypeLayoutValue,
 };
 use linear_ir::{layout_types, LinearContext};
-use parser::AstNode;
+use parser::ParsedFile;
 use thiserror::Error;
 use typecheck::typecheck;
 pub use typecheck::{ExpressionType, FuncType, TypeDeclaration};
@@ -31,9 +31,8 @@ mod type_validator;
 mod typecheck;
 
 use parser::ParseError;
-use typed_arena::Arena;
 
-use crate::{hir::lower_module, type_validator::validate_types, typecheck::TypecheckError};
+use crate::{hir::desugar_module, type_validator::validate_types, typecheck::TypecheckError};
 
 pub mod id;
 pub use hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirNodeValue, UnaryLogicalOp};
@@ -221,7 +220,6 @@ pub struct CompilationResults {
 }
 
 pub fn check_types(sources: Vec<SourceFile>) -> Result<CompilationResults, CompileError> {
-    let parse_arena = Arena::new();
     // TODO: return more than one parse error
     let modules: Vec<_> = sources
         .into_iter()
@@ -230,17 +228,15 @@ pub fn check_types(sources: Vec<SourceFile>) -> Result<CompilationResults, Compi
                  filename,
                  module_name,
                  contents,
-             }| {
-                parse_file(&parse_arena, filename, contents).map(|ast| (module_name, ast))
-            },
+             }| { parse_file(filename, contents).map(|ast| (module_name, ast)) },
         )
         .collect::<Result<_, _>>()?;
 
     typecheck_module(&modules[..])
 }
 
-pub fn typecheck_module<'a>(
-    contents: &'a [(&'static str, Vec<AstNode<'a>>)],
+pub fn typecheck_module(
+    contents: &[(&'static str, ParsedFile)],
 ) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
@@ -251,8 +247,8 @@ pub fn typecheck_module<'a>(
         .par_iter()
         .map(
             |(name, contents)| -> Result<(&'static str, HirModule), TypecheckError> {
-                let types = typecheck(&contents[..], name, &declarations)?;
-                let ir = lower_module(types, &declarations);
+                let types = typecheck(contents, name, &declarations)?;
+                let ir = desugar_module(&declarations, &contents.arena, types);
                 Ok((name, ir))
             },
         )
@@ -283,13 +279,9 @@ pub fn typecheck_module<'a>(
     })
 }
 
-pub fn parse_file<'a>(
-    arena: &'a Arena<AstNode<'a>>,
-    filename: &'static str,
-    contents: String,
-) -> Result<Vec<AstNode<'a>>, CompileError> {
+pub fn parse_file(filename: &'static str, contents: String) -> Result<ParsedFile, CompileError> {
     let tokens = tokenizer::lex(filename, contents);
-    let parsed_module = parser::parse(arena, tokens)?;
+    let parsed_module = ParsedFile::parse(tokens)?;
 
     Ok(parsed_module)
 }

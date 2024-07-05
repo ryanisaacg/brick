@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     declaration_context::{IntrinsicFunction, TypeID},
     id::{AnyID, FunctionID, NodeID, VariableID},
-    parser::AstNode,
+    parser::{AstArena, AstNode},
     provenance::SourceRange,
     typecheck::{
         is_assignable_to, CollectionType, ExpressionType, PrimitiveType, TypeDeclaration,
@@ -25,13 +25,14 @@ mod simplify_sequence_expressions;
 mod unions;
 mod widen_null;
 
-pub fn lower_module<'dest>(
-    module: TypecheckedFile<'_, 'dest>,
+pub fn desugar_module<'dest>(
     declarations: &'dest DeclarationContext,
+    ast: &AstArena,
+    module: TypecheckedFile<'_, 'dest>,
 ) -> HirModule {
-    let constant_values = constant_inlining::extract_constant_values(&module, declarations);
+    let constant_values = constant_inlining::extract_constant_values(ast, &module, declarations);
 
-    let mut module = lower::lower_module(module, declarations);
+    let mut module = lower::lower_module(declarations, ast, module);
 
     // Important that this comes before ANY pass that uses the declarations
     coroutines::rewrite_generator_calls(&mut module);
@@ -172,7 +173,7 @@ impl HirNode {
         }
     }
 
-    pub fn from_ast(ast: &AstNode<'_>, value: HirNodeValue, ty: ExpressionType) -> HirNode {
+    pub fn from_ast(ast: &AstNode, value: HirNodeValue, ty: ExpressionType) -> HirNode {
         HirNode {
             id: NodeID::new(),
             value,
@@ -181,7 +182,7 @@ impl HirNode {
         }
     }
 
-    pub fn from_ast_void(ast: &AstNode<'_>, value: HirNodeValue) -> HirNode {
+    pub fn from_ast_void(ast: &AstNode, value: HirNodeValue) -> HirNode {
         Self::from_ast(ast, value, ExpressionType::Void)
     }
 

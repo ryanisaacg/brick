@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 brick = { path = "../brick" }
-typed-arena = "2.0.2"
 
 [dev-dependencies]
 anyhow = "1.0"

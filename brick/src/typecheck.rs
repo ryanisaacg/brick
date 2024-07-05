@@ -7,8 +7,8 @@ use crate::{
     id::{AnyID, FunctionID},
     multi_error::{merge_results, merge_results_or_value, print_multi_errors, MultiError},
     parser::{
-        AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
-        InterfaceDeclarationValue, MatchDeclaration, StructDeclarationValue, UnaryOp,
+        AstArena, AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
+        InterfaceDeclarationValue, MatchDeclaration, ParsedFile, StructDeclarationValue, UnaryOp,
     },
     provenance::SourceRange,
 };
@@ -383,6 +383,7 @@ impl MultiError for TypecheckError {
 }
 
 struct TypecheckContext<'a> {
+    ast: &'a AstArena,
     declarations: &'a DeclarationContext,
     top_level_type_names: HashMap<&'a str, TypeID>,
     top_level_function_names: HashMap<&'a str, FunctionID>,
@@ -401,20 +402,19 @@ impl<'a> TypecheckContext<'a> {
 
 pub struct TypecheckedFile<'ast, 'decl> {
     pub functions: Vec<TypecheckedFunction<'ast>>,
-    pub top_level_statements: Vec<&'ast AstNode<'ast>>,
+    pub top_level_statements: Vec<&'ast AstNode>,
     pub module: &'decl FileDeclarations,
 }
 
 #[derive(Clone, Debug)]
-pub struct TypecheckedFunction<'a> {
+pub struct TypecheckedFunction<'ast> {
     pub id: FunctionID,
     pub name: String,
-    pub func: &'a FunctionDeclarationValue<'a>,
+    pub func: &'ast FunctionDeclarationValue,
 }
 
-// TODO: pass import namespace in
 pub fn typecheck<'ast, 'decl>(
-    file: &'ast [AstNode<'ast>],
+    file: &'ast ParsedFile,
     current_module_name: &str,
     declarations: &'decl DeclarationContext,
 ) -> Result<TypecheckedFile<'ast, 'decl>, TypecheckError> {
@@ -486,6 +486,7 @@ pub fn typecheck<'ast, 'decl>(
     }
 
     let mut context = TypecheckContext {
+        ast: &file.arena,
         declarations,
         top_level_name_to_expr_type,
         top_level_function_names,
@@ -494,7 +495,7 @@ pub fn typecheck<'ast, 'decl>(
 
     // Insert all the constants
     let mut constants = HashMap::new();
-    for statement in file {
+    for statement in file.top_level.iter() {
         if let AstNodeValue::ConstDeclaration { .. } = &statement.value {
             typecheck_const(&context, &[], &mut constants, statement)?;
         }
@@ -505,7 +506,7 @@ pub fn typecheck<'ast, 'decl>(
     let mut top_level_statements = Vec::new();
     let mut top_level_scope = HashMap::new();
 
-    for statement in file {
+    for statement in file.top_level.iter() {
         merge_results(
             &mut results,
             typecheck_node(
@@ -527,11 +528,11 @@ pub fn typecheck<'ast, 'decl>(
 }
 
 fn typecheck_node<'a>(
-    statement: &'a AstNode<'a>,
+    statement: &'a AstNode,
     context: &TypecheckContext,
     top_level_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     functions: &mut Vec<TypecheckedFunction<'a>>,
-    top_level_statements: &mut Vec<&AstNode<'a>>,
+    top_level_statements: &mut Vec<&'a AstNode>,
 ) -> Result<(), TypecheckError> {
     match &statement.value {
         AstNodeValue::FunctionDeclaration(func) => {
@@ -611,9 +612,9 @@ fn typecheck_node<'a>(
     Ok(())
 }
 
-fn typecheck_function<'a>(
+fn typecheck_function(
     context: &TypecheckContext,
-    function: &'a FunctionDeclarationValue<'a>,
+    function: &FunctionDeclarationValue,
     function_type: &FuncType,
 ) -> Result<(), TypecheckError> {
     let parameters = function
@@ -623,6 +624,7 @@ fn typecheck_function<'a>(
         .map(|((id, name), param)| (name.name.clone(), ((*id).into(), param.clone())))
         .collect();
 
+    let body = context.ast.get(function.body);
     if function.is_coroutine {
         let ExpressionType::Generator { param_ty, .. } = &function_type.returns else {
             return Err(TypecheckError::MustReturnGenerator(
@@ -630,7 +632,7 @@ fn typecheck_function<'a>(
             ));
         };
         let return_ty = typecheck_expression(
-            function.body,
+            body,
             &[&context.top_level_name_to_expr_type, &parameters],
             &mut HashMap::new(),
             context,
@@ -639,14 +641,14 @@ fn typecheck_function<'a>(
 
         if return_ty != &ExpressionType::Void && return_ty != &ExpressionType::Unreachable {
             return Err(TypecheckError::TypeMismatch {
-                provenance: function.body.provenance.clone(),
+                provenance: body.provenance.clone(),
                 expected: ExpressionType::Void,
                 received: return_ty.clone(),
             });
         }
     } else {
         let return_ty = typecheck_expression(
-            function.body,
+            body,
             &[&context.top_level_name_to_expr_type, &parameters],
             &mut HashMap::new(),
             context,
@@ -654,19 +656,19 @@ fn typecheck_function<'a>(
         )?;
         assert_assignable_to(
             context.declarations,
-            &function.body.provenance,
+            &body.provenance,
             &function_type.returns,
             return_ty,
         )?;
 
-        typecheck_returns(context, &function_type.returns, function.body)?;
+        typecheck_returns(context, &function_type.returns, body)?;
     }
 
     Ok(())
 }
 
 fn typecheck_expression<'a>(
-    node: &'a AstNode<'a>,
+    node: &'a AstNode,
     outer_scopes: &[&HashMap<String, (AnyID, ExpressionType)>],
     current_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     context: &TypecheckContext,
@@ -695,7 +697,7 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::Statement(inner) => {
             typecheck_expression(
-                inner,
+                context.ast.get(*inner),
                 outer_scopes,
                 current_scope,
                 context,
@@ -705,7 +707,7 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::Declaration(name, type_hint, value, variable_id) => {
             let value_ty = typecheck_expression(
-                value,
+                context.ast.get(*value),
                 outer_scopes,
                 current_scope,
                 context,
@@ -722,7 +724,9 @@ fn typecheck_expression<'a>(
             }
 
             if let Some(type_hint) = type_hint {
-                let hint_ty = resolve_type_expr(&context.top_level_type_names, type_hint)?;
+                let type_hint = context.ast.get(*type_hint);
+                let hint_ty =
+                    resolve_type_expr(context.ast, &context.top_level_type_names, type_hint)?;
                 if matches!(hint_ty, ExpressionType::Pointer(_, _)) {
                     merge_results(
                         &mut result,
@@ -758,6 +762,7 @@ fn typecheck_expression<'a>(
             ExpressionType::Void
         }
         AstNodeValue::BorrowDeclaration(name, value, variable_id) => {
+            let value = context.ast.get(*value);
             let value_ty = typecheck_expression(
                 value,
                 outer_scopes,
@@ -769,7 +774,7 @@ fn typecheck_expression<'a>(
 
             let mut results = Ok(());
             if let AstNodeValue::TakeRef(child) | AstNodeValue::TakeUnique(child) = &value.value {
-                if !validate_lvalue(child) {
+                if !validate_lvalue(context, context.ast.get(*child)) {
                     merge_results(
                         &mut results,
                         Err(TypecheckError::IllegalNonLvalueBorrow(
@@ -793,7 +798,7 @@ fn typecheck_expression<'a>(
         AstNodeValue::Return(returned) => {
             if let Some(returned) = returned {
                 typecheck_expression(
-                    returned,
+                    context.ast.get(*returned),
                     outer_scopes,
                     current_scope,
                     context,
@@ -809,7 +814,7 @@ fn typecheck_expression<'a>(
             };
             if let Some(yielded) = yielded {
                 typecheck_expression(
-                    yielded,
+                    context.ast.get(*yielded),
                     outer_scopes,
                     current_scope,
                     context,
@@ -850,6 +855,9 @@ fn typecheck_expression<'a>(
         AstNodeValue::Null => ExpressionType::Null,
         AstNodeValue::Bool(_) => ExpressionType::Primitive(PrimitiveType::Bool),
         AstNodeValue::BinExpr(BinOp::Dot, left, right) => {
+            let left = context.ast.get(*left);
+            let right = context.ast.get(*right);
+
             let left_ty = typecheck_expression(
                 left,
                 outer_scopes,
@@ -920,6 +928,9 @@ fn typecheck_expression<'a>(
             }
         }
         AstNodeValue::BinExpr(BinOp::Concat, left, right) => {
+            let left = context.ast.get(*left);
+            let right = context.ast.get(*right);
+
             let mut results = Ok(());
 
             merge_results(
@@ -963,6 +974,9 @@ fn typecheck_expression<'a>(
             ExpressionType::Collection(CollectionType::String)
         }
         AstNodeValue::BinExpr(BinOp::NullChaining, left, right) => {
+            let left = context.ast.get(*left);
+            let right = context.ast.get(*right);
+
             let left = typecheck_expression(
                 left,
                 outer_scopes,
@@ -974,7 +988,7 @@ fn typecheck_expression<'a>(
                 panic!("TODO: left side of nullable dot operator");
             };
             let mut field_ty = Ok(ty.as_ref().clone());
-            traverse_dots(right, |name, provenance| {
+            traverse_dots(context.ast, right, |name, provenance| {
                 let Ok(ty) = &field_ty else {
                     return;
                 };
@@ -986,6 +1000,9 @@ fn typecheck_expression<'a>(
             ExpressionType::Nullable(Box::new(field_ty?))
         }
         AstNodeValue::BinExpr(BinOp::Index, collection, index) => {
+            let collection = context.ast.get(*collection);
+            let index = context.ast.get(*index);
+
             let collection_ty = typecheck_expression(
                 collection,
                 outer_scopes,
@@ -1036,6 +1053,9 @@ fn typecheck_expression<'a>(
             left,
             right,
         ) => {
+            let left = context.ast.get(*left);
+            let right = context.ast.get(*right);
+
             let left = typecheck_expression(
                 left,
                 outer_scopes,
@@ -1065,6 +1085,9 @@ fn typecheck_expression<'a>(
             }
         }
         AstNodeValue::BinExpr(BinOp::BooleanAnd | BinOp::BooleanOr, left, right) => {
+            let left = context.ast.get(*left);
+            let right = context.ast.get(*right);
+
             let left_ty = typecheck_expression(
                 left,
                 outer_scopes,
@@ -1103,7 +1126,6 @@ fn typecheck_expression<'a>(
 
             ExpressionType::Primitive(PrimitiveType::Bool)
         }
-        // TODO: non-numeric equality
         AstNodeValue::BinExpr(
             BinOp::LessThan
             | BinOp::GreaterThan
@@ -1114,6 +1136,9 @@ fn typecheck_expression<'a>(
             left,
             right,
         ) => {
+            let left = context.ast.get(*left);
+            let right = context.ast.get(*right);
+
             let left = typecheck_expression(
                 left,
                 outer_scopes,
@@ -1138,6 +1163,9 @@ fn typecheck_expression<'a>(
             ExpressionType::Primitive(PrimitiveType::Bool)
         }
         AstNodeValue::BinExpr(BinOp::Assignment, left, right) => {
+            let left = context.ast.get(*left);
+            let right = context.ast.get(*right);
+
             let mut errors = Ok(());
             let left_ty = typecheck_expression(
                 left,
@@ -1146,7 +1174,7 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            merge_results(&mut errors, validate_assignment_lhs(left));
+            merge_results(&mut errors, validate_assignment_lhs(context, left));
             merge_results(
                 &mut errors,
                 ensure_no_assignment_to_reference(left_ty, &left.provenance),
@@ -1183,6 +1211,9 @@ fn typecheck_expression<'a>(
             left,
             right,
         ) => {
+            let left = context.ast.get(*left);
+            let right = context.ast.get(*right);
+
             let mut errors = Ok(());
             let left_ty = typecheck_expression(
                 left,
@@ -1191,7 +1222,7 @@ fn typecheck_expression<'a>(
                 context,
                 generator_input_ty,
             )?;
-            merge_results(&mut errors, validate_assignment_lhs(left));
+            merge_results(&mut errors, validate_assignment_lhs(context, left));
             merge_results(
                 &mut errors,
                 ensure_no_assignment_to_reference(left_ty, &left.provenance),
@@ -1223,6 +1254,9 @@ fn typecheck_expression<'a>(
             ExpressionType::Void
         }
         AstNodeValue::BinExpr(BinOp::NullCoalesce, left, right) => {
+            let left = context.ast.get(*left);
+            let right = context.ast.get(*right);
+
             let left_ty = typecheck_expression(
                 left,
                 outer_scopes,
@@ -1246,6 +1280,9 @@ fn typecheck_expression<'a>(
             ty.as_ref().clone()
         }
         AstNodeValue::While(condition, body) => {
+            let condition = context.ast.get(*condition);
+            let body = context.ast.get(*body);
+
             let condition_ty = typecheck_expression(
                 condition,
                 outer_scopes,
@@ -1277,7 +1314,7 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::Loop(body) => {
             typecheck_expression(
-                body,
+                context.ast.get(*body),
                 outer_scopes,
                 current_scope,
                 context,
@@ -1290,6 +1327,9 @@ fn typecheck_expression<'a>(
             if_branch,
             else_branch,
         }) => {
+            let condition = context.ast.get(*condition);
+            let if_branch = context.ast.get(*if_branch);
+
             let condition_ty = typecheck_expression(
                 condition,
                 outer_scopes,
@@ -1320,7 +1360,7 @@ fn typecheck_expression<'a>(
                 .as_ref()
                 .map(|else_branch| {
                     typecheck_expression(
-                        else_branch,
+                        context.ast.get(*else_branch),
                         outer_scopes,
                         current_scope,
                         context,
@@ -1347,6 +1387,8 @@ fn typecheck_expression<'a>(
             }
         }
         AstNodeValue::Match(MatchDeclaration { value, cases }) => {
+            let value = context.ast.get(*value);
+
             let input_ty = typecheck_expression(
                 value,
                 outer_scopes,
@@ -1528,6 +1570,7 @@ fn typecheck_expression<'a>(
             expr_ty
         }
         AstNodeValue::Call(func, args) => {
+            let func = context.ast.get(*func);
             match fully_dereference(typecheck_expression(
                 func,
                 outer_scopes,
@@ -1544,6 +1587,7 @@ fn typecheck_expression<'a>(
                         if let AstNodeValue::BinExpr(BinOp::NullChaining | BinOp::Dot, lhs, _) =
                             &func.value
                         {
+                            let lhs = context.ast.get(*lhs);
                             find_generic_bindings(
                                 &mut generic_args[..],
                                 &func_ty.params[0],
@@ -1646,6 +1690,7 @@ fn typecheck_expression<'a>(
             }
         }
         AstNodeValue::RecordLiteral { name, fields } => {
+            let name = context.ast.get(*name);
             let ExpressionType::ReferenceToType(ty_id) = typecheck_expression(
                 name,
                 outer_scopes,
@@ -1752,7 +1797,7 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::ReferenceCountLiteral(inner) => {
             let inner_ty = typecheck_expression(
-                inner,
+                context.ast.get(*inner),
                 outer_scopes,
                 current_scope,
                 context,
@@ -1762,7 +1807,7 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::CellLiteral(inner) => {
             let inner_ty = typecheck_expression(
-                inner,
+                context.ast.get(*inner),
                 outer_scopes,
                 current_scope,
                 context,
@@ -1774,7 +1819,7 @@ fn typecheck_expression<'a>(
             PointerKind::Unique,
             Box::new(
                 typecheck_expression(
-                    inner,
+                    context.ast.get(*inner),
                     outer_scopes,
                     current_scope,
                     context,
@@ -1787,7 +1832,7 @@ fn typecheck_expression<'a>(
             PointerKind::Shared,
             Box::new(
                 typecheck_expression(
-                    inner,
+                    context.ast.get(*inner),
                     outer_scopes,
                     current_scope,
                     context,
@@ -1797,6 +1842,7 @@ fn typecheck_expression<'a>(
             ),
         ),
         AstNodeValue::Deref(inner) => {
+            let inner = context.ast.get(*inner);
             let ty = typecheck_expression(
                 inner,
                 outer_scopes,
@@ -1846,12 +1892,13 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::ArrayLiteralLength(value, length) => {
             let value_ty = typecheck_expression(
-                value,
+                context.ast.get(*value),
                 outer_scopes,
                 current_scope,
                 context,
                 generator_input_ty,
             )?;
+            let length = context.ast.get(*length);
             let length_ty = typecheck_expression(
                 length,
                 outer_scopes,
@@ -1869,6 +1916,7 @@ fn typecheck_expression<'a>(
         }
         AstNodeValue::UnaryExpr(op, child) => match op {
             UnaryOp::BooleanNot => {
+                let child = context.ast.get(*child);
                 let child_ty = typecheck_expression(
                     child,
                     outer_scopes,
@@ -1898,15 +1946,19 @@ enum BindingState<'a> {
     Binding(&'a String, &'a ExpressionType),
 }
 
-pub fn traverse_dots(node: &AstNode, mut callback: impl FnMut(&str, &SourceRange)) {
-    traverse_dots_recursive(node, &mut callback);
+pub fn traverse_dots(ast: &AstArena, node: &AstNode, mut callback: impl FnMut(&str, &SourceRange)) {
+    traverse_dots_recursive(ast, node, &mut callback);
 }
 
-fn traverse_dots_recursive(node: &AstNode, callback: &mut impl FnMut(&str, &SourceRange)) {
+fn traverse_dots_recursive(
+    ast: &AstArena,
+    node: &AstNode,
+    callback: &mut impl FnMut(&str, &SourceRange),
+) {
     match &node.value {
         AstNodeValue::BinExpr(BinOp::Dot, lhs, rhs) => {
-            traverse_dots_recursive(lhs, callback);
-            traverse_dots_recursive(rhs, callback);
+            traverse_dots_recursive(ast, ast.get(*lhs), callback);
+            traverse_dots_recursive(ast, ast.get(*rhs), callback);
         }
         AstNodeValue::Name { value, .. } => {
             callback(value, &node.provenance);
@@ -1915,16 +1967,16 @@ fn traverse_dots_recursive(node: &AstNode, callback: &mut impl FnMut(&str, &Sour
     }
 }
 
-fn typecheck_returns<'a>(
+fn typecheck_returns(
     context: &TypecheckContext,
     expected_ty: &ExpressionType,
-    current: &'a AstNode<'a>,
+    current: &AstNode,
 ) -> Result<(), TypecheckError> {
     let mut results = Ok(());
     if let AstNodeValue::Return(child) = &current.value {
         let return_ty = child
             .as_ref()
-            .map(|child| child.ty.get().unwrap())
+            .map(|child| context.ast.get(*child).ty.get().unwrap())
             .unwrap_or(&ExpressionType::Void);
         if !is_assignable_to(context.declarations, None, expected_ty, return_ty) {
             merge_results(
@@ -1937,20 +1989,24 @@ fn typecheck_returns<'a>(
             );
         }
     }
-    current.children(|child| {
+    current.children(context.ast, |child| {
         merge_results(&mut results, typecheck_returns(context, expected_ty, child))
     });
 
     results
 }
 
-fn validate_assignment_lhs(lhs: &AstNode<'_>) -> Result<(), TypecheckError> {
+fn validate_assignment_lhs(
+    context: &TypecheckContext,
+    lhs: &AstNode,
+) -> Result<(), TypecheckError> {
     match &lhs.value {
         // TODO: remove this if I add auto-deref later
         AstNodeValue::Name { .. } => {
             validate_assignment_lhs_ty(lhs.ty.get().unwrap(), &lhs.provenance)
         }
         AstNodeValue::Deref(inner) => {
+            let inner = context.ast.get(*inner);
             let Some(ExpressionType::Pointer(kind, _)) = inner.ty.get() else {
                 unreachable!()
             };
@@ -1961,10 +2017,12 @@ fn validate_assignment_lhs(lhs: &AstNode<'_>) -> Result<(), TypecheckError> {
             } else {
                 Ok(())
             };
-            merge_results(&mut errors, validate_assignment_lhs(inner));
+            merge_results(&mut errors, validate_assignment_lhs(context, inner));
             errors
         }
-        AstNodeValue::BinExpr(BinOp::Dot | BinOp::Index, lhs, _) => validate_assignment_lhs(lhs),
+        AstNodeValue::BinExpr(BinOp::Dot | BinOp::Index, lhs, _) => {
+            validate_assignment_lhs(context, context.ast.get(*lhs))
+        }
 
         AstNodeValue::BinExpr(_, _, _)
         | AstNodeValue::FunctionDeclaration(_)
@@ -2020,7 +2078,7 @@ fn typecheck_const<'a>(
     context: &TypecheckContext,
     outer_scopes: &[&HashMap<String, (AnyID, ExpressionType)>],
     current_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
-    node: &'a AstNode<'a>,
+    node: &'a AstNode,
 ) -> Result<&'a ExpressionType, TypecheckError> {
     let AstNodeValue::ConstDeclaration {
         name,
@@ -2031,6 +2089,7 @@ fn typecheck_const<'a>(
     else {
         unreachable!()
     };
+    let value = context.ast.get(*value);
     let value_ty = typecheck_expression(value, outer_scopes, current_scope, context, None)?;
     let mut result = Ok(());
     if !validate_is_const(value) {
@@ -2040,7 +2099,8 @@ fn typecheck_const<'a>(
         );
     }
     if let Some(type_hint) = type_hint {
-        let hint_ty = resolve_type_expr(&context.top_level_type_names, type_hint)?;
+        let type_hint = context.ast.get(*type_hint);
+        let hint_ty = resolve_type_expr(context.ast, &context.top_level_type_names, type_hint)?;
         merge_results(
             &mut result,
             assert_assignable_to(context.declarations, &value.provenance, &hint_ty, value_ty),
@@ -2161,17 +2221,20 @@ fn validate_assignment_lhs_ty(
     }
 }
 
-fn validate_lvalue(lvalue: &AstNode<'_>) -> bool {
+fn validate_lvalue(context: &TypecheckContext, lvalue: &AstNode) -> bool {
     match &lvalue.value {
         // TODO: remove this if I add auto-deref later
         AstNodeValue::Name { .. } => true,
         AstNodeValue::Deref(inner) => {
+            let inner = context.ast.get(*inner);
             let Some(ExpressionType::Pointer(kind, _)) = inner.ty.get() else {
                 unreachable!()
             };
-            *kind == PointerKind::Unique && validate_lvalue(inner)
+            *kind == PointerKind::Unique && validate_lvalue(context, inner)
         }
-        AstNodeValue::BinExpr(BinOp::Dot | BinOp::Index, lhs, _) => validate_lvalue(lhs),
+        AstNodeValue::BinExpr(BinOp::Dot | BinOp::Index, lhs, _) => {
+            validate_lvalue(context, context.ast.get(*lhs))
+        }
 
         AstNodeValue::BinExpr(_, _, _)
         | AstNodeValue::FunctionDeclaration(_)

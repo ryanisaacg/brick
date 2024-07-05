@@ -3,9 +3,9 @@ use bytemuck::{Pod, Zeroable};
 use crate::{
     multi_error::{merge_result_list, merge_results, merge_results_or_value},
     parser::{
-        AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
-        InterfaceDeclarationValue, NameAndType, StructDeclarationValue, UnionDeclarationValue,
-        UnionDeclarationVariant,
+        AstArena, AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
+        InterfaceDeclarationValue, NameAndType, ParsedFile, StructDeclarationValue,
+        UnionDeclarationValue, UnionDeclarationVariant,
     },
     typecheck::{
         CollectionType, FuncType, InterfaceType, ModuleType, PointerKind, PrimitiveType,
@@ -33,9 +33,7 @@ pub struct DeclarationContext {
 }
 
 impl DeclarationContext {
-    pub fn new(
-        files: &[(&'static str, Vec<AstNode<'_>>)],
-    ) -> Result<DeclarationContext, TypecheckError> {
+    pub fn new(files: &[(&'static str, ParsedFile)]) -> Result<DeclarationContext, TypecheckError> {
         let mut ctx = DeclarationContext {
             intrinsic_module: FileDeclarations::new(),
             files: HashMap::new(),
@@ -66,7 +64,7 @@ impl DeclarationContext {
         Ok(ctx)
     }
 
-    fn assign_ids_to_names(&mut self, module_name: &'static str, source: &[AstNode<'_>]) {
+    fn assign_ids_to_names(&mut self, module_name: &'static str, source: &ParsedFile) {
         let module = match self.files.get_mut(module_name) {
             Some(module) => module,
             None => {
@@ -88,7 +86,7 @@ impl DeclarationContext {
             unreachable!()
         };
 
-        for statement in source.iter() {
+        for statement in source.top_level.iter() {
             match &statement.value {
                 AstNodeValue::StructDeclaration(StructDeclarationValue { name, .. })
                 | AstNodeValue::UnionDeclaration(UnionDeclarationValue { name, .. })
@@ -113,12 +111,12 @@ impl DeclarationContext {
     fn fill_in_file_type_info(
         &mut self,
         module_name: &'static str,
-        source: &[AstNode<'_>],
+        source: &ParsedFile,
     ) -> Result<(), TypecheckError> {
         let mut result = Ok(());
 
         let mut imports = Vec::new();
-        for statement in source.iter() {
+        for statement in source.top_level.iter() {
             let AstNodeValue::Import(path) = &statement.value else {
                 continue;
             };
@@ -151,11 +149,12 @@ impl DeclarationContext {
         }
 
         let mut declarations = Vec::new();
-        for statement in source.iter() {
+        for statement in source.top_level.iter() {
             let decl = match &statement.value {
                 AstNodeValue::StructDeclaration(decl) => merge_results_or_value(
                     &mut result,
                     fill_in_struct_info(
+                        &source.arena,
                         &names_to_type_id,
                         file,
                         &mut self.id_to_func,
@@ -165,11 +164,22 @@ impl DeclarationContext {
                 ),
                 AstNodeValue::UnionDeclaration(decl) => merge_results_or_value(
                     &mut result,
-                    fill_in_union_decl(&names_to_type_id, decl, &statement.provenance),
+                    fill_in_union_decl(
+                        &source.arena,
+                        &names_to_type_id,
+                        decl,
+                        &statement.provenance,
+                    ),
                 ),
                 AstNodeValue::InterfaceDeclaration(decl) => merge_results_or_value(
                     &mut result,
-                    fill_in_interface_decl(&names_to_type_id, file, &mut self.id_to_func, decl),
+                    fill_in_interface_decl(
+                        &source.arena,
+                        &names_to_type_id,
+                        file,
+                        &mut self.id_to_func,
+                        decl,
+                    ),
                 ),
                 _ => None,
             };
@@ -183,6 +193,7 @@ impl DeclarationContext {
                     merge_results_or_value(
                         &mut result,
                         fill_in_fn_header(
+                            &source.arena,
                             &names_to_type_id,
                             id,
                             func,
@@ -198,7 +209,14 @@ impl DeclarationContext {
                     }
                     merge_results_or_value(
                         &mut result,
-                        fill_in_fn_decl(&names_to_type_id, id, func, false, &statement.provenance),
+                        fill_in_fn_decl(
+                            &source.arena,
+                            &names_to_type_id,
+                            id,
+                            func,
+                            false,
+                            &statement.provenance,
+                        ),
                     )
                 }
                 _ => None,
@@ -405,6 +423,7 @@ fn resolve_import(
 }
 
 fn fill_in_struct_info(
+    ast: &AstArena,
     names_to_type_id: &HashMap<&str, TypeID>,
     module: &FileDeclarations,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
@@ -417,7 +436,7 @@ fn fill_in_struct_info(
              ty,
              provenance,
          }| {
-            let ty = resolve_type_expr(names_to_type_id, ty)?;
+            let ty = resolve_type_expr(ast, names_to_type_id, ast.get(*ty))?;
             if matches!(ty, ExpressionType::Pointer(_, _)) {
                 return Err(TypecheckError::IllegalReferenceInsideDataType(
                     provenance.clone(),
@@ -437,7 +456,14 @@ fn fill_in_struct_info(
                 associated_functions.insert(func.name.clone(), func_id);
                 if let Some(func_type) = merge_results_or_value(
                     &mut result,
-                    fill_in_fn_decl(names_to_type_id, func_id, func, true, &node.provenance),
+                    fill_in_fn_decl(
+                        ast,
+                        names_to_type_id,
+                        func_id,
+                        func,
+                        true,
+                        &node.provenance,
+                    ),
                 ) {
                     id_to_func.insert(func_id, func_type);
                 }
@@ -473,6 +499,7 @@ fn fill_in_struct_info(
 }
 
 fn fill_in_interface_decl(
+    ast: &AstArena,
     names_to_type_id: &HashMap<&str, TypeID>,
     module: &FileDeclarations,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
@@ -487,11 +514,11 @@ fn fill_in_interface_decl(
         let func_type = match &node.value {
             AstNodeValue::RequiredFunction(func) => {
                 associated_functions.insert(func.name.clone(), func_id);
-                fill_in_fn_header(names_to_type_id, func_id, func, true, &node.provenance)
+                fill_in_fn_header(ast, names_to_type_id, func_id, func, true, &node.provenance)
             }
             AstNodeValue::FunctionDeclaration(func) => {
                 associated_functions.insert(func.name.clone(), func_id);
-                fill_in_fn_decl(names_to_type_id, func_id, func, true, &node.provenance)
+                fill_in_fn_decl(ast, names_to_type_id, func_id, func, true, &node.provenance)
             }
             _ => panic!("Associated function should not be anything but function declaration"),
         };
@@ -508,6 +535,7 @@ fn fill_in_interface_decl(
 }
 
 fn fill_in_union_decl(
+    ast: &AstArena,
     names_to_type_id: &HashMap<&str, TypeID>,
     UnionDeclarationValue {
         variants: variant_ast,
@@ -523,7 +551,7 @@ fn fill_in_union_decl(
                 ty,
                 provenance,
             }) => {
-                let ty = resolve_type_expr(names_to_type_id, ty)?;
+                let ty = resolve_type_expr(ast, names_to_type_id, ast.get(*ty))?;
                 if matches!(ty, ExpressionType::Pointer(_, _)) {
                     return Err(TypecheckError::IllegalReferenceInsideDataType(
                         provenance.clone(),
@@ -563,6 +591,7 @@ fn fill_in_union_decl(
 }
 
 fn fill_in_fn_decl(
+    ast: &AstArena,
     names_to_type_id: &HashMap<&str, TypeID>,
     id: FunctionID,
     FunctionDeclarationValue {
@@ -579,11 +608,13 @@ fn fill_in_fn_decl(
         type_param_count: 0,
         params: params
             .iter()
-            .map(|(_, NameAndType { ty: type_, .. })| resolve_type_expr(names_to_type_id, type_))
+            .map(|(_, NameAndType { ty, .. })| {
+                resolve_type_expr(ast, names_to_type_id, ast.get(*ty))
+            })
             .collect::<Result<Vec<_>, _>>()?,
         returns: returns
             .as_ref()
-            .map(|returns| resolve_type_expr(names_to_type_id, returns))
+            .map(|returns| resolve_type_expr(ast, names_to_type_id, ast.get(*returns)))
             .unwrap_or(Ok(ExpressionType::Void))?,
         is_associated,
         is_coroutine: *is_coroutine,
@@ -592,6 +623,7 @@ fn fill_in_fn_decl(
 }
 
 fn fill_in_fn_header(
+    ast: &AstArena,
     names_to_type_id: &HashMap<&str, TypeID>,
     id: FunctionID,
     FunctionHeaderValue {
@@ -605,11 +637,11 @@ fn fill_in_fn_header(
         type_param_count: 0,
         params: params
             .iter()
-            .map(|NameAndType { ty: type_, .. }| resolve_type_expr(names_to_type_id, type_))
+            .map(|NameAndType { ty, .. }| resolve_type_expr(ast, names_to_type_id, ast.get(*ty)))
             .collect::<Result<Vec<_>, _>>()?,
         returns: returns
             .as_ref()
-            .map(|returns| resolve_type_expr(names_to_type_id, returns))
+            .map(|returns| resolve_type_expr(ast, names_to_type_id, ast.get(*returns)))
             .unwrap_or(Ok(ExpressionType::Void))?,
         is_associated,
         is_coroutine: false,
@@ -618,8 +650,9 @@ fn fill_in_fn_header(
 }
 
 pub fn resolve_type_expr(
+    ast: &AstArena,
     name_to_type_id: &HashMap<&str, TypeID>,
-    node: &AstNode<'_>,
+    node: &AstNode,
 ) -> Result<ExpressionType, TypecheckError> {
     Ok(match &node.value {
         AstNodeValue::Name { value: name, .. } => match name.as_str() {
@@ -640,31 +673,35 @@ pub fn resolve_type_expr(
         AstNodeValue::VoidType => ExpressionType::Void,
         AstNodeValue::UniqueType(inner) => ExpressionType::Pointer(
             PointerKind::Unique,
-            Box::new(resolve_type_expr(name_to_type_id, inner)?),
+            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*inner))?),
         ),
         AstNodeValue::SharedType(inner) => ExpressionType::Pointer(
             PointerKind::Shared,
-            Box::new(resolve_type_expr(name_to_type_id, inner)?),
+            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*inner))?),
         ),
         AstNodeValue::ArrayType(inner) => ExpressionType::Collection(CollectionType::Array(
-            Box::new(resolve_type_expr(name_to_type_id, inner)?),
+            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*inner))?),
         )),
-        AstNodeValue::RcType(inner) => ExpressionType::Collection(
-            CollectionType::ReferenceCounter(Box::new(resolve_type_expr(name_to_type_id, inner)?)),
-        ),
-        AstNodeValue::DictType(key, value) => ExpressionType::Collection(CollectionType::Dict(
-            Box::new(resolve_type_expr(name_to_type_id, key)?),
-            Box::new(resolve_type_expr(name_to_type_id, value)?),
-        )),
-        AstNodeValue::NullableType(inner) => {
-            ExpressionType::Nullable(Box::new(resolve_type_expr(name_to_type_id, inner)?))
+        AstNodeValue::RcType(inner) => {
+            ExpressionType::Collection(CollectionType::ReferenceCounter(Box::new(
+                resolve_type_expr(ast, name_to_type_id, ast.get(*inner))?,
+            )))
         }
+        AstNodeValue::DictType(key, value) => ExpressionType::Collection(CollectionType::Dict(
+            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*key))?),
+            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*value))?),
+        )),
+        AstNodeValue::NullableType(inner) => ExpressionType::Nullable(Box::new(resolve_type_expr(
+            ast,
+            name_to_type_id,
+            ast.get(*inner),
+        )?)),
         AstNodeValue::GeneratorType { yield_ty, param_ty } => ExpressionType::Generator {
-            yield_ty: Box::new(resolve_type_expr(name_to_type_id, yield_ty)?),
-            param_ty: Box::new(resolve_type_expr(name_to_type_id, param_ty)?),
+            yield_ty: Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*yield_ty))?),
+            param_ty: Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*param_ty))?),
         },
         AstNodeValue::CellType(inner_ty) => ExpressionType::Collection(CollectionType::Cell(
-            Box::new(resolve_type_expr(name_to_type_id, inner_ty)?),
+            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*inner_ty))?),
         )),
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::RequiredFunction(_)

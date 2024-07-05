@@ -2,32 +2,32 @@ use std::cmp::Ordering;
 
 use brick::{
     parse_file,
-    parser::{AstNode, AstNodeValue, BinOp, UnaryOp, UnionDeclarationVariant},
+    parser::{
+        AstArena, AstNode, AstNodeValue, BinOp, ParsedFile, UnaryOp, UnionDeclarationVariant,
+    },
     CompileError,
 };
-use typed_arena::Arena;
 
 pub fn format_str(source: &str) -> Result<String, CompileError> {
-    let parse_arena = Arena::new();
-    let mut ast = parse_file(&parse_arena, "input", source.to_string())?;
+    let mut file = parse_file("input", source.to_string())?;
 
-    Ok(format(&mut ast[..]))
+    Ok(format(&mut file))
 }
 
-pub fn format(nodes: &mut [AstNode]) -> String {
+pub fn format(nodes: &mut ParsedFile) -> String {
     rewrite(nodes);
 
     let mut output = String::new();
-    for node in nodes.iter() {
-        write_node(node, &mut output, 0);
+    for node in nodes.top_level.iter() {
+        write_node(&nodes.arena, node, &mut output, 0);
         output.push('\n');
     }
     output
 }
 
-fn rewrite(nodes: &mut [AstNode]) {
+fn rewrite(nodes: &mut ParsedFile) {
     // Move imports to the top of the block
-    nodes.sort_by(|a, b| match (&a.value, &b.value) {
+    nodes.top_level.sort_by(|a, b| match (&a.value, &b.value) {
         (AstNodeValue::Import(a_path), AstNodeValue::Import(b_path)) => a_path.cmp(b_path),
         (AstNodeValue::Import(_), _) => Ordering::Less,
         (_, AstNodeValue::Import(_)) => Ordering::Greater,
@@ -35,31 +35,33 @@ fn rewrite(nodes: &mut [AstNode]) {
     });
 }
 
-fn write_node(node: &AstNode, result: &mut String, indent: u32) {
+fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) {
     match &node.value {
         AstNodeValue::FunctionDeclaration(func) => {
             write_function_header(
+                ast,
                 result,
                 &func.name,
                 func.params
                     .iter()
-                    .map(|(_, param)| (param.name.as_str(), param.ty)),
-                func.returns.as_deref(),
+                    .map(|(_, param)| (param.name.as_str(), ast.get(param.ty))),
+                func.returns.map(|returns| ast.get(returns)),
                 func.is_extern,
                 func.is_coroutine,
             );
             result.push(' ');
-            write_node(func.body, result, indent);
+            write_node(ast, ast.get(func.body), result, indent);
             result.push('\n');
         }
         AstNodeValue::ExternFunctionBinding(func) => {
             write_function_header(
+                ast,
                 result,
                 func.name.as_str(),
                 func.params
                     .iter()
-                    .map(|param| (param.name.as_str(), param.ty)),
-                func.returns.as_deref(),
+                    .map(|param| (param.name.as_str(), ast.get(param.ty))),
+                func.returns.map(|returns| ast.get(returns)),
                 true,
                 false,
             );
@@ -83,13 +85,13 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
                 do_indent(result, indent + 1);
                 result.push_str(field.name.as_str());
                 result.push_str(": ");
-                write_node(field.ty, result, indent + 1);
+                write_node(ast, ast.get(field.ty), result, indent + 1);
                 result.push_str(",\n");
             }
             if !decl.associated_functions.is_empty() {
                 result.push('\n');
                 for func in decl.associated_functions.iter() {
-                    write_node(func, result, indent + 1);
+                    write_node(ast, func, result, indent + 1);
                 }
             }
             result.push_str("}\n");
@@ -114,7 +116,7 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
                     UnionDeclarationVariant::WithValue(variant) => {
                         result.push_str(variant.name.as_str());
                         result.push('(');
-                        write_node(variant.ty, result, indent + 1);
+                        write_node(ast, ast.get(variant.ty), result, indent + 1);
                         result.push(')');
                     }
                     UnionDeclarationVariant::WithoutValue(variant) => {
@@ -131,18 +133,19 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             result.push_str(" {\n");
             for func in decl.associated_functions.iter() {
                 do_indent(result, indent + 1);
-                write_node(func, result, indent + 1);
+                write_node(ast, func, result, indent + 1);
             }
             result.push_str("}\n");
         }
         AstNodeValue::RequiredFunction(func) => {
             write_function_header(
+                ast,
                 result,
                 func.name.as_str(),
                 func.params
                     .iter()
-                    .map(|param| (param.name.as_str(), param.ty)),
-                func.returns.as_deref(),
+                    .map(|param| (param.name.as_str(), ast.get(param.ty))),
+                func.returns.map(|returns| ast.get(returns)),
                 false,
                 false,
             );
@@ -153,10 +156,10 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             result.push_str(var_name.as_str());
             if let Some(ty) = type_hint {
                 result.push_str(": ");
-                write_node(ty, result, indent);
+                write_node(ast, ast.get(*ty), result, indent);
             }
             result.push_str(" = ");
-            write_node(value, result, indent);
+            write_node(ast, ast.get(*value), result, indent);
             result.push(';');
         }
         AstNodeValue::ConstDeclaration {
@@ -169,17 +172,17 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             result.push_str(name.as_str());
             if let Some(ty) = type_hint {
                 result.push_str(": ");
-                write_node(ty, result, indent);
+                write_node(ast, ast.get(*ty), result, indent);
             }
             result.push_str(" = ");
-            write_node(value, result, indent);
+            write_node(ast, ast.get(*value), result, indent);
             result.push(';');
         }
         AstNodeValue::BorrowDeclaration(name, value, _) => {
             result.push_str("borrow ");
             result.push_str(name.as_str());
             result.push_str(" = ");
-            write_node(value, result, indent);
+            write_node(ast, ast.get(*value), result, indent);
             result.push(';');
         }
         AstNodeValue::Import(path) => {
@@ -196,7 +199,7 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             result.push_str("return");
             if let Some(inner) = inner {
                 result.push(' ');
-                write_node(inner, result, indent);
+                write_node(ast, ast.get(*inner), result, indent);
             } else {
                 result.push(';');
             }
@@ -205,12 +208,12 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             result.push_str("yield");
             if let Some(inner) = inner {
                 result.push(' ');
-                write_node(inner, result, indent);
+                write_node(ast, ast.get(*inner), result, indent);
             }
         }
         AstNodeValue::Statement(inner) => {
             do_indent(result, indent);
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
             result.push(';');
         }
         AstNodeValue::Name {
@@ -235,27 +238,27 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             match op {
                 UnaryOp::BooleanNot => result.push('!'),
             }
-            write_node(operand, result, indent);
+            write_node(ast, ast.get(*operand), result, indent);
         }
         AstNodeValue::BinExpr(BinOp::Index, lhs, rhs) => {
-            write_node(lhs, result, indent);
+            write_node(ast, ast.get(*lhs), result, indent);
             result.push('[');
-            write_node(rhs, result, indent);
+            write_node(ast, ast.get(*rhs), result, indent);
             result.push(']');
         }
         AstNodeValue::BinExpr(BinOp::Dot, lhs, rhs) => {
-            write_node(lhs, result, indent);
+            write_node(ast, ast.get(*lhs), result, indent);
             result.push('.');
-            write_node(rhs, result, indent);
+            write_node(ast, ast.get(*rhs), result, indent);
         }
         AstNodeValue::BinExpr(BinOp::NullChaining, lhs, rhs) => {
-            write_node(lhs, result, indent);
+            write_node(ast, ast.get(*lhs), result, indent);
             result.push_str("?.");
-            write_node(rhs, result, indent);
+            write_node(ast, ast.get(*rhs), result, indent);
         }
         // TODO: paranthesize expressions as necessary
         AstNodeValue::BinExpr(op, lhs, rhs) => {
-            let paren_left = if let AstNodeValue::BinExpr(lhs_op, _, _) = &lhs.value {
+            let paren_left = if let AstNodeValue::BinExpr(lhs_op, _, _) = &ast.get(*lhs).value {
                 op.binding_power() > lhs_op.binding_power()
             } else {
                 false
@@ -263,7 +266,7 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             if paren_left {
                 result.push('(');
             }
-            write_node(lhs, result, indent);
+            write_node(ast, ast.get(*lhs), result, indent);
             if paren_left {
                 result.push(')');
             }
@@ -291,7 +294,7 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
                 BinOp::BooleanOr => "or",
             });
             result.push(' ');
-            let paren_right = if let AstNodeValue::BinExpr(rhs_op, _, _) = &rhs.value {
+            let paren_right = if let AstNodeValue::BinExpr(rhs_op, _, _) = &ast.get(*rhs).value {
                 op.binding_power() > rhs_op.binding_power()
             } else {
                 false
@@ -299,35 +302,35 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             if paren_right {
                 result.push('(');
             }
-            write_node(rhs, result, indent);
+            write_node(ast, ast.get(*rhs), result, indent);
             if paren_right {
                 result.push(')');
             }
         }
         AstNodeValue::If(decl) => {
             result.push_str("if ");
-            write_node(decl.condition, result, indent);
-            write_node(decl.if_branch, result, indent);
+            write_node(ast, ast.get(decl.condition), result, indent);
+            write_node(ast, ast.get(decl.if_branch), result, indent);
             // Remove the newline from the block output
             if let Some(else_branch) = decl.else_branch.as_ref() {
                 result.push_str(" else ");
-                write_node(else_branch, result, indent);
+                write_node(ast, ast.get(*else_branch), result, indent);
             }
         }
         AstNodeValue::While(cond, body) => {
             result.push_str("while ");
-            write_node(cond, result, indent);
-            write_node(body, result, indent);
+            write_node(ast, ast.get(*cond), result, indent);
+            write_node(ast, ast.get(*body), result, indent);
         }
         AstNodeValue::Loop(body) => {
             result.push_str("loop ");
-            write_node(body, result, indent);
+            write_node(ast, ast.get(*body), result, indent);
         }
         AstNodeValue::Call(func, args) => {
-            write_node(func, result, indent);
+            write_node(ast, ast.get(*func), result, indent);
             result.push('(');
             for (idx, arg) in args.iter().enumerate() {
-                write_node(arg, result, indent);
+                write_node(ast, arg, result, indent);
                 if idx + 1 != args.len() {
                     result.push_str(", ");
                 }
@@ -335,7 +338,7 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             result.push(')');
         }
         AstNodeValue::RecordLiteral { name, fields } => {
-            write_node(name, result, indent);
+            write_node(ast, ast.get(*name), result, indent);
             result.push_str("{ ");
             let mut field_order: Vec<_> = fields.keys().collect();
             field_order.sort();
@@ -343,7 +346,7 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
                 // TODO: unify { name: name }
                 result.push_str(field);
                 result.push_str(": ");
-                write_node(&fields[*field], result, indent);
+                write_node(ast, &fields[*field], result, indent);
                 if idx + 1 != field_order.len() {
                     result.push_str(", ");
                 }
@@ -354,9 +357,9 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             result.push_str("dict{ ");
             for (idx, (key, value)) in entries.iter().enumerate() {
                 result.push('[');
-                write_node(key, result, indent);
+                write_node(ast, key, result, indent);
                 result.push_str("]: ");
-                write_node(value, result, indent);
+                write_node(ast, value, result, indent);
                 if idx + 1 != entries.len() {
                     result.push_str(", ");
                 }
@@ -366,7 +369,7 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
         AstNodeValue::ArrayLiteral(entries) => {
             result.push_str("list[");
             for (idx, entry) in entries.iter().enumerate() {
-                write_node(entry, result, indent);
+                write_node(ast, entry, result, indent);
                 if idx + 1 != entries.len() {
                     result.push_str(", ");
                 }
@@ -375,19 +378,19 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
         }
         AstNodeValue::ArrayLiteralLength(value, times) => {
             result.push_str("list[");
-            write_node(value, result, indent);
+            write_node(ast, ast.get(*value), result, indent);
             result.push_str("; ");
-            write_node(times, result, indent);
+            write_node(ast, ast.get(*times), result, indent);
             result.push(']');
         }
         AstNodeValue::ReferenceCountLiteral(inner) => {
             result.push_str("rc {");
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
             result.push_str(" }");
         }
         AstNodeValue::CellLiteral(inner) => {
             result.push_str("cell {");
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
             result.push_str(" }");
         }
         AstNodeValue::Block(values) => {
@@ -395,7 +398,7 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
             for value in values.iter() {
                 let indent = indent + 1;
                 do_indent(result, indent);
-                write_node(value, result, indent);
+                write_node(ast, value, result, indent);
                 result.push('\n');
             }
             do_indent(result, indent);
@@ -403,11 +406,11 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
         }
         AstNodeValue::Deref(inner) => {
             result.push('*');
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
         }
         AstNodeValue::Match(decl) => {
             result.push_str("case ");
-            write_node(decl.value, result, indent);
+            write_node(ast, ast.get(decl.value), result, indent);
             result.push_str(" {\n");
             for case in decl.cases.iter() {
                 do_indent(result, indent + 1);
@@ -428,7 +431,7 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
                     }
                 }
                 result.push_str(" => ");
-                write_node(&case.body, result, indent + 1);
+                write_node(ast, &case.body, result, indent + 1);
                 if !matches!(&case.body.value, AstNodeValue::Block(_)) {
                     result.push(',');
                 }
@@ -439,52 +442,53 @@ fn write_node(node: &AstNode, result: &mut String, indent: u32) {
         AstNodeValue::VoidType => result.push_str("void"),
         AstNodeValue::TakeUnique(inner) | AstNodeValue::UniqueType(inner) => {
             result.push_str("unique ");
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
         }
         AstNodeValue::TakeRef(inner) | AstNodeValue::SharedType(inner) => {
             result.push_str("ref ");
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
         }
         AstNodeValue::ArrayType(inner) => {
             result.push_str("list[");
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
             result.push(']');
         }
         AstNodeValue::DictType(key_ty, value_ty) => {
             result.push_str("list[");
-            write_node(key_ty, result, indent);
+            write_node(ast, ast.get(*key_ty), result, indent);
             result.push_str(", ");
-            write_node(value_ty, result, indent);
+            write_node(ast, ast.get(*value_ty), result, indent);
             result.push(']');
         }
         AstNodeValue::RcType(inner) => {
             result.push_str("rc[");
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
             result.push(']');
         }
         AstNodeValue::CellType(inner) => {
             result.push_str("cell[");
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
             result.push(']');
         }
         AstNodeValue::NullableType(inner) => {
-            write_node(inner, result, indent);
+            write_node(ast, ast.get(*inner), result, indent);
             result.push('?');
         }
         AstNodeValue::GeneratorType { yield_ty, param_ty } => {
             result.push_str("generator[");
-            write_node(yield_ty, result, indent);
+            write_node(ast, ast.get(*yield_ty), result, indent);
             result.push_str(", ");
-            write_node(param_ty, result, indent);
+            write_node(ast, ast.get(*param_ty), result, indent);
             result.push(']');
         }
     }
 }
 
 fn write_function_header<'iter, 'node: 'iter>(
+    ast: &AstArena,
     result: &mut String,
     name: &str,
-    params: impl Iterator<Item = (&'iter str, &'iter AstNode<'node>)>,
+    params: impl Iterator<Item = (&'iter str, &'iter AstNode)>,
     returns: Option<&AstNode>,
     is_extern: bool,
     is_coroutine: bool,
@@ -502,7 +506,7 @@ fn write_function_header<'iter, 'node: 'iter>(
     while let Some((name, ty)) = params.next() {
         result.push_str(name);
         result.push_str(": ");
-        write_node(ty, result, 0);
+        write_node(ast, ty, result, 0);
         if params.peek().is_some() {
             result.push_str(", ");
         }
@@ -510,7 +514,7 @@ fn write_function_header<'iter, 'node: 'iter>(
     result.push(')');
     if let Some(returns) = &returns {
         result.push_str(": ");
-        write_node(returns, result, 0);
+        write_node(ast, returns, result, 0);
     }
 }
 

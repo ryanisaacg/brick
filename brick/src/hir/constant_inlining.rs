@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     id::{AnyID, ConstantID},
-    parser::{AstNode, AstNodeValue},
+    parser::{AstArena, AstNode, AstNodeValue},
     typecheck::TypecheckedFile,
     DeclarationContext, HirNodeValue,
 };
@@ -10,22 +10,24 @@ use crate::{
 use super::{lower::lower_node, HirModule, HirNode};
 
 pub fn extract_constant_values(
-    ast: &TypecheckedFile,
+    ast: &AstArena,
+    types: &TypecheckedFile,
     declarations: &DeclarationContext,
 ) -> HashMap<ConstantID, HirNode> {
     let mut map = HashMap::new();
-    for statement in ast.top_level_statements.iter() {
-        extract_constant_value(statement, declarations, &mut map);
+    for statement in types.top_level_statements.iter() {
+        extract_constant_value(ast, statement, declarations, &mut map);
     }
-    for func in ast.functions.iter() {
-        extract_constant_value(func.func.body, declarations, &mut map);
+    for func in types.functions.iter() {
+        extract_constant_value(ast, ast.get(func.func.body), declarations, &mut map);
     }
 
     map
 }
 
-fn extract_constant_value<'a>(
-    node: &'a AstNode<'a>,
+fn extract_constant_value(
+    ast: &AstArena,
+    node: &AstNode,
     decls: &DeclarationContext,
     map: &mut HashMap<ConstantID, HirNode>,
 ) {
@@ -33,11 +35,11 @@ fn extract_constant_value<'a>(
         value, variable_id, ..
     } = &node.value
     {
-        let value = lower_node(decls, value);
+        let value = lower_node(decls, ast, ast.get(*value));
         map.insert(*variable_id, value);
     }
-    node.children(|child| {
-        extract_constant_value(child, decls, map);
+    node.children(ast, |child| {
+        extract_constant_value(ast, child, decls, map);
     });
 }
 

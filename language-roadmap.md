@@ -71,3 +71,5 @@ linear types (requires destructuring):
 - linear value reaching end of a function unused is a compile error
 - linear value conditionally being dropped is a compile error
 - linear value re-assigned without dropping is a compile error
+
+operator overloading?
