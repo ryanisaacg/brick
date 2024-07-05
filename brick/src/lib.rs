@@ -62,6 +62,7 @@ pub enum CompileError {
     LifetimeError(#[from] LifetimeError),
 }
 
+#[derive(Clone, Debug)]
 pub struct SourceFile {
     pub filename: &'static str,
     pub module_name: &'static str,
@@ -70,18 +71,22 @@ pub struct SourceFile {
 
 impl SourceFile {
     pub fn from_filename(filename: &'static str) -> io::Result<SourceFile> {
+        let contents = std::fs::read_to_string(filename)?;
+        Ok(Self::from_filename_and_contents(filename, contents))
+    }
+
+    pub fn from_filename_and_contents(filename: &'static str, contents: String) -> SourceFile {
         let after_last_slash = filename
             .rfind(std::path::MAIN_SEPARATOR)
             .map(|idx| idx + 1)
             .unwrap_or(0);
         let dot = filename.find('.').unwrap_or(filename.len());
         let module_name = &filename[after_last_slash..dot];
-        let contents = std::fs::read_to_string(filename)?;
-        Ok(SourceFile {
+        SourceFile {
             filename,
             module_name,
             contents,
-        })
+        }
     }
 }
 

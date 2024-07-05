@@ -1,22 +1,20 @@
 // Adapating from the example from the lsp-server repo
 
+use lsp_types::notification::{
+    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
+};
 use lsp_types::request::{Request as _, ShowMessageRequest};
-use lsp_types::{request::GotoDefinition, InitializeParams, ServerCapabilities};
-use lsp_types::{MessageType, OneOf, ShowMessageParams};
+use lsp_types::{request::GotoDefinition, InitializeParams};
+use lsp_types::{MessageType, ShowMessageParams};
 
-use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
-use server_state::ServerState;
-
-mod server_state;
+use brick_lsp::ServerState;
+use lsp_server::{Connection, ExtractError, Message, Notification, Request, Response};
 
 fn main() -> anyhow::Result<()> {
     eprintln!("brick-lsp booting up");
 
     let (connection, io_threads) = Connection::stdio();
-    let server_capabilities = serde_json::to_value(ServerCapabilities {
-        definition_provider: Some(OneOf::Left(true)),
-        ..Default::default()
-    })?;
+    let server_capabilities = serde_json::to_value(ServerState::capabilities())?;
     let initialization_params = match connection.initialize(server_capabilities) {
         Ok(it) => it,
         Err(e) => {
@@ -37,13 +35,11 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
     let mut server = ServerState::new();
     let _params: InitializeParams = serde_json::from_value(params)?;
     for msg in &connection.receiver {
-        eprintln!("got msg: {msg:?}");
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req)? {
                     return Ok(());
                 }
-                eprintln!("got request: {req:?}");
                 match handle_request(&mut server, req) {
                     Ok(Some(resp)) => {
                         connection.sender.send(Message::Response(resp))?;
@@ -65,11 +61,9 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
                     }
                 }
             }
-            Message::Response(resp) => {
-                eprintln!("got response: {resp:?}");
-            }
+            Message::Response(_resp) => {}
             Message::Notification(not) => {
-                eprintln!("got notification: {not:?}");
+                handle_notification(&mut server, not)?;
             }
         }
     }
@@ -78,7 +72,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
 
 fn handle_request(server: &mut ServerState, req: Request) -> anyhow::Result<Option<Response>> {
     Ok(match req.method.as_str() {
-        GotoDefinition::METHOD => match cast::<GotoDefinition>(req) {
+        GotoDefinition::METHOD => match req.extract(GotoDefinition::METHOD) {
             Ok((id, params)) => {
                 eprintln!("got gotoDefinition request #{id}: {params:?}\n");
                 let result = server.goto_definition(params)?;
@@ -96,10 +90,30 @@ fn handle_request(server: &mut ServerState, req: Request) -> anyhow::Result<Opti
     })
 }
 
-fn cast<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
-where
-    R: lsp_types::request::Request,
-    R::Params: serde::de::DeserializeOwned,
-{
-    req.extract(R::METHOD)
+fn handle_notification(server: &mut ServerState, notif: Notification) -> anyhow::Result<()> {
+    match notif.method.as_str() {
+        DidOpenTextDocument::METHOD => match notif.extract(DidOpenTextDocument::METHOD) {
+            Ok(params) => {
+                server.did_open_text_document(params);
+            }
+            Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+            Err(ExtractError::MethodMismatch(_)) => unreachable!(),
+        },
+        DidChangeTextDocument::METHOD => match notif.extract(DidChangeTextDocument::METHOD) {
+            Ok(params) => {
+                server.did_change_text_document(params);
+            }
+            Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+            Err(ExtractError::MethodMismatch(_)) => unreachable!(),
+        },
+        DidCloseTextDocument::METHOD => match notif.extract(DidCloseTextDocument::METHOD) {
+            Ok(params) => {
+                server.did_close_text_document(params);
+            }
+            Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+            Err(ExtractError::MethodMismatch(_)) => unreachable!(),
+        },
+        _ => {}
+    }
+    Ok(())
 }
