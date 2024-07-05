@@ -5,8 +5,9 @@ use lsp_types::{request::GotoDefinition, InitializeParams, ServerCapabilities};
 use lsp_types::{MessageType, OneOf, ShowMessageParams};
 
 use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
+use server_state::ServerState;
 
-mod goto_definition;
+mod server_state;
 
 fn main() -> anyhow::Result<()> {
     eprintln!("brick-lsp booting up");
@@ -33,6 +34,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Result<()> {
+    let mut server = ServerState::new();
     let _params: InitializeParams = serde_json::from_value(params)?;
     for msg in &connection.receiver {
         eprintln!("got msg: {msg:?}");
@@ -42,7 +44,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
                     return Ok(());
                 }
                 eprintln!("got request: {req:?}");
-                match handle_request(req) {
+                match handle_request(&mut server, req) {
                     Ok(Some(resp)) => {
                         connection.sender.send(Message::Response(resp))?;
                     }
@@ -74,12 +76,12 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
     Ok(())
 }
 
-fn handle_request(req: Request) -> anyhow::Result<Option<Response>> {
+fn handle_request(server: &mut ServerState, req: Request) -> anyhow::Result<Option<Response>> {
     Ok(match req.method.as_str() {
         GotoDefinition::METHOD => match cast::<GotoDefinition>(req) {
             Ok((id, params)) => {
                 eprintln!("got gotoDefinition request #{id}: {params:?}\n");
-                let result = goto_definition::handle_goto_definition(params)?;
+                let result = server.goto_definition(params)?;
                 let result = serde_json::to_value(result)?;
                 Some(Response {
                     id,
