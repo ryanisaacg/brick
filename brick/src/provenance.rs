@@ -58,8 +58,8 @@ impl SourceRange {
     pub fn contains(&self, line: u32, char: u32) -> bool {
         line >= self.start_line
             && line <= self.end_line
-            && char >= self.start_offset
-            && char <= self.end_offset
+            && (line != self.start_line || char >= self.start_offset)
+            && (line != self.end_line || char <= self.end_offset)
     }
 }
 

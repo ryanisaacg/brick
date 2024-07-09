@@ -191,7 +191,7 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
         AstNodeValue::Block(contents) => {
             let contents = contents
                 .iter()
-                .map(|node| lower_node(decls, ast, node))
+                .map(|node| lower_node(decls, ast, ast.get(*node)))
                 .collect();
 
             HirNodeValue::Sequence(contents)
@@ -389,7 +389,7 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
             let func = lower_node_alloc(decls, ast, ast.get(*func));
             let params = params
                 .iter()
-                .map(|param| lower_node(decls, ast, param))
+                .map(|param| lower_node(decls, ast, ast.get(*param)))
                 .collect();
             HirNodeValue::Call(func, params)
         }
@@ -406,7 +406,9 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
                 TypeDeclaration::Struct(_) => {
                     let fields = fields
                         .iter()
-                        .map(|(name, field)| (name.clone(), lower_node(decls, ast, field)))
+                        .map(|(name, field)| {
+                            (name.clone(), lower_node(decls, ast, ast.get(*field)))
+                        })
                         .collect();
                     HirNodeValue::StructLiteral(id, fields)
                 }
@@ -422,13 +424,18 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
         AstNodeValue::DictLiteral(elements) => HirNodeValue::DictLiteral(
             elements
                 .iter()
-                .map(|(key, value)| (lower_node(decls, ast, key), lower_node(decls, ast, value)))
+                .map(|(key, value)| {
+                    (
+                        lower_node(decls, ast, ast.get(*key)),
+                        lower_node(decls, ast, ast.get(*value)),
+                    )
+                })
                 .collect(),
         ),
         AstNodeValue::ArrayLiteral(arr) => {
             let arr = arr
                 .iter()
-                .map(|elem| lower_node(decls, ast, elem))
+                .map(|elem| lower_node(decls, ast, ast.get(*elem)))
                 .collect();
             HirNodeValue::ArrayLiteral(arr)
         }
@@ -496,7 +503,7 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
                         );
                     };
                     let variant_ty = &union_decl.variants[union_variant];
-                    let body = lower_node(decls, ast, &case_decl.body);
+                    let body = lower_node(decls, ast, ast.get(case_decl.body));
                     let body_ty = body.ty.clone();
                     // If there's no variable to bind, return just the body
                     let Some(variant_ty) = variant_ty else {

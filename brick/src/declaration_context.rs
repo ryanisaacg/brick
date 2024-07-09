@@ -33,7 +33,9 @@ pub struct DeclarationContext {
 }
 
 impl DeclarationContext {
-    pub fn new(files: &[(&'static str, ParsedFile)]) -> Result<DeclarationContext, TypecheckError> {
+    pub fn new(
+        files: &[(&'static str, &ParsedFile)],
+    ) -> Result<DeclarationContext, TypecheckError> {
         let mut ctx = DeclarationContext {
             intrinsic_module: FileDeclarations::new(),
             files: HashMap::new(),
@@ -450,20 +452,14 @@ fn fill_in_struct_info(
 
     let mut associated_functions = HashMap::new();
     for node in decl.associated_functions.iter() {
+        let node = ast.get(*node);
         match &node.value {
             AstNodeValue::FunctionDeclaration(func) => {
                 let func_id = module.new_func_id();
                 associated_functions.insert(func.name.clone(), func_id);
                 if let Some(func_type) = merge_results_or_value(
                     &mut result,
-                    fill_in_fn_decl(
-                        ast,
-                        names_to_type_id,
-                        func_id,
-                        func,
-                        true,
-                        &node.provenance,
-                    ),
+                    fill_in_fn_decl(ast, names_to_type_id, func_id, func, true, &node.provenance),
                 ) {
                     id_to_func.insert(func_id, func_type);
                 }
@@ -510,6 +506,7 @@ fn fill_in_interface_decl(
     let mut results = Ok(());
     for node in interface.associated_functions.iter() {
         let func_id = module.new_func_id();
+        let node = ast.get(*node);
 
         let func_type = match &node.value {
             AstNodeValue::RequiredFunction(func) => {

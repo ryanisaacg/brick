@@ -7,7 +7,7 @@ use lsp_types::{
 };
 
 fn file_uri(filename: &str) -> anyhow::Result<Url> {
-    Ok(Url::parse(format!("file://{filename}").as_str())?)
+    Ok(Url::parse(format!("file://src/{filename}").as_str())?)
 }
 
 fn test_doc(uri: Url, contents: &str) -> TextDocumentItem {
@@ -33,13 +33,117 @@ func();"#,
     let mut server = ServerState::new();
     server.did_open_text_document(DidOpenTextDocumentParams {
         text_document: file,
-    });
+    })?;
     let resp = server.goto_definition(GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position {
                 line: 3,
                 character: 1,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams {
+            work_done_token: None,
+        },
+        partial_result_params: PartialResultParams {
+            partial_result_token: None,
+        },
+    })?;
+    assert_eq!(
+        resp,
+        Some(GotoDefinitionResponse::Scalar(Location {
+            uri,
+            range: Range {
+                start: Position {
+                    line: 1,
+                    character: 1
+                },
+                end: Position {
+                    line: 1,
+                    character: 12
+                },
+            },
+        }))
+    );
+
+    Ok(())
+}
+
+#[test]
+pub fn goto_definition_twice() -> anyhow::Result<()> {
+    let uri = file_uri("test.brick")?;
+    let file = test_doc(
+        uri.clone(),
+        r#"
+fn func() { }
+// other contents
+func();"#,
+    );
+
+    let mut server = ServerState::new();
+    server.did_open_text_document(DidOpenTextDocumentParams {
+        text_document: file,
+    })?;
+    let req = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 3,
+                character: 1,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams {
+            work_done_token: None,
+        },
+        partial_result_params: PartialResultParams {
+            partial_result_token: None,
+        },
+    };
+    server.goto_definition(req.clone())?;
+    let resp = server.goto_definition(req.clone())?;
+    assert_eq!(
+        resp,
+        Some(GotoDefinitionResponse::Scalar(Location {
+            uri,
+            range: Range {
+                start: Position {
+                    line: 1,
+                    character: 1
+                },
+                end: Position {
+                    line: 1,
+                    character: 12
+                },
+            },
+        }))
+    );
+
+    Ok(())
+}
+
+#[test]
+pub fn goto_definition_within_func() -> anyhow::Result<()> {
+    let uri = file_uri("test.brick")?;
+    let file = test_doc(
+        uri.clone(),
+        r#"
+fn func() { }
+// other contents
+fn func2() {
+    func();
+}"#,
+    );
+
+    let mut server = ServerState::new();
+    server.did_open_text_document(DidOpenTextDocumentParams {
+        text_document: file,
+    })?;
+    let resp = server.goto_definition(GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 4,
+                character: 6,
             },
         },
         work_done_progress_params: WorkDoneProgressParams {
@@ -83,7 +187,7 @@ func();"#,
     let mut server = ServerState::new();
     server.did_open_text_document(DidOpenTextDocumentParams {
         text_document: file,
-    });
+    })?;
     // Remove the reference
     server.did_change_text_document(DidChangeTextDocumentParams {
         text_document: VersionedTextDocumentIdentifier {
@@ -99,7 +203,7 @@ fn func() { }
 1 + 2"#
                 .to_string(),
         }],
-    });
+    })?;
 
     let resp = server.goto_definition(GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {

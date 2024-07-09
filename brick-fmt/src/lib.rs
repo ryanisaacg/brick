@@ -91,7 +91,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
             if !decl.associated_functions.is_empty() {
                 result.push('\n');
                 for func in decl.associated_functions.iter() {
-                    write_node(ast, func, result, indent + 1);
+                    write_node(ast, ast.get(*func), result, indent + 1);
                 }
             }
             result.push_str("}\n");
@@ -133,7 +133,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
             result.push_str(" {\n");
             for func in decl.associated_functions.iter() {
                 do_indent(result, indent + 1);
-                write_node(ast, func, result, indent + 1);
+                write_node(ast, ast.get(*func), result, indent + 1);
             }
             result.push_str("}\n");
         }
@@ -330,7 +330,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
             write_node(ast, ast.get(*func), result, indent);
             result.push('(');
             for (idx, arg) in args.iter().enumerate() {
-                write_node(ast, arg, result, indent);
+                write_node(ast, ast.get(*arg), result, indent);
                 if idx + 1 != args.len() {
                     result.push_str(", ");
                 }
@@ -346,7 +346,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 // TODO: unify { name: name }
                 result.push_str(field);
                 result.push_str(": ");
-                write_node(ast, &fields[*field], result, indent);
+                write_node(ast, ast.get(fields[*field]), result, indent);
                 if idx + 1 != field_order.len() {
                     result.push_str(", ");
                 }
@@ -357,9 +357,9 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
             result.push_str("dict{ ");
             for (idx, (key, value)) in entries.iter().enumerate() {
                 result.push('[');
-                write_node(ast, key, result, indent);
+                write_node(ast, ast.get(*key), result, indent);
                 result.push_str("]: ");
-                write_node(ast, value, result, indent);
+                write_node(ast, ast.get(*value), result, indent);
                 if idx + 1 != entries.len() {
                     result.push_str(", ");
                 }
@@ -369,7 +369,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
         AstNodeValue::ArrayLiteral(entries) => {
             result.push_str("list[");
             for (idx, entry) in entries.iter().enumerate() {
-                write_node(ast, entry, result, indent);
+                write_node(ast, ast.get(*entry), result, indent);
                 if idx + 1 != entries.len() {
                     result.push_str(", ");
                 }
@@ -398,7 +398,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
             for value in values.iter() {
                 let indent = indent + 1;
                 do_indent(result, indent);
-                write_node(ast, value, result, indent);
+                write_node(ast, ast.get(*value), result, indent);
                 result.push('\n');
             }
             do_indent(result, indent);
@@ -431,8 +431,9 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                     }
                 }
                 result.push_str(" => ");
-                write_node(ast, &case.body, result, indent + 1);
-                if !matches!(&case.body.value, AstNodeValue::Block(_)) {
+                let case_body = ast.get(case.body);
+                write_node(ast, case_body, result, indent + 1);
+                if !matches!(&case_body.value, AstNodeValue::Block(_)) {
                     result.push(',');
                 }
                 result.push('\n');

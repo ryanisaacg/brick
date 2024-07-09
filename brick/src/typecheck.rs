@@ -382,15 +382,106 @@ impl MultiError for TypecheckError {
     }
 }
 
-struct TypecheckContext<'a> {
-    ast: &'a AstArena,
-    declarations: &'a DeclarationContext,
-    top_level_type_names: HashMap<&'a str, TypeID>,
-    top_level_function_names: HashMap<&'a str, FunctionID>,
+pub struct TypecheckContext<'ast, 'decl> {
+    ast: &'ast AstArena,
+    declarations: &'decl DeclarationContext,
+    top_level_type_names: HashMap<&'decl str, TypeID>,
+    top_level_function_names: HashMap<&'decl str, FunctionID>,
     top_level_name_to_expr_type: HashMap<String, (AnyID, ExpressionType)>,
 }
 
-impl<'a> TypecheckContext<'a> {
+impl<'ast, 'decl> TypecheckContext<'ast, 'decl> {
+    pub fn new(
+        file: &'ast ParsedFile,
+        current_module_name: &str,
+        declarations: &'decl DeclarationContext,
+    ) -> Result<Self, TypecheckError> {
+        let mut top_level_type_names = HashMap::new();
+        let mut top_level_function_names = HashMap::new();
+        let mut top_level_name_to_expr_type = HashMap::new();
+
+        let module = &declarations.files[current_module_name];
+
+        // Insert the module's top-level
+        let top_level = declarations.id_to_decl[&module.module_id]
+            .as_module()
+            .unwrap();
+        for (name, ty) in top_level.exports.iter() {
+            match ty {
+                ExpressionType::Void
+                | ExpressionType::Unreachable
+                | ExpressionType::Primitive(_)
+                | ExpressionType::Pointer(_, _)
+                | ExpressionType::Collection(_)
+                | ExpressionType::Null
+                | ExpressionType::Nullable(_)
+                | ExpressionType::TypeParameterReference(_)
+                | ExpressionType::Generator { .. }
+                | ExpressionType::FunctionReference { .. }
+                | ExpressionType::InstanceOf(_) => unreachable!(),
+                ExpressionType::ReferenceToType(ty_id) => {
+                    let value = &declarations.id_to_decl[ty_id];
+                    top_level_type_names.insert(name.as_str(), *ty_id);
+                    top_level_name_to_expr_type
+                        .insert(name.clone(), (value.fn_id_or_type_id(), value.ref_to()));
+                }
+                ExpressionType::ReferenceToFunction(fn_id) => {
+                    let value = &declarations.id_to_func[fn_id];
+                    top_level_function_names.insert(name.as_str(), *fn_id);
+                    top_level_name_to_expr_type.insert(
+                        name.clone(),
+                        (
+                            value.id.into(),
+                            ExpressionType::ReferenceToFunction(value.id),
+                        ),
+                    );
+                }
+            }
+        }
+
+        // Insert all the imports
+        for (name, expr) in module.imports() {
+            match expr {
+                ExpressionType::ReferenceToFunction(fn_id) => {
+                    let fn_id = *fn_id;
+                    top_level_function_names.insert(name, fn_id);
+                    top_level_name_to_expr_type.insert(
+                        name.to_string(),
+                        (fn_id.into(), ExpressionType::ReferenceToFunction(fn_id)),
+                    );
+                }
+                ExpressionType::ReferenceToType(ty_id) => {
+                    let ty_id = *ty_id;
+                    top_level_type_names.insert(name, ty_id);
+                    top_level_name_to_expr_type.insert(
+                        name.to_string(),
+                        (ty_id.into(), ExpressionType::ReferenceToType(ty_id)),
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        let mut context = TypecheckContext {
+            ast: &file.arena,
+            declarations,
+            top_level_name_to_expr_type,
+            top_level_function_names,
+            top_level_type_names,
+        };
+
+        // Insert all the constants
+        let mut constants = HashMap::new();
+        for statement in file.top_level.iter() {
+            if let AstNodeValue::ConstDeclaration { .. } = &statement.value {
+                typecheck_const(&context, &[], &mut constants, statement)?;
+            }
+        }
+        context.top_level_name_to_expr_type.extend(constants);
+
+        Ok(context)
+    }
+
     fn id_to_decl(&self) -> &HashMap<TypeID, TypeDeclaration> {
         &self.declarations.id_to_decl
     }
@@ -418,93 +509,13 @@ pub fn typecheck<'ast, 'decl>(
     current_module_name: &str,
     declarations: &'decl DeclarationContext,
 ) -> Result<TypecheckedFile<'ast, 'decl>, TypecheckError> {
-    let mut top_level_type_names = HashMap::new();
-    let mut top_level_function_names = HashMap::new();
-    let mut top_level_name_to_expr_type = HashMap::new();
-    let mut results = Ok(());
-
+    let context = TypecheckContext::new(file, current_module_name, declarations)?;
     let module = &declarations.files[current_module_name];
-
-    // Insert the module's top-level
-    let top_level = declarations.id_to_decl[&module.module_id]
-        .as_module()
-        .unwrap();
-    for (name, ty) in top_level.exports.iter() {
-        match ty {
-            ExpressionType::Void
-            | ExpressionType::Unreachable
-            | ExpressionType::Primitive(_)
-            | ExpressionType::Pointer(_, _)
-            | ExpressionType::Collection(_)
-            | ExpressionType::Null
-            | ExpressionType::Nullable(_)
-            | ExpressionType::TypeParameterReference(_)
-            | ExpressionType::Generator { .. }
-            | ExpressionType::FunctionReference { .. }
-            | ExpressionType::InstanceOf(_) => unreachable!(),
-            ExpressionType::ReferenceToType(ty_id) => {
-                let value = &declarations.id_to_decl[ty_id];
-                top_level_type_names.insert(name.as_str(), *ty_id);
-                top_level_name_to_expr_type
-                    .insert(name.clone(), (value.fn_id_or_type_id(), value.ref_to()));
-            }
-            ExpressionType::ReferenceToFunction(fn_id) => {
-                let value = &declarations.id_to_func[fn_id];
-                top_level_function_names.insert(name.as_str(), *fn_id);
-                top_level_name_to_expr_type.insert(
-                    name.clone(),
-                    (
-                        value.id.into(),
-                        ExpressionType::ReferenceToFunction(value.id),
-                    ),
-                );
-            }
-        }
-    }
-
-    // Insert all the imports
-    for (name, expr) in module.imports() {
-        match expr {
-            ExpressionType::ReferenceToFunction(fn_id) => {
-                let fn_id = *fn_id;
-                top_level_function_names.insert(name, fn_id);
-                top_level_name_to_expr_type.insert(
-                    name.to_string(),
-                    (fn_id.into(), ExpressionType::ReferenceToFunction(fn_id)),
-                );
-            }
-            ExpressionType::ReferenceToType(ty_id) => {
-                let ty_id = *ty_id;
-                top_level_type_names.insert(name, ty_id);
-                top_level_name_to_expr_type.insert(
-                    name.to_string(),
-                    (ty_id.into(), ExpressionType::ReferenceToType(ty_id)),
-                );
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    let mut context = TypecheckContext {
-        ast: &file.arena,
-        declarations,
-        top_level_name_to_expr_type,
-        top_level_function_names,
-        top_level_type_names,
-    };
-
-    // Insert all the constants
-    let mut constants = HashMap::new();
-    for statement in file.top_level.iter() {
-        if let AstNodeValue::ConstDeclaration { .. } = &statement.value {
-            typecheck_const(&context, &[], &mut constants, statement)?;
-        }
-    }
-    context.top_level_name_to_expr_type.extend(constants);
 
     let mut functions = Vec::new();
     let mut top_level_statements = Vec::new();
     let mut top_level_scope = HashMap::new();
+    let mut results = Ok(());
 
     for statement in file.top_level.iter() {
         merge_results(
@@ -527,9 +538,9 @@ pub fn typecheck<'ast, 'decl>(
     })
 }
 
-fn typecheck_node<'a>(
+pub fn typecheck_node<'a>(
     statement: &'a AstNode,
-    context: &TypecheckContext,
+    context: &TypecheckContext<'a, '_>,
     top_level_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     functions: &mut Vec<TypecheckedFunction<'a>>,
     top_level_statements: &mut Vec<&'a AstNode>,
@@ -570,6 +581,7 @@ fn typecheck_node<'a>(
             let associated_functions = associated_functions
                 .iter()
                 .filter_map(|function| {
+                    let function = context.ast.get(*function);
                     let AstNodeValue::FunctionDeclaration(func) = &function.value else {
                         return None;
                     };
@@ -1478,8 +1490,9 @@ fn typecheck_expression<'a>(
                     child_scope.insert(binding_name.clone(), (case.var_id.into(), binding_ty));
                 }
 
+                let case_body = context.ast.get(case.body);
                 let body_ty = typecheck_expression(
-                    &case.body,
+                    case_body,
                     &scopes,
                     &mut child_scope,
                     context,
@@ -1490,7 +1503,7 @@ fn typecheck_expression<'a>(
                         &mut results,
                         assert_assignable_to(
                             context.declarations,
-                            &case.body.provenance,
+                            &case_body.provenance,
                             return_type,
                             body_ty,
                         ),
@@ -1534,6 +1547,7 @@ fn typecheck_expression<'a>(
             let mut child_scope = HashMap::new();
             let mut expr_ty = ExpressionType::Void;
             for (index, child) in children.iter().enumerate() {
+                let child = context.ast.get(*child);
                 let new_ty = typecheck_expression(
                     child,
                     &scopes[..],
@@ -1604,6 +1618,7 @@ fn typecheck_expression<'a>(
                     }
 
                     for (arg, param) in args.iter().zip(params.iter()) {
+                        let arg = context.ast.get(*arg);
                         let arg_ty = typecheck_expression(
                             arg,
                             outer_scopes,
@@ -1641,6 +1656,7 @@ fn typecheck_expression<'a>(
                             return Err(TypecheckError::WrongArgsCount(node.provenance.clone()));
                         }
                         let arg = args.last().unwrap();
+                        let arg = context.ast.get(*arg);
                         let arg_ty = typecheck_expression(
                             arg,
                             outer_scopes,
@@ -1664,6 +1680,7 @@ fn typecheck_expression<'a>(
                 } => {
                     let mut results = Ok(());
                     for (arg, param) in args.iter().zip(parameters.iter()) {
+                        let arg = context.ast.get(*arg);
                         let arg_ty = typecheck_expression(
                             arg,
                             outer_scopes,
@@ -1713,6 +1730,7 @@ fn typecheck_expression<'a>(
                         let Some(arg_field) = fields.get(name) else {
                             return Err(TypecheckError::MissingField(node.provenance.clone()));
                         };
+                        let arg_field = context.ast.get(*arg_field);
                         match typecheck_expression(
                             arg_field,
                             outer_scopes,
@@ -1754,6 +1772,7 @@ fn typecheck_expression<'a>(
             let mut result_key_ty = None;
             let mut result_value_ty = None;
             for (key, value) in entries.iter() {
+                let key = context.ast.get(*key);
                 let key_ty = typecheck_expression(
                     key,
                     outer_scopes,
@@ -1771,6 +1790,7 @@ fn typecheck_expression<'a>(
                 } else {
                     result_key_ty = Some(key_ty);
                 }
+                let value = context.ast.get(*value);
                 let value_ty = typecheck_expression(
                     value,
                     outer_scopes,
@@ -1865,7 +1885,7 @@ fn typecheck_expression<'a>(
             }
             let mut iter = items.iter();
             let ty = typecheck_expression(
-                iter.next().unwrap(),
+                context.ast.get(*iter.next().unwrap()),
                 outer_scopes,
                 current_scope,
                 context,
@@ -1873,6 +1893,7 @@ fn typecheck_expression<'a>(
             )?
             .clone();
             for remaining in iter {
+                let remaining = context.ast.get(*remaining);
                 let this_ty = typecheck_expression(
                     remaining,
                     outer_scopes,

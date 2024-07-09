@@ -35,6 +35,14 @@ impl AstArena {
         self.nodes.push(node);
         AstNodeId(idx)
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &AstNode> {
+        self.nodes.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut AstNode> {
+        self.nodes.iter_mut()
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -111,24 +119,24 @@ impl AstNode {
             }
             ArrayLiteral(values) | Block(values) => {
                 for value in values.iter() {
-                    callback(value);
+                    callback(arena.get(*value));
                 }
             }
             RecordLiteral { fields, .. } => {
                 for expression in fields.values() {
-                    callback(expression);
+                    callback(arena.get(*expression));
                 }
             }
             DictLiteral(entries) => {
                 for (left, right) in entries.iter() {
-                    callback(left);
-                    callback(right);
+                    callback(arena.get(*left));
+                    callback(arena.get(*right));
                 }
             }
             Call(function, parameters) => {
                 callback(arena.get(*function));
                 for expression in parameters.iter() {
-                    callback(expression);
+                    callback(arena.get(*expression));
                 }
             }
             AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
@@ -167,7 +175,7 @@ impl AstNode {
                     callback(arena.get(field.ty));
                 }
                 for node in associated_functions.iter() {
-                    callback(node);
+                    callback(arena.get(*node));
                 }
             }
             InterfaceDeclaration(InterfaceDeclarationValue {
@@ -175,7 +183,7 @@ impl AstNode {
                 ..
             }) => {
                 for field in fields.iter() {
-                    callback(field);
+                    callback(arena.get(*field));
                 }
             }
             UnionDeclaration(UnionDeclarationValue {
@@ -193,7 +201,7 @@ impl AstNode {
             Match(case) => {
                 callback(arena.get(case.value));
                 for case in case.cases.iter() {
-                    callback(&case.body);
+                    callback(arena.get(case.body));
                 }
             }
             Name { .. }
@@ -236,7 +244,7 @@ pub struct FunctionHeaderValue {
 pub struct StructDeclarationValue {
     pub name: String,
     pub fields: Vec<NameAndType>,
-    pub associated_functions: Vec<AstNode>,
+    pub associated_functions: Vec<AstNodeId>,
     pub properties: Vec<String>,
 }
 
@@ -256,7 +264,7 @@ pub enum UnionDeclarationVariant {
 #[derive(Debug, PartialEq)]
 pub struct InterfaceDeclarationValue {
     pub name: String,
-    pub associated_functions: Vec<AstNode>,
+    pub associated_functions: Vec<AstNodeId>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -276,7 +284,7 @@ pub struct MatchDeclaration {
 pub struct MatchCaseDeclaration {
     pub variants: Vec<MatchCaseVariant>,
     pub var_id: VariableID,
-    pub body: AstNode,
+    pub body: AstNodeId,
     pub provenance: SourceRange,
 }
 
@@ -331,19 +339,19 @@ pub enum AstNodeValue {
     If(IfDeclaration),
     While(AstNodeId, AstNodeId),
     Loop(AstNodeId),
-    Call(AstNodeId, Vec<AstNode>),
+    Call(AstNodeId, Vec<AstNodeId>),
     TakeUnique(AstNodeId),
     TakeRef(AstNodeId),
     RecordLiteral {
         name: AstNodeId,
-        fields: HashMap<String, AstNode>,
+        fields: HashMap<String, AstNodeId>,
     },
-    DictLiteral(Vec<(AstNode, AstNode)>),
-    ArrayLiteral(Vec<AstNode>),
+    DictLiteral(Vec<(AstNodeId, AstNodeId)>),
+    ArrayLiteral(Vec<AstNodeId>),
     ArrayLiteralLength(AstNodeId, AstNodeId),
     ReferenceCountLiteral(AstNodeId),
     CellLiteral(AstNodeId),
-    Block(Vec<AstNode>),
+    Block(Vec<AstNodeId>),
     Deref(AstNodeId),
     Match(MatchDeclaration),
 
@@ -474,6 +482,14 @@ impl ParsedFile {
         }
 
         Ok(ParsedFile { arena, top_level })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &AstNode> {
+        self.arena.iter().chain(self.top_level.iter())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut AstNode> {
+        self.arena.iter_mut().chain(self.top_level.iter_mut())
     }
 }
 
@@ -666,7 +682,7 @@ fn interface_or_struct_body(
     context: &mut AstArena,
     cursor: SourceMarker,
     is_interface: bool,
-) -> Result<(SourceMarker, Vec<NameAndType>, Vec<AstNode>), ParseError> {
+) -> Result<(SourceMarker, Vec<NameAndType>, Vec<AstNodeId>), ParseError> {
     let mut cursor = assert_next_lexeme_eq(
         source,
         TokenValue::OpenBracket,
@@ -710,14 +726,14 @@ fn interface_or_struct_body(
                 if next.value == TokenValue::Comma {
                     already_peeked_token(source)?;
                 }
-                associated_functions.push(AstNode::new(
+                associated_functions.push(context.add(AstNode::new(
                     AstNodeValue::RequiredFunction(FunctionHeaderValue {
                         name,
                         params,
                         returns,
                     }),
                     SourceRange::new(start, cursor),
-                ));
+                )));
             } else {
                 let token = assert_next_lexeme_eq(
                     source,
@@ -728,17 +744,18 @@ fn interface_or_struct_body(
                 cursor = token.range.end();
                 let body = block(source, context, cursor)?;
                 cursor = body.provenance.end();
-                associated_functions.push(AstNode::new(
+                let body = add_node(context, body);
+                associated_functions.push(context.add(AstNode::new(
                     AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
                         name,
                         params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
                         returns,
-                        body: add_node(context, body),
+                        body,
                         is_extern: false,
                         is_coroutine: false,
                     }),
                     SourceRange::new(start, cursor),
-                ));
+                )));
             }
         } else {
             if is_interface {
@@ -1490,7 +1507,7 @@ fn expression_pratt(
                     while !closed {
                         let argument = expression(source, context, end, can_be_struct)?;
                         end = argument.provenance.end();
-                        arguments.push(argument);
+                        arguments.push(context.add(argument));
 
                         let (should_break, new_end) = comma_or_end_list(
                             source,
@@ -1547,7 +1564,7 @@ fn expression_pratt(
                             source.next();
                             let argument =
                                 AstNode::new(AstNodeValue::name(field.clone()), field_range);
-                            fields.insert(field, argument);
+                            fields.insert(field, context.add(argument));
                             if lex == TokenValue::CloseBracket {
                                 break;
                             }
@@ -1561,7 +1578,7 @@ fn expression_pratt(
                             let cursor = token.range.end();
                             let argument = expression(source, context, cursor, can_be_struct)?;
                             end = argument.provenance.end();
-                            fields.insert(field, argument);
+                            fields.insert(field, context.add(argument));
 
                             if let TokenValue::Comma = peek_token(
                                 source,
@@ -1736,7 +1753,7 @@ fn array_literal(
     match separator.value {
         TokenValue::Comma => {
             let mut end = separator.range.end();
-            let mut children = vec![expr];
+            let mut children = vec![context.add(expr)];
 
             let mut closed = peek_for_closed(
                 source,
@@ -1754,7 +1771,7 @@ fn array_literal(
                 end = peeked.range.end();
                 let expr = expression(source, context, end, can_be_struct)?;
                 end = expr.provenance.end();
-                children.push(expr);
+                children.push(context.add(expr));
 
                 let (should_break, new_end) = comma_or_end_list(
                     source,
@@ -1786,7 +1803,7 @@ fn array_literal(
             ))
         }
         TokenValue::CloseSquare => Ok(AstNode::new(
-            AstNodeValue::ArrayLiteral(vec![expr]),
+            AstNodeValue::ArrayLiteral(vec![context.add(expr)]),
             SourceRange::new(start, separator.range.end()),
         )),
         _ => Err(ParseError::UnexpectedToken(
@@ -1898,7 +1915,7 @@ fn dict_literal(
                     let value = AstNode::new(AstNodeValue::name(key.clone()), key_range.clone());
                     let key = AstNode::new(AstNodeValue::StringLiteral(key), key_range);
 
-                    entries.push((key, value));
+                    entries.push((context.add(key), context.add(value)));
 
                     if lex == TokenValue::Comma {
                         continue;
@@ -1919,7 +1936,7 @@ fn dict_literal(
         cursor = token.range.end();
         let value = expression(source, context, cursor, true)?;
         cursor = value.provenance.end();
-        entries.push((key, value));
+        entries.push((context.add(key), context.add(value)));
         let (did_end, range) = comma_or_end_list(
             source,
             TokenValue::CloseBracket,
@@ -1980,7 +1997,7 @@ fn if_or_while(
                         let if_node =
                             if_or_while(source, context, TokenValue::If, token.range.end())?;
                         let provenance = if_node.provenance.clone();
-                        AstNode::new(AstNodeValue::Block(vec![if_node]), provenance)
+                        AstNode::new(AstNodeValue::Block(vec![context.add(if_node)]), provenance)
                     }
                     _ => {
                         return Err(ParseError::UnexpectedToken(
@@ -2098,7 +2115,7 @@ fn match_case_statement(
     Ok(MatchCaseDeclaration {
         variants,
         var_id: VariableID::new(),
-        body,
+        body: context.add(body),
         provenance: SourceRange::new(start, cursor),
     })
 }
@@ -2178,7 +2195,7 @@ fn block(
             _ => {
                 let statement = statement(source, context, provenance.end())?;
                 provenance.set_end(statement.provenance.end());
-                statements.push(statement);
+                statements.push(context.add(statement));
             }
         }
     }

@@ -16,7 +16,7 @@ use linear_ir::{layout_types, LinearContext};
 use parser::ParsedFile;
 use thiserror::Error;
 use typecheck::typecheck;
-pub use typecheck::{ExpressionType, FuncType, TypeDeclaration};
+pub use typecheck::{typecheck_node, ExpressionType, FuncType, TypeDeclaration, TypecheckContext};
 
 mod borrowck;
 mod declaration_context;
@@ -240,7 +240,8 @@ pub fn typecheck_module(
 ) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
-    let declarations = DeclarationContext::new(contents)?;
+    let decl_contents: Vec<_> = contents.iter().map(|(path, file)| (*path, file)).collect();
+    let declarations = DeclarationContext::new(&decl_contents[..])?;
     validate_types(&declarations)?;
 
     let module_results = contents

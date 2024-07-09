@@ -94,14 +94,14 @@ fn handle_notification(server: &mut ServerState, notif: Notification) -> anyhow:
     match notif.method.as_str() {
         DidOpenTextDocument::METHOD => match notif.extract(DidOpenTextDocument::METHOD) {
             Ok(params) => {
-                server.did_open_text_document(params);
+                server.did_open_text_document(params)?;
             }
             Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
             Err(ExtractError::MethodMismatch(_)) => unreachable!(),
         },
         DidChangeTextDocument::METHOD => match notif.extract(DidChangeTextDocument::METHOD) {
             Ok(params) => {
-                server.did_change_text_document(params);
+                server.did_change_text_document(params)?;
             }
             Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
             Err(ExtractError::MethodMismatch(_)) => unreachable!(),
