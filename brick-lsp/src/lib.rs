@@ -8,9 +8,10 @@ use brick::{
 };
 use lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Location, OneOf, Position, Range,
-    ServerCapabilities, TextDocumentItem, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, Url,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, Location, MarkedString, OneOf, Position, Range, ServerCapabilities,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, Url,
 };
 
 #[derive(Default)]
@@ -33,6 +34,7 @@ impl ServerState {
     pub fn capabilities() -> ServerCapabilities {
         ServerCapabilities {
             definition_provider: Some(OneOf::Left(true)),
+            hover_provider: Some(HoverProviderCapability::Simple(true)),
             text_document_sync: Some(TextDocumentSyncCapability::Options(
                 TextDocumentSyncOptions {
                     open_close: Some(true),
@@ -185,6 +187,68 @@ impl ServerState {
         }))
     }
 
+    pub fn hover(
+        &mut self,
+        HoverParams {
+            text_document_position_params:
+                TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri },
+                    position,
+                },
+            work_done_progress_params: _,
+        }: HoverParams,
+    ) -> anyhow::Result<Hover> {
+        // TODO: be able to read sources from disk / package
+
+        self.reset_types(&uri);
+        let file = self.open_documents.get(&uri).unwrap();
+        let files: Vec<_> = self
+            .open_documents
+            .values()
+            .map(|entry| (entry.source.module_name, &entry.parsed))
+            .collect();
+        let declarations = DeclarationContext::new(&files[..])?;
+
+        let ctx = TypecheckContext::new(&file.parsed, file.source.module_name, &declarations)?;
+
+        // Find the name currently under the cursor
+        let found = file
+            .parsed
+            .top_level
+            .iter()
+            .find(|node| {
+                node.provenance
+                    .contains(position.line + 1, position.character + 1)
+            })
+            .map(|node| -> anyhow::Result<Option<&AstNode>> {
+                if node.ty.get().is_none() {
+                    typecheck_node(
+                        node,
+                        &ctx,
+                        &mut Default::default(),
+                        &mut Default::default(),
+                        &mut Default::default(),
+                    )?;
+                }
+                let token = find_token_under_cursor(&file.parsed.arena, node, position);
+                Ok(token)
+            })
+            .transpose()?
+            .flatten();
+        // TODO: are we hovering on a meaningless token?
+        // find character under cursor
+        // all characters in literals are meaningful
+
+        // DONTMERGE: off by one in function definitions
+
+        let hover = format!("{:?}", found);
+
+        Ok(Hover {
+            contents: HoverContents::Scalar(MarkedString::String(hover)),
+            range: None,
+        })
+    }
+
     /**
      * Reset all the OnceLock cells so we can run typechecking again
      */
@@ -223,6 +287,27 @@ fn find_id_at_position(
             find_id_at_position(ast, found, node, position);
         }
     });
+}
+
+fn find_token_under_cursor<'a>(
+    ast: &'a AstArena,
+    node: &'a AstNode,
+    position: Position,
+) -> Option<&'a AstNode> {
+    if !node
+        .provenance
+        .contains(position.line + 1, position.character + 1)
+    {
+        None
+    } else {
+        let mut more_specific = None;
+        node.children(ast, |child| {
+            if let Some(child_node) = find_token_under_cursor(ast, child, position) {
+                more_specific = Some(child_node);
+            }
+        });
+        Some(more_specific.unwrap_or(node))
+    }
 }
 
 fn position_to_idx(source: &str, position: Position) -> u32 {

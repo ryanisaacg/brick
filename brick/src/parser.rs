@@ -61,7 +61,7 @@ impl AstNode {
         }
     }
 
-    pub fn children(&self, arena: &AstArena, mut callback: impl FnMut(&AstNode)) {
+    pub fn children<'a>(&self, arena: &'a AstArena, mut callback: impl FnMut(&'a AstNode)) {
         use AstNodeValue::*;
 
         match &self.value {
