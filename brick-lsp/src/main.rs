@@ -3,7 +3,7 @@
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
 };
-use lsp_types::request::{Request as _, ShowMessageRequest};
+use lsp_types::request::{HoverRequest, Request as _, ShowMessageRequest};
 use lsp_types::{request::GotoDefinition, InitializeParams};
 use lsp_types::{MessageType, ShowMessageParams};
 
@@ -76,6 +76,20 @@ fn handle_request(server: &mut ServerState, req: Request) -> anyhow::Result<Opti
             Ok((id, params)) => {
                 eprintln!("got gotoDefinition request #{id}: {params:?}\n");
                 let result = server.goto_definition(params)?;
+                let result = serde_json::to_value(result)?;
+                Some(Response {
+                    id,
+                    result: Some(result),
+                    error: None,
+                })
+            }
+            Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+            Err(ExtractError::MethodMismatch(_)) => unreachable!(),
+        },
+        HoverRequest::METHOD => match req.extract(HoverRequest::METHOD) {
+            Ok((id, params)) => {
+                eprintln!("got gotoDefinition request #{id}: {params:?}\n");
+                let result = server.hover(params)?;
                 let result = serde_json::to_value(result)?;
                 Some(Response {
                     id,

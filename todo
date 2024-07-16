@@ -127,6 +127,7 @@ tooling:
     - rename (probably going to be very hard)
     - list of compilation errors
     - syntax highlighting
+- provenance range is incorrect on function declarations
 - pretty-printer
 
 unions:
