@@ -1,10 +1,16 @@
 use std::{collections::HashMap, sync::OnceLock};
 
 use brick::{
+    diagnostic::{DiagnosticContents, DiagnosticMarker},
     id::AnyID,
     parse_file,
     parser::{AstArena, AstNode, AstNodeValue, ParsedFile},
-    typecheck_node, DeclarationContext, SourceFile, TypecheckContext,
+    typecheck_node, CompileError, DeclarationContext, SourceFile, TypecheckContext,
+};
+use lsp_server::{Message, Notification};
+use lsp_types::{
+    notification::{Notification as _, PublishDiagnostics},
+    Diagnostic, DiagnosticSeverity, PublishDiagnosticsParams,
 };
 use lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
@@ -13,10 +19,12 @@ use lsp_types::{
     TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, Url,
 };
+use serde::Serialize;
 
 #[derive(Default)]
 pub struct ServerState {
     open_documents: HashMap<Url, DocumentEntry>,
+    server_driven_messages: Vec<Message>,
 }
 
 struct DocumentEntry {
@@ -28,6 +36,7 @@ impl ServerState {
     pub fn new() -> ServerState {
         ServerState {
             open_documents: HashMap::new(),
+            server_driven_messages: Vec::new(),
         }
     }
 
@@ -62,15 +71,27 @@ impl ServerState {
         let filename = uri.path().to_string().leak() as &'static str;
         let source_file = SourceFile::from_filename_and_contents(filename, text);
 
-        let parsed = parse_file(source_file.filename, source_file.contents.clone())?;
+        match parse_file(source_file.filename, source_file.contents.clone()) {
+            Ok(parsed) => {
+                // TODO: run full type checker async rather than sync
+                if let Err(err) = brick::typecheck_module(&[(source_file.module_name, &parsed)]) {
+                    self.generate_diagnostics(&uri, Some(err))?;
+                } else {
+                    self.generate_diagnostics(&uri, None)?;
+                }
+                self.open_documents.insert(
+                    uri,
+                    DocumentEntry {
+                        source: source_file,
+                        parsed,
+                    },
+                );
+            }
+            Err(error) => {
+                self.generate_diagnostics(&uri, Some(error))?;
+            }
+        }
 
-        self.open_documents.insert(
-            uri,
-            DocumentEntry {
-                source: source_file,
-                parsed,
-            },
-        );
         Ok(())
     }
 
@@ -97,7 +118,22 @@ impl ServerState {
             }
         }
 
-        entry.parsed = parse_file(entry.source.filename, entry.source.contents.clone())?;
+        match parse_file(entry.source.filename, entry.source.contents.clone()) {
+            Ok(contents) => {
+                entry.parsed = contents;
+                // TODO: run full type checker async rather than sync
+                if let Err(err) =
+                    brick::typecheck_module(&[(entry.source.module_name, &entry.parsed)])
+                {
+                    self.generate_diagnostics(&text_document.uri, Some(err))?;
+                } else {
+                    self.generate_diagnostics(&text_document.uri, None)?;
+                }
+            }
+            Err(error) => {
+                self.generate_diagnostics(&text_document.uri, Some(error))?;
+            }
+        }
 
         Ok(())
     }
@@ -262,6 +298,89 @@ impl ServerState {
                 *referenced_id = OnceLock::new();
             }
         }
+    }
+
+    fn generate_diagnostics(
+        &mut self,
+        uri: &Url,
+        error: Option<CompileError>,
+    ) -> anyhow::Result<()> {
+        let mut diagnostics = Vec::new();
+        if let Some(error) = error {
+            push_diagnostics(&mut diagnostics, error);
+        }
+        self.push_notification(
+            PublishDiagnostics::METHOD,
+            PublishDiagnosticsParams {
+                uri: uri.clone(),
+                diagnostics,
+                version: None,
+            },
+        )
+    }
+
+    pub fn server_messages(&mut self) -> impl Iterator<Item = Message> + '_ {
+        self.server_driven_messages.drain(..)
+    }
+
+    fn push_notification(&mut self, method: &str, params: impl Serialize) -> anyhow::Result<()> {
+        self.server_driven_messages
+            .push(Message::Notification(Notification {
+                method: method.to_string(),
+                params: serde_json::to_value(params)?,
+            }));
+
+        Ok(())
+    }
+}
+
+fn push_diagnostics(diagnostics: &mut Vec<Diagnostic>, error: CompileError) {
+    match error {
+        CompileError::ParseError(err) => push_diagnostic_contents(diagnostics, &err),
+        CompileError::TypeValidationError(err) => push_diagnostic_contents(diagnostics, &err),
+        CompileError::TypecheckError(err) => push_diagnostic_contents(diagnostics, &err),
+        CompileError::LifetimeError(err) => push_diagnostic_contents(diagnostics, &err),
+    }
+}
+
+fn push_diagnostic_contents(
+    diagnostics: &mut Vec<Diagnostic>,
+    diagnostic: &dyn brick::diagnostic::Diagnostic,
+) {
+    let contents = diagnostic.contents();
+    match contents {
+        DiagnosticContents::Scalar(marker) => diagnostics.push(error_diagnostic(marker)),
+        DiagnosticContents::Vector(markers) => {
+            for marker in markers {
+                diagnostics.push(error_diagnostic(marker));
+            }
+        }
+    }
+}
+
+fn error_diagnostic(
+    DiagnosticMarker {
+        range,
+        message,
+        severity,
+    }: DiagnosticMarker,
+) -> Diagnostic {
+    Diagnostic {
+        range: Range::new(
+            Position::new(range.start_line - 1, range.start_offset - 1),
+            Position::new(range.end_line - 1, range.end_offset - 1),
+        ),
+        severity: Some(match severity {
+            brick::diagnostic::Severity::Error => DiagnosticSeverity::ERROR,
+            brick::diagnostic::Severity::Info => DiagnosticSeverity::INFORMATION,
+        }),
+        code: None,
+        code_description: None,
+        source: Some("brick".to_string()),
+        message: message.to_string(),
+        related_information: None,
+        tags: None,
+        data: None,
     }
 }
 

@@ -10,6 +10,7 @@ use thiserror::Error;
 
 use crate::{
     declaration_context::TypeID,
+    diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
     hir::{HirModule, HirNode},
     id::{AnyID, NodeID, VariableID},
     multi_error::{merge_results, print_multi_errors, MultiError},
@@ -53,6 +54,119 @@ pub enum LifetimeError {
     },
     #[error("borrow used before initialization. this is almost certainly an ICE. {}", maybe_range(.0))]
     UsedUninitBorrow(Option<SourceRange>),
+}
+
+impl Diagnostic for LifetimeError {
+    fn contents(&self) -> DiagnosticContents {
+        match self {
+            LifetimeError::MultiError(children) => {
+                let mut contents = Vec::new();
+                for child in children.iter() {
+                    match child.contents() {
+                        DiagnosticContents::Scalar(value) => contents.push(value),
+                        DiagnosticContents::Vector(values) => contents.extend(values),
+                    }
+                }
+                DiagnosticContents::Vector(contents)
+            }
+            LifetimeError::UseAfterMove {
+                use_point,
+                move_point,
+            } => {
+                let mut contents = Vec::new();
+                if let Some(use_point) = use_point {
+                    contents.push(DiagnosticMarker::error(
+                        use_point.clone(),
+                        "value used after moving",
+                    ));
+                }
+                if let Some(move_point) = move_point {
+                    contents.push(DiagnosticMarker::info(
+                        move_point.clone(),
+                        "value moved here",
+                    ));
+                }
+                DiagnosticContents::Vector(contents)
+            }
+            LifetimeError::BorrowUseAfterMove {
+                use_point,
+                move_point,
+            } => {
+                let mut contents = Vec::new();
+                if let Some(use_point) = use_point {
+                    contents.push(DiagnosticMarker::error(
+                        use_point.clone(),
+                        "borrow used after borrowed value was moved",
+                    ));
+                }
+                if let Some(move_point) = move_point {
+                    contents.push(DiagnosticMarker::info(
+                        move_point.clone(),
+                        "value moved here",
+                    ));
+                }
+                DiagnosticContents::Vector(contents)
+            }
+            LifetimeError::BorrowUseAfterReassignment {
+                use_point,
+                reassign_point,
+            } => {
+                let mut contents = Vec::new();
+                if let Some(use_point) = use_point {
+                    contents.push(DiagnosticMarker::error(
+                        use_point.clone(),
+                        "borrow used after borrowed value was dropped",
+                    ));
+                }
+                if let Some(reassign_point) = reassign_point {
+                    contents.push(DiagnosticMarker::info(
+                        reassign_point.clone(),
+                        "value reassigned here",
+                    ));
+                }
+                DiagnosticContents::Vector(contents)
+            }
+            LifetimeError::BorrowUseAfterMutableRefTaken {
+                use_point,
+                ref_point,
+            } => {
+                let mut contents = Vec::new();
+                if let Some(use_point) = use_point {
+                    contents.push(DiagnosticMarker::error(
+                        use_point.clone(),
+                        "borrow used after unique reference taken",
+                    ));
+                }
+                if let Some(ref_point) = ref_point {
+                    contents.push(DiagnosticMarker::info(
+                        ref_point.clone(),
+                        "value uniquely borrowed here",
+                    ));
+                }
+                DiagnosticContents::Vector(contents)
+            }
+            LifetimeError::UniqueBorrowUseAfterSharedRefTaken {
+                use_point,
+                ref_point,
+            } => {
+                let mut contents = Vec::new();
+                if let Some(use_point) = use_point {
+                    contents.push(DiagnosticMarker::error(
+                        use_point.clone(),
+                        "unique borrow used after shared reference taken",
+                    ));
+                }
+                if let Some(ref_point) = ref_point {
+                    contents.push(DiagnosticMarker::info(
+                        ref_point.clone(),
+                        "value shared borrow here",
+                    ));
+                }
+                DiagnosticContents::Vector(contents)
+            }
+            LifetimeError::UsedUninitBorrow(_) => DiagnosticContents::Vector(Vec::new()),
+        }
+    }
 }
 
 impl MultiError for LifetimeError {

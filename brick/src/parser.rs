@@ -3,6 +3,7 @@ use std::{collections::HashMap, iter::Peekable, sync::OnceLock};
 use thiserror::Error;
 
 use crate::{
+    diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
     id::{AnyID, ConstantID, VariableID},
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
@@ -453,8 +454,41 @@ pub enum ParseError {
     MissingTypeForParam(SourceMarker),
     #[error("token error: {0}")]
     TokenError(#[from] LexError),
-    #[error("unexpected top-level statement at {0}")]
-    UnexpectedTopLevelStatement(SourceRange),
+}
+
+impl Diagnostic for ParseError {
+    fn contents(&self) -> DiagnosticContents {
+        DiagnosticContents::Scalar(match self {
+            ParseError::UnexpectedToken(token, message) => {
+                DiagnosticMarker::error(token.range.clone(), message)
+            }
+            ParseError::UnexpectedEndOfInput(range, message) => {
+                DiagnosticMarker::error(SourceRange::new(*range, *range), message)
+            }
+            ParseError::MissingTypeForParam(range) => DiagnosticMarker::error(
+                SourceRange::new(*range, *range),
+                "expected type for parameter",
+            ),
+            ParseError::TokenError(token) => match token {
+                LexError::UnexpectedStart(_, marker) => DiagnosticMarker::error(
+                    SourceRange::new(*marker, *marker),
+                    "unexpected character",
+                ),
+                LexError::IllegalNullByte(marker) => DiagnosticMarker::error(
+                    SourceRange::new(*marker, *marker),
+                    "illegal null bytes",
+                ),
+                LexError::UnterminatedLiteral(marker) => DiagnosticMarker::error(
+                    SourceRange::new(*marker, *marker),
+                    "unterminated literal",
+                ),
+                LexError::IllegalEscapeSequence(marker) => DiagnosticMarker::error(
+                    SourceRange::new(*marker, *marker),
+                    "illegal escape sequence",
+                ),
+            },
+        })
+    }
 }
 
 type TokenIterInner<'a> = &'a mut dyn Iterator<Item = Result<Token, LexError>>;

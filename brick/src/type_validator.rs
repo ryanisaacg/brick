@@ -2,6 +2,7 @@ use rayon::prelude::*;
 use thiserror::Error;
 
 use crate::{
+    diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
     multi_error::{merge_results, print_multi_errors, MultiError},
     typecheck::{InterfaceType, PointerKind, StructType},
     DeclarationContext, ExpressionType, FuncType, SourceRange, TypeDeclaration,
@@ -23,6 +24,44 @@ pub enum TypeValidationError {
     WrongDropParamCount(SourceRange),
     #[error("parameter to drop must be a mutable self pointer: {0}")]
     IllegalDropParam(SourceRange),
+}
+
+impl Diagnostic for TypeValidationError {
+    fn contents(&self) -> DiagnosticContents {
+        DiagnosticContents::Scalar(match self {
+            TypeValidationError::MultiError(children) => {
+                let mut contents = Vec::new();
+                for child in children.iter() {
+                    match child.contents() {
+                        DiagnosticContents::Scalar(value) => contents.push(value),
+                        DiagnosticContents::Vector(values) => contents.extend(values),
+                    }
+                }
+                return DiagnosticContents::Vector(contents);
+            }
+            TypeValidationError::ReferenceReturn(range) => DiagnosticMarker::error(
+                range.clone(),
+                "illegal return of a reference from a function",
+            ),
+            TypeValidationError::DropOnNormalType(range) => DiagnosticMarker::error(
+                range.clone(),
+                "drop may not be defined on normal types (they must be affine)",
+            ),
+            TypeValidationError::DropOnInterface(range) => {
+                DiagnosticMarker::error(range.clone(), "drop may not be defined on interfaces")
+            }
+            TypeValidationError::NonVoidDrop(range) => {
+                DiagnosticMarker::error(range.clone(), "drop must return void")
+            }
+            TypeValidationError::WrongDropParamCount(range) => {
+                DiagnosticMarker::error(range.clone(), "drop must have exactly one parameter")
+            }
+            TypeValidationError::IllegalDropParam(range) => DiagnosticMarker::error(
+                range.clone(),
+                "parameter to drop must be a mutable self pointer",
+            ),
+        })
+    }
 }
 
 impl MultiError for TypeValidationError {

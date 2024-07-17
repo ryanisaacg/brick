@@ -3,9 +3,7 @@
 use declaration_context::FileDeclarations;
 pub use declaration_context::{DeclarationContext, TypeID};
 use std::{collections::HashMap, io};
-use type_validator::TypeValidationError;
 
-use borrowck::LifetimeError;
 use hir::HirModule;
 use interpreter::{Function, VM};
 pub use linear_ir::{
@@ -20,6 +18,7 @@ pub use typecheck::{typecheck_node, ExpressionType, FuncType, TypeDeclaration, T
 
 mod borrowck;
 mod declaration_context;
+pub mod diagnostic;
 mod hir;
 mod interpreter;
 mod linear_ir;
@@ -32,12 +31,16 @@ mod typecheck;
 
 use parser::ParseError;
 
-use crate::{hir::desugar_module, type_validator::validate_types, typecheck::TypecheckError};
+use crate::{hir::desugar_module, type_validator::validate_types};
 
 pub mod id;
 pub use hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirNodeValue, UnaryLogicalOp};
 pub use interpreter::{ExternBinding, Value};
 pub use provenance::{SourceMarker, SourceRange};
+
+pub use borrowck::LifetimeError;
+pub use type_validator::TypeValidationError;
+pub use typecheck::TypecheckError;
 
 #[derive(Debug, Error)]
 pub enum IntepreterError {
@@ -51,8 +54,6 @@ pub enum IntepreterError {
 pub enum CompileError {
     #[error("parse error: {0}")]
     ParseError(#[from] ParseError),
-    #[error("filesystem error: {0} {1}")]
-    FilesystemError(io::Error, String),
     #[error("type error: {0}")]
     TypeValidationError(#[from] TypeValidationError),
     #[error("typecheck errors: {0}")]
@@ -231,17 +232,17 @@ pub fn check_types(sources: Vec<SourceFile>) -> Result<CompilationResults, Compi
              }| { parse_file(filename, contents).map(|ast| (module_name, ast)) },
         )
         .collect::<Result<_, _>>()?;
+    let module_refs: Vec<_> = modules.iter().map(|(name, ast)| (*name, ast)).collect();
 
-    typecheck_module(&modules[..])
+    typecheck_module(&module_refs[..])
 }
 
 pub fn typecheck_module(
-    contents: &[(&'static str, ParsedFile)],
+    contents: &[(&'static str, &ParsedFile)],
 ) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
-    let decl_contents: Vec<_> = contents.iter().map(|(path, file)| (*path, file)).collect();
-    let declarations = DeclarationContext::new(&decl_contents[..])?;
+    let declarations = DeclarationContext::new(contents)?;
     validate_types(&declarations)?;
 
     let module_results = contents

@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::{
     declaration_context::{resolve_type_expr, DeclarationContext, FileDeclarations, TypeID},
+    diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
     id::{AnyID, FunctionID},
     multi_error::{merge_results, merge_results_or_value, print_multi_errors, MultiError},
     parser::{
@@ -367,6 +368,120 @@ pub enum TypecheckError {
     FileNotFound(SourceRange, String),
     #[error("non-constant value in const: {0}")]
     NonConstantInConst(SourceRange),
+}
+
+impl Diagnostic for TypecheckError {
+    fn contents(&self) -> DiagnosticContents {
+        use TypecheckError::*;
+        DiagnosticContents::Scalar(match self {
+            MultiError(children) => {
+                let mut contents = Vec::new();
+                for child in children.iter() {
+                    match child.contents() {
+                        DiagnosticContents::Scalar(value) => contents.push(value),
+                        DiagnosticContents::Vector(values) => contents.extend(values),
+                    }
+                }
+                return DiagnosticContents::Vector(contents);
+            }
+            TypeMismatch { provenance, .. } => {
+                DiagnosticMarker::error(provenance.clone(), "type mismatch")
+            }
+            ArithmeticMismatch(range) => DiagnosticMarker::error(range.clone(), "arithmetic"),
+            NameNotFound(range) => {
+                DiagnosticMarker::error(range.clone(), "declaration for {0:?} not found")
+            }
+            CantCall(range) => DiagnosticMarker::error(range.clone(), "can't call: {0}"),
+            WrongArgsCount(range) => {
+                DiagnosticMarker::error(range.clone(), "wrong args count: {0}")
+            }
+            MissingField(range) => DiagnosticMarker::error(range.clone(), "missing field: {0}"),
+            NoNullDeclarations(range) => DiagnosticMarker::error(
+                range.clone(),
+                "insufficient type info: null variables must have a type annotation {0}",
+            ),
+            ExpectedNullableLHS(range) => DiagnosticMarker::error(
+                range.clone(),
+                "expected nullable left-hand-side to ?? operator: {0}",
+            ),
+            CannotYield(range) => {
+                DiagnosticMarker::error(range.clone(), "cannot yield outside of a generator: {0}")
+            }
+            IllegalAssignmentLHS(range) => {
+                DiagnosticMarker::error(range.clone(), "illegal left hand side of assignment: {0}")
+            }
+            IllegalDotLHS(range) => {
+                DiagnosticMarker::error(range.clone(), "illegal lhs of dot operator: {0}")
+            }
+            MustReturnGenerator(range) => {
+                DiagnosticMarker::error(range.clone(), "must return a generator: {0}")
+            }
+            CaseStatementRequiresUnion(range) => DiagnosticMarker::error(
+                range.clone(),
+                "argument to case statement must be a union: {0}",
+            ),
+            IllegalDotRHS(range) => DiagnosticMarker::error(
+                range.clone(),
+                "right side of dot operator must be a name: {0}",
+            ),
+            BindingCountDoesntMatch(range) => DiagnosticMarker::error(
+                range.clone(),
+                "variant doesn't match previous count of bindings: {0}",
+            ),
+            BindingNameDoesntMatch(range) => {
+                DiagnosticMarker::error(range.clone(), "variant doesn't match binding name: {0}")
+            }
+            DereferenceNonPointer(range) => DiagnosticMarker::error(
+                range.clone(),
+                "attempted to dereference a non-ptr value: {0}",
+            ),
+            NonExhaustiveCase(range) => {
+                DiagnosticMarker::error(range.clone(), "non-exhaustive case statement: {0}")
+            }
+            IllegalFirstClassReference(range) => DiagnosticMarker::error(
+                range.clone(),
+                "references may not be assigned to variables, use 'borrow' instead of 'let': {0}",
+            ),
+            IllegalNonRefBorrow(range) => DiagnosticMarker::error(
+                range.clone(),
+                "right hand side of 'borrow' statement must be a reference: {0}",
+            ),
+            IllegalNonLvalueBorrow(range) => DiagnosticMarker::error(
+                range.clone(),
+                "right hand side of 'borrow' statement must be a valid lvalue: {0}",
+            ),
+            IllegalReferenceInsideDataType(range) => {
+                DiagnosticMarker::error(range.clone(), "illegal reference inside data type: {0}")
+            }
+            UnknownProperty(_, range) => {
+                DiagnosticMarker::error(range.clone(), "unknown property {0}: {1}")
+            }
+            FieldNotPresent(_, range) => {
+                DiagnosticMarker::error(range.clone(), "unknown property {0}: {1}")
+            }
+            NonStructDeclStructLiteral(range) => DiagnosticMarker::error(
+                range.clone(),
+                "non-struct declaration in struct literal: {0}",
+            ),
+            CantAssignToReference(range) => {
+                DiagnosticMarker::error(range.clone(), "can't assign new value to reference: {0}")
+            }
+            IllegalSharedRefMutation(range) => DiagnosticMarker::error(
+                range.clone(),
+                "illegal assignment to a shared reference: {0}",
+            ),
+            IllegalImport(range) => DiagnosticMarker::error(range.clone(), "illegal import: {0}"),
+            ImportPathMustBeModule(range) => {
+                DiagnosticMarker::error(range.clone(), "import path items must be modules: {0}")
+            }
+            FileNotFound(range, _) => {
+                DiagnosticMarker::error(range.clone(), "file \"{1}\" not found: {0}")
+            }
+            NonConstantInConst(range) => {
+                DiagnosticMarker::error(range.clone(), "non-constant value in const: {0}")
+            }
+        })
+    }
 }
 
 impl MultiError for TypecheckError {

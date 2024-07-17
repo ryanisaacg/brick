@@ -66,6 +66,9 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> anyhow::Resul
                 handle_notification(&mut server, not)?;
             }
         }
+        for msg in server.server_messages() {
+            connection.sender.send(msg)?;
+        }
     }
     Ok(())
 }
