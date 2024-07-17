@@ -47,6 +47,7 @@ diagnostics:
 - parsing recovery during errors
 - "unknown type" placeholder for better error reporting
 - "u32" used as type results in strange errors
+- output errors in a custom format, not just as a printout of the error implementation
 
 packages:
 - packages can declare dependencies on one another

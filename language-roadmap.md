@@ -2,6 +2,11 @@
 
 Stuff that's planned for the language itself but is totally unimplemented or outside of any existing work I've started
 
+closures:
+- syntax for manually capturing parts of the environment (move/copy only?)
+- type level support for passing closures
+- use closures for iteration?
+
 unsafe:
 - functions can be declared unsafe
 - you can have unsafe blocks (or statements?)
