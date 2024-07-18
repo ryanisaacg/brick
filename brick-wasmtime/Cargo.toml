@@ -8,18 +8,10 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 wasmtime = "20"
-brick = { path = "../brick" }
-brick-wasm-backend = { path = "../brick-wasm-backend" }
 brick-runtime = { path = "../brick-runtime" }
-sdl2 = { version = "0.36.0", features = ["bundled"] }
 
 [dev-dependencies]
+brick = { path = "../brick" }
+brick-wasm-backend = { path = "../brick-wasm-backend" }
 data-test-driver = { path = "../data-test-driver" }
 
-[lib]
-name = "brick_wasmtime"
-path = "src/lib.rs"
-
-[[bin]]
-name = "brick_wasmtime"
-path = "src/main.rs"

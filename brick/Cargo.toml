@@ -17,10 +17,3 @@ anyhow = "1.0"
 matches = "0.1.9"
 data-test-driver = { path = "../data-test-driver" }
 
-[lib]
-name = "brick"
-path = "src/lib.rs"
-
-[[bin]]
-name = "brick"
-path = "src/main.rs"
