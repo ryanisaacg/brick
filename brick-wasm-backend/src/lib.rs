@@ -81,7 +81,7 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     let mut codes = CodeSection::new();
     let mut data_section = DataSection::new();
 
-    let constant_data_start = 0;
+    let constant_data_start = 4;
     let constant_data_offset = constant_data.len() as i32;
     data_section.segment(DataSegment {
         mode: DataSegmentMode::Active {
