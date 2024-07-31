@@ -1,0 +1,6 @@
+// NoCompile
+struct Data: Affine {}
+
+let x = Data{};
+let y = x;
+x
