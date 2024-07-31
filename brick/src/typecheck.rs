@@ -168,6 +168,15 @@ impl TypeDeclaration {
         }
     }
 
+    pub fn provenance(&self) -> Option<&SourceRange> {
+        match self {
+            TypeDeclaration::Struct(StructType { provenance, .. }) => provenance.as_ref(),
+            TypeDeclaration::Interface(InterfaceType { provenance, .. }) => provenance.as_ref(),
+            TypeDeclaration::Union(UnionType { provenance, .. }) => provenance.as_ref(),
+            TypeDeclaration::Module(ModuleType { provenance, .. }) => provenance.as_ref(),
+        }
+    }
+
     pub fn fn_id_or_type_id(&self) -> AnyID {
         match self {
             TypeDeclaration::Struct(inner) => inner.id.into(),
@@ -252,6 +261,7 @@ impl TypeDeclaration {
 pub struct ModuleType {
     pub id: TypeID,
     pub exports: HashMap<String, ExpressionType>,
+    pub provenance: Option<SourceRange>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -260,6 +270,7 @@ pub struct StructType {
     pub fields: HashMap<String, ExpressionType>,
     pub associated_functions: HashMap<String, FunctionID>,
     pub is_affine: bool,
+    pub provenance: Option<SourceRange>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -279,12 +290,14 @@ pub struct UnionType {
     pub variant_order: Vec<String>,
     pub variants: HashMap<String, Option<ExpressionType>>,
     pub is_affine: bool,
+    pub provenance: Option<SourceRange>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InterfaceType {
     pub id: TypeID,
     pub associated_functions: HashMap<String, FunctionID>,
+    pub provenance: Option<SourceRange>,
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]

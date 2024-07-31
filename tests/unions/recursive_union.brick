@@ -1,0 +1,6 @@
+// NoCompile
+
+union Recursive {
+    Fine,
+    Recursive(Recursive),
+}

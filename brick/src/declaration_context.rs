@@ -60,7 +60,6 @@ impl DeclarationContext {
         }
 
         add_intrinsics(&mut ctx);
-        ctx.propagate_viral_types();
 
         results?;
         Ok(ctx)
@@ -76,6 +75,7 @@ impl DeclarationContext {
                     TypeDeclaration::Module(ModuleType {
                         id: file.module_id,
                         exports: HashMap::new(),
+                        provenance: None,
                     }),
                 );
                 self.files.insert(module_name, file);
@@ -181,6 +181,7 @@ impl DeclarationContext {
                         file,
                         &mut self.id_to_func,
                         decl,
+                        &statement.provenance,
                     ),
                 ),
                 _ => None,
@@ -233,20 +234,6 @@ impl DeclarationContext {
         }
 
         result
-    }
-
-    fn propagate_viral_types(&mut self) {
-        let mut affinity = HashMap::new();
-        for decl in self.id_to_decl.values() {
-            is_decl_affine(&self.id_to_decl, decl, &mut affinity);
-        }
-        for decl in self.id_to_decl.values_mut() {
-            match decl {
-                TypeDeclaration::Struct(decl) => decl.is_affine = affinity[&decl.id],
-                TypeDeclaration::Union(decl) => decl.is_affine = affinity[&decl.id],
-                TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => {}
-            }
-        }
     }
 }
 
@@ -306,37 +293,6 @@ pub struct FunctionID(FileID, u32);
 unsafe impl Zeroable for FunctionID {}
 
 unsafe impl Pod for FunctionID {}
-
-fn is_decl_affine(
-    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
-    decl: &TypeDeclaration,
-    affine_types: &mut HashMap<TypeID, bool>,
-) -> bool {
-    let id = decl.id();
-    if let Some(affinity) = affine_types.get(&id) {
-        return *affinity;
-    }
-    if decl.is_affine() {
-        affine_types.insert(id, true);
-        return true;
-    }
-    let is_children_affine = match decl {
-        TypeDeclaration::Struct(decl) => decl
-            .fields
-            .values()
-            .filter_map(|expr| expr.type_id())
-            .any(|id| is_decl_affine(id_to_decl, &id_to_decl[id], affine_types)),
-        TypeDeclaration::Union(decl) => decl
-            .variants
-            .values()
-            .filter_map(|expr| expr.as_ref()?.type_id())
-            .any(|id| is_decl_affine(id_to_decl, &id_to_decl[id], affine_types)),
-        TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => false,
-    };
-
-    affine_types.insert(id, is_children_affine);
-    is_children_affine
-}
 
 fn get_id_for_func_name(
     module: &FileDeclarations,
@@ -491,6 +447,7 @@ fn fill_in_struct_info(
         fields,
         associated_functions,
         is_affine,
+        provenance: Some(provenance.clone()),
     }))
 }
 
@@ -500,6 +457,7 @@ fn fill_in_interface_decl(
     module: &FileDeclarations,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
     interface: &InterfaceDeclarationValue,
+    provenance: &SourceRange,
 ) -> Result<TypeDeclaration, TypecheckError> {
     let mut associated_functions = HashMap::new();
 
@@ -528,6 +486,7 @@ fn fill_in_interface_decl(
     Ok(TypeDeclaration::Interface(InterfaceType {
         id: names_to_type_id[interface.name.as_str()],
         associated_functions,
+        provenance: Some(provenance.clone()),
     }))
 }
 
@@ -584,6 +543,7 @@ fn fill_in_union_decl(
             .collect(),
         variants,
         is_affine,
+        provenance: Some(provenance.clone()),
     }))
 }
 

@@ -1,0 +1,5 @@
+// NoCompile
+
+struct Recursive {
+    inner: Recursive,
+}

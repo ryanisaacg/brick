@@ -1,10 +1,8 @@
 type validation:
-- don't allow recursive types without indirection
 - prevent references being stored in collections
 
 borrow checker and lifetimes:
 - clone support
-- switch from "Move is viral" to "types that have Move must be marked Move"
 - can't dereference pointers to Move types
 - drop:
     - drop dicts

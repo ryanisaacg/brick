@@ -1,0 +1,5 @@
+// Compile
+
+struct Recursive {
+    inner: rc[Recursive],
+}
