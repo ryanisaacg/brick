@@ -2228,7 +2228,11 @@ fn layout_static_decl(
             for (_, offset, ty) in fields.iter_mut() {
                 let field_size = ty.size_from_decls(layouts, byte_size, pointer_size);
                 let field_alignment = ty.alignment(layouts, byte_size, pointer_size);
-                let padding = size.abs_diff(field_alignment) % field_alignment;
+                let padding = if field_size == 0 && field_alignment == 0 {
+                    0
+                } else {
+                    size.abs_diff(field_alignment) % field_alignment
+                };
                 *offset = size + padding;
                 size = *offset + field_size;
                 alignment = alignment.max(field_alignment);

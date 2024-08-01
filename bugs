@@ -1,2 +1,1 @@
-- zero-size types as fields cause alignment calculation crashes
 - unused? temporary values aren't dropped

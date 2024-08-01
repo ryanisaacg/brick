@@ -1,0 +1,9 @@
+// Compile
+
+struct Outer {
+    a: Inner,
+    b: Inner,
+    c: Inner,
+}
+
+struct Inner {}
