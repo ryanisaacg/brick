@@ -13,7 +13,13 @@ fn main() {
         .map(|arg| SourceFile::from_filename(String::leak(arg) as &'static str).unwrap())
         .collect();
 
-    let module = compile(sources, true).unwrap();
-    std::fs::write("out.wasm", module.as_slice()).unwrap();
-    std::fs::write("runtime.wasm", RUNTIME_WASM).unwrap();
+    match compile(sources, true) {
+        Ok(module) => {
+            std::fs::write("out.wasm", module.as_slice()).unwrap();
+            std::fs::write("runtime.wasm", RUNTIME_WASM).unwrap();
+        }
+        Err(e) => {
+            println!("{e}");
+        }
+    }
 }

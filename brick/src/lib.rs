@@ -2,7 +2,8 @@
 
 use declaration_context::FileDeclarations;
 pub use declaration_context::{DeclarationContext, TypeID};
-use std::{collections::HashMap, io};
+use diagnostic::DiagnosticContents;
+use std::{collections::HashMap, fmt::Display, io};
 
 use hir::HirModule;
 use interpreter::{Function, VM};
@@ -12,7 +13,6 @@ pub use linear_ir::{
 };
 use linear_ir::{layout_types, LinearContext};
 use parser::ParsedFile;
-use thiserror::Error;
 use typecheck::typecheck;
 pub use typecheck::{typecheck_node, ExpressionType, FuncType, TypeDeclaration, TypecheckContext};
 
@@ -33,7 +33,8 @@ mod typecheck;
 use parser::ParseError;
 
 use crate::{
-    generate_destructors::generate_destructors, hir::desugar_module, type_validator::validate_types,
+    diagnostic::Diagnostic, generate_destructors::generate_destructors, hir::desugar_module,
+    type_validator::validate_types,
 };
 
 pub mod id;
@@ -45,25 +46,52 @@ pub use borrowck::LifetimeError;
 pub use type_validator::TypeValidationError;
 pub use typecheck::TypecheckError;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum IntepreterError {
-    #[error("aborted during execution")]
     Abort,
-    #[error("compile error: {0}")]
-    CompileError(#[from] CompileError),
+    CompileError(CompileError),
 }
 
-#[derive(Debug, Error)]
-pub enum CompileError {
-    #[error("parse error: {0}")]
-    ParseError(#[from] ParseError),
-    #[error("type error: {0}")]
-    TypeValidationError(#[from] TypeValidationError),
-    #[error("typecheck errors: {0}")]
-    TypecheckError(#[from] TypecheckError),
-    #[error("lifetime errors: {0}")]
-    LifetimeError(#[from] LifetimeError),
+impl Display for IntepreterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntepreterError::Abort => write!(f, "Panic within interpreter"),
+            IntepreterError::CompileError(e) => e.fmt(f),
+        }
+    }
 }
+
+impl std::error::Error for IntepreterError {}
+
+#[derive(Debug)]
+pub enum CompileError {
+    ParseError(ParseError),
+    TypeValidationError(TypeValidationError),
+    TypecheckError(TypecheckError),
+    LifetimeError(LifetimeError),
+}
+
+impl Display for CompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let diagnostics = match self {
+            CompileError::ParseError(e) => e.contents(),
+            CompileError::TypeValidationError(e) => e.contents(),
+            CompileError::TypecheckError(e) => e.contents(),
+            CompileError::LifetimeError(e) => e.contents(),
+        };
+        match diagnostics {
+            DiagnosticContents::Scalar(d) => d.fmt(f),
+            DiagnosticContents::Vector(diagnostics) => {
+                for diagnostic in diagnostics {
+                    diagnostic.fmt(f)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for CompileError {}
 
 #[derive(Clone, Debug)]
 pub struct SourceFile {
@@ -104,7 +132,8 @@ pub fn interpret_code(
         declarations,
         type_layouts: ty_declarations,
         constant_data,
-    } = lower_code(sources, 1, std::mem::size_of::<usize>())?;
+    } = lower_code(sources, 1, std::mem::size_of::<usize>())
+        .map_err(IntepreterError::CompileError)?;
     let mut functions: HashMap<_, _> = functions
         .into_iter()
         .map(|func| (func.id, Function::Ir(func)))
@@ -247,8 +276,9 @@ pub fn typecheck_module(
 ) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
-    let mut declarations = DeclarationContext::new(contents)?;
-    validate_types(&declarations)?;
+    let mut declarations =
+        DeclarationContext::new(contents).map_err(CompileError::TypecheckError)?;
+    validate_types(&declarations).map_err(CompileError::TypeValidationError)?;
 
     let module_results = contents
         .par_iter()
@@ -273,7 +303,7 @@ pub fn typecheck_module(
             multi_error::merge_results(&mut typecheck_errors, module_result.map(|_| {}));
         }
     }
-    typecheck_errors?;
+    typecheck_errors.map_err(CompileError::TypecheckError)?;
     generate_destructors(&mut modules, &mut declarations);
 
     let mut lifetime_errors = Ok(());
@@ -283,7 +313,7 @@ pub fn typecheck_module(
             borrowck::borrow_check(&declarations, module),
         );
     }
-    lifetime_errors?;
+    lifetime_errors.map_err(CompileError::LifetimeError)?;
 
     Ok(CompilationResults {
         main,
@@ -294,7 +324,7 @@ pub fn typecheck_module(
 
 pub fn parse_file(filename: &'static str, contents: String) -> Result<ParsedFile, CompileError> {
     let tokens = tokenizer::lex(filename, contents);
-    let parsed_module = ParsedFile::parse(tokens)?;
+    let parsed_module = ParsedFile::parse(tokens).map_err(CompileError::ParseError)?;
 
     Ok(parsed_module)
 }

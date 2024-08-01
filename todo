@@ -5,7 +5,7 @@ borrow checker and lifetimes:
     - drop dicts
     - drop strings (may require string buffer vs string view types?)
     - drop nullables
-- users can't call destructors manually
+- forbid user from calling destructors directly
 - path support:
     - allow disjoint borrows of collection indices
     - allow reassignment of affine fields (currently they can't generate drops)

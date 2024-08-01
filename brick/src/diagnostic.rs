@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::SourceRange;
 
 pub trait Diagnostic {
@@ -30,6 +32,22 @@ impl DiagnosticMarker {
             message,
             severity: Severity::Info,
         }
+    }
+}
+
+impl Display for DiagnosticMarker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{}: {}",
+            match self.severity {
+                Severity::Error => "Error",
+                Severity::Info => "Info",
+            },
+            self.message,
+        )?;
+        writeln!(f, "{}", self.range)?;
+        writeln!(f, "{}", self.range.text())
     }
 }
 
