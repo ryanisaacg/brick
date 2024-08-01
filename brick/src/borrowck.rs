@@ -233,7 +233,7 @@ fn borrow_check_body(
         );
     }
 
-    let drop_points = drop_points::calculate_drop_points(&cfg, end);
+    let drop_points = drop_points::calculate_drop_points(declarations, &cfg, node, end);
     drop_points::insert_drops(declarations, node, drop_points);
 
     result

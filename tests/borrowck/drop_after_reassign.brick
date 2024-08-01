@@ -1,0 +1,25 @@
+// Counter | 4
+extern fn incr_test_counter();
+
+struct Data: Affine {
+    x: i32,
+
+    fn drop(self: unique Data) {
+        self.x += 1;
+        incr_test_counter();
+    }
+}
+
+
+let x = Data { x: 0 };
+{
+    x = Data { x: x.x };
+    x = Data { x: x.x };
+    x = Data { x: x.x };
+}
+
+// ensure that Data.drop mutations aren't carried forward to avoid a regression
+while x.x > 0 {
+    incr_test_counter();
+    x.x -= 1;
+}
