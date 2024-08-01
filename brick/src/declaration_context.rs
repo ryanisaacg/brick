@@ -20,6 +20,7 @@ use std::{
 
 pub struct DeclarationContext {
     pub intrinsic_module: FileDeclarations,
+    pub auto_destructors_module: FileDeclarations,
     pub files: HashMap<&'static str, FileDeclarations>,
     pub id_to_decl: HashMap<TypeID, TypeDeclaration>,
     pub id_to_func: HashMap<FunctionID, FuncType>,
@@ -38,6 +39,7 @@ impl DeclarationContext {
     ) -> Result<DeclarationContext, TypecheckError> {
         let mut ctx = DeclarationContext {
             intrinsic_module: FileDeclarations::new(),
+            auto_destructors_module: FileDeclarations::new(),
             files: HashMap::new(),
             id_to_decl: HashMap::new(),
             id_to_func: HashMap::new(),

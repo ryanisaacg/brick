@@ -5,10 +5,14 @@ borrow checker and lifetimes:
     - drop dicts
     - drop strings (may require string buffer vs string view types?)
     - drop nullables
-    - automatically run the drop of all children when dropping
+- users can't call destructors manually
 - path support:
     - allow disjoint borrows of collection indices
     - allow reassignment of affine fields (currently they can't generate drops)
+
+refactors:
+- instead of &'static str for provenance source, maybe Arc<[str]>?
+- do all HirNodes need a ty? I think prrrrrobably not?
 
 collections:
 - tuples
@@ -134,7 +138,7 @@ unions:
 - optional non-exhaustive cases?
 - faulthrough / default branch in case statement
 - ?. operator on union lvalues
-- unions have associated functions
+- unions have associated functions (and by extension, destructors)
 - unions can be converted to interfaces
 
 error reporting:

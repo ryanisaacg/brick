@@ -189,7 +189,7 @@ impl TypeDeclaration {
     pub fn is_affine(&self) -> bool {
         match self {
             TypeDeclaration::Struct(decl) => decl.is_affine,
-            TypeDeclaration::Interface(_) => true,
+            TypeDeclaration::Interface(_) => false,
             TypeDeclaration::Union(decl) => decl.is_affine,
             TypeDeclaration::Module(_) => false,
         }

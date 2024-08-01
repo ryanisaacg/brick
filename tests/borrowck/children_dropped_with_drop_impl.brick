@@ -1,0 +1,23 @@
+// Counter | 4
+
+extern fn incr_test_counter();
+
+struct Outer: Affine {
+    a: Inner,
+    b: Inner,
+    c: Inner,
+
+    fn drop(self: unique Outer) {
+        incr_test_counter();
+    }
+}
+
+struct Inner: Affine {
+    x: i32,
+
+    fn drop(self: unique Inner) {
+        incr_test_counter(); 
+    }
+}
+
+let x = Outer { a: Inner { x: 1 }, b: Inner { x: 2 }, c: Inner { x: 3 } };

@@ -81,7 +81,10 @@ pub fn build_control_flow_graph(body: &HirNode) -> FunctionCFG {
         }
     }
     let HirNodeValue::Sequence(children) = &body.value else {
-        unreachable!("expected body passed to CFG to be a sequence")
+        unreachable!(
+            "expected body passed to CFG to be a sequence, was {:?}",
+            body.value
+        )
     };
     let cfg_end = cfg.add_node(CfgNode::Exit {
         life_state: BlockLiveness::new(),

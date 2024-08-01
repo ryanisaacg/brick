@@ -19,6 +19,7 @@ pub use typecheck::{typecheck_node, ExpressionType, FuncType, TypeDeclaration, T
 mod borrowck;
 mod declaration_context;
 pub mod diagnostic;
+mod generate_destructors;
 mod hir;
 mod interpreter;
 mod linear_ir;
@@ -31,7 +32,9 @@ mod typecheck;
 
 use parser::ParseError;
 
-use crate::{hir::desugar_module, type_validator::validate_types};
+use crate::{
+    generate_destructors::generate_destructors, hir::desugar_module, type_validator::validate_types,
+};
 
 pub mod id;
 pub use hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, HirNodeValue, UnaryLogicalOp};
@@ -142,6 +145,7 @@ pub fn lower_code(
     let single_source = sources.len() == 1;
 
     let CompilationResults {
+        main,
         modules,
         mut declarations,
     } = check_types(sources)?;
@@ -168,8 +172,8 @@ pub fn lower_code(
         module: FileDeclarations::new(),
     };
 
-    for (name, module) in modules {
-        if name == "main" || single_source {
+    for (idx, module) in modules.into_iter().enumerate() {
+        if Some(idx) == main || (single_source && idx == 0) {
             statements.push(module.top_level_statements);
         }
         for function in module.functions {
@@ -216,7 +220,8 @@ pub fn lower_code(
 }
 
 pub struct CompilationResults {
-    pub modules: HashMap<&'static str, HirModule>,
+    pub main: Option<usize>,
+    pub modules: Vec<HirModule>,
     pub declarations: DeclarationContext,
 }
 
@@ -242,7 +247,7 @@ pub fn typecheck_module(
 ) -> Result<CompilationResults, CompileError> {
     use rayon::prelude::*;
 
-    let declarations = DeclarationContext::new(contents)?;
+    let mut declarations = DeclarationContext::new(contents)?;
     validate_types(&declarations)?;
 
     let module_results = contents
@@ -255,19 +260,24 @@ pub fn typecheck_module(
             },
         )
         .collect::<Vec<_>>();
-    let mut modules = HashMap::new();
+    let mut modules = Vec::new();
     let mut typecheck_errors = Ok(());
+    let mut main = None;
     for module_result in module_results {
         if let Ok((name, module)) = module_result {
-            modules.insert(name, module);
+            if name == "main" {
+                main = Some(modules.len());
+            }
+            modules.push(module);
         } else {
             multi_error::merge_results(&mut typecheck_errors, module_result.map(|_| {}));
         }
     }
     typecheck_errors?;
+    generate_destructors(&mut modules, &mut declarations);
 
     let mut lifetime_errors = Ok(());
-    for module in modules.values_mut() {
+    for module in modules.iter_mut() {
         multi_error::merge_results(
             &mut lifetime_errors,
             borrowck::borrow_check(&declarations, module),
@@ -276,6 +286,7 @@ pub fn typecheck_module(
     lifetime_errors?;
 
     Ok(CompilationResults {
+        main,
         modules,
         declarations,
     })
