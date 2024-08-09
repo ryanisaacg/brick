@@ -1,0 +1,7 @@
+// Int | 4567
+
+fn test(): i32 {
+    return 4567;
+}
+
+test()

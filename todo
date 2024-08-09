@@ -39,7 +39,6 @@ wasm backend:
 - compatibility with extern functions (https://github.com/WebAssembly/tool-conventions)
 - handle coroutines
 - figure out and fix issue with dictionaries
-- trailing return statements in functions cause miscompilations
 - bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
 
 diagnostics:
