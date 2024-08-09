@@ -1,5 +1,5 @@
 // NoCompile
-struct Data: Affine {}
+struct Data: Resource {}
 
 let x = Data{};
 if 1 > 5 {

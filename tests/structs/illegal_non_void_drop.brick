@@ -1,6 +1,6 @@
 // NoCompile
 
-struct NonVoidDrop: Affine {
+struct NonVoidDrop: Resource {
     fn drop(self: unique NonVoidDrop): i32 {
         5
     }

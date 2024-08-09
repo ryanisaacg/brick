@@ -2,7 +2,7 @@
 
 extern fn incr_test_counter();
 
-struct Data: Affine {
+struct Data: Resource {
     value: i32,
 
     fn drop(self: unique Data) {

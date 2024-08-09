@@ -1,6 +1,6 @@
 // NoCompile
 
-struct Data: Affine {}
+struct Data: Resource {}
 fn drop(a: unique Data) {}
 
 

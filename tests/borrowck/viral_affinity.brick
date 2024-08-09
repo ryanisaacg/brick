@@ -1,11 +1,11 @@
 // NoCompile
-struct Affine: Affine {}
+struct Resource: Resource {}
 struct ViralAffinity {
-    inner: Affine,
+    inner: Resource,
 }
 
 let x = ViralAffinity {
-    inner: Affine{},
+    inner: Resource{},
 };
 let y = x;
 x

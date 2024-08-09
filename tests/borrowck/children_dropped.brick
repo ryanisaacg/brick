@@ -2,13 +2,13 @@
 
 extern fn incr_test_counter();
 
-struct Outer: Affine {
+struct Outer: Resource {
     a: Inner,
     b: Inner,
     c: Inner,
 }
 
-struct Inner: Affine {
+struct Inner: Resource {
     x: i32,
 
     fn drop(self: unique Inner) {

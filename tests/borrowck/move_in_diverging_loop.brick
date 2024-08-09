@@ -1,5 +1,5 @@
 // Compile
-struct Data: Affine {}
+struct Data: Resource {}
 
 fn drop(x: Data) {}
 

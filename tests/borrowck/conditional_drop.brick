@@ -1,7 +1,7 @@
 // Counter | 1
 extern fn incr_test_counter();
 
-struct Data: Affine {
+struct Data: Resource {
     fn drop(self: unique Data) {
         incr_test_counter();
     }

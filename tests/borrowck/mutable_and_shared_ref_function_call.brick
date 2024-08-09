@@ -1,6 +1,6 @@
 // NoCompile
 
-struct Data: Affine {}
+struct Data: Resource {}
 fn take_two_data(a: ref Data, b: unique Data) {}
 
 

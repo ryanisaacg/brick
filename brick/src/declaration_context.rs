@@ -429,7 +429,7 @@ fn fill_in_struct_info(
     let mut is_affine = false;
     for property in decl.properties.iter() {
         match property.as_str() {
-            "Affine" => is_affine = true,
+            "Resource" => is_affine = true,
             _ => {
                 merge_results(
                     &mut result,
@@ -524,7 +524,7 @@ fn fill_in_union_decl(
     let mut is_affine = false;
     for property in properties.iter() {
         match property.as_str() {
-            "Affine" => is_affine = true,
+            "Resource" => is_affine = true,
             _ => {
                 return Err(TypecheckError::UnknownProperty(
                     property.clone(),

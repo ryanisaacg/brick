@@ -70,9 +70,10 @@ impl Diagnostic for TypeValidationError {
                 range.clone(),
                 "type is recursive without indirection, which would require infinite size",
             ),
-            TypeValidationError::IllegalAffineInNonAffine(range) => {
-                DiagnosticMarker::error(range.clone(), "non-affine type may not have affine fields")
-            }
+            TypeValidationError::IllegalAffineInNonAffine(range) => DiagnosticMarker::error(
+                range.clone(),
+                "non-resource type may not have resource fields",
+            ),
         })
     }
 }
