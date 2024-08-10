@@ -1,4 +1,4 @@
-# My Toy Programming Language
+# Brick Programming Language
 
 This repo is a work-in-progress programming language inspired by Without Boats' ["Notes on a Smaller Rust"](https://without.boats/blog/notes-on-a-smaller-rust/), Graydon Hoare's ["The Rust I Wanted Had No Future"](https://graydon2.dreamwidth.org/307291.html), the [Austral programming language](https://austral-lang.org/), and to some degree Typescript/Go (for introducing me to the joy of structural interfaces).
 
@@ -11,7 +11,7 @@ Its principle goal is to be enjoyable to use for writing games and toy software.
 
 It's just barely ready to write toys in, if you're willing to get your hands dirty: no standard library, no built-in IO of any kind, barely any collections, and a big pile of known bugs.
 
-You may notice all the sub-projects are named "brick"; this was the original name I had for the project. Unfortunately there's an existing PL project with that name! So this repo goes nameless for now.
+`brick` isn't a final name, but it's the one the language goes by for now!
 
 ## Sub-Crates
 
