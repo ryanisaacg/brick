@@ -91,8 +91,7 @@ pub fn add_start(
     start.instruction(&Instruction::MemorySize(0));
     start.instruction(&Instruction::I32Sub);
     // Store intended - actual memory
-    start.instruction(&Instruction::LocalSet(0));
-    start.instruction(&Instruction::LocalGet(0));
+    start.instruction(&Instruction::LocalTee(0));
     start.instruction(&Instruction::I32Const(0));
     // If intended - actual > 0, grow memory by that amount
     start.instruction(&Instruction::I32GtS);
