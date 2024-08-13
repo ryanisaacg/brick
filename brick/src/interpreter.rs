@@ -634,18 +634,30 @@ impl<'a> VM<'a> {
                 let Value::Size(b_ptr) = self.op_stack.pop().unwrap() else {
                     unreachable!()
                 };
-                let location = unsafe {
-                    let ptr = brick_string_concat(
+                self.evaluate_node(params, &args[2])?;
+                let Value::Size(dest_ptr_offset) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                self.evaluate_node(params, &args[3])?;
+                let Value::Size(dest_len_offset) = self.op_stack.pop().unwrap() else {
+                    unreachable!()
+                };
+                unsafe {
+                    let mem_mut: *mut u8 = self.memory.as_mut_ptr();
+                    let new_ptr = mem_mut.add(dest_ptr_offset) as *mut *const u8;
+                    let new_len = mem_mut.add(dest_len_offset) as *mut usize;
+
+                    brick_string_concat(
                         self.allocator(),
                         self.memory[a_ptr..(a_ptr + a_len)].as_ptr(),
                         a_len,
                         self.memory[b_ptr..(b_ptr + b_len)].as_ptr(),
                         b_len,
+                        new_ptr,
+                        new_len,
                     );
-                    ptr.offset_from(self.memory.as_ptr()) as usize
+                    *new_ptr = (*new_ptr).sub(mem_mut as usize);
                 };
-                self.op_stack.push(Value::Size(location));
-                self.op_stack.push(Value::Size(a_len + b_len));
             }
             LinearNodeValue::RuntimeCall(RuntimeFunction::Memcpy, args) => {
                 self.evaluate_node(params, &args[0])?;

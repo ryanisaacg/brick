@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use brick::RuntimeFunction;
 use wasm_encoder::{
-    CodeSection, EntityType, Function, ImportSection, Instruction, TypeSection, ValType,
+    BlockType, CodeSection, EntityType, Function, ImportSection, Instruction, TypeSection, ValType,
 };
 
 pub fn add_runtime_imports(
@@ -40,13 +40,19 @@ pub fn add_runtime_imports(
             RuntimeFunction::StringConcat,
             "brick_string_concat",
             vec![
+                // allocator
+                ValType::I32,
+                // string a
                 ValType::I32,
                 ValType::I32,
+                // string b
                 ValType::I32,
+                ValType::I32,
+                // pointers for string c
                 ValType::I32,
                 ValType::I32,
             ],
-            vec![ValType::I32, ValType::I32],
+            vec![],
         ),
     ];
     for (linear_id, name, params, returns) in functions {
@@ -77,8 +83,25 @@ pub fn add_start(
     main_index: u32,
     alloc_pointer_idx: u32,
     heap_size: i32,
+    intended_pages: i32,
 ) {
-    let mut start = Function::new([]);
+    let mut start = Function::new([(1, ValType::I32)]);
+    // Allocate the right size of linear memory
+    start.instruction(&Instruction::I32Const(intended_pages));
+    start.instruction(&Instruction::MemorySize(0));
+    start.instruction(&Instruction::I32Sub);
+    // Store intended - actual memory
+    start.instruction(&Instruction::LocalSet(0));
+    start.instruction(&Instruction::LocalGet(0));
+    start.instruction(&Instruction::I32Const(0));
+    // If intended - actual > 0, grow memory by that amount
+    start.instruction(&Instruction::I32GtS);
+    start.instruction(&Instruction::If(BlockType::Empty));
+    start.instruction(&Instruction::LocalGet(0));
+    start.instruction(&Instruction::MemoryGrow(0));
+    start.instruction(&Instruction::Drop);
+    start.instruction(&Instruction::End);
+
     start.instruction(&Instruction::GlobalGet(alloc_pointer_idx));
     start.instruction(&Instruction::I32Const(heap_size));
     start.instruction(&Instruction::Call(init_index));

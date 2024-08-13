@@ -8,8 +8,8 @@ use function_bodies::{walk_vals_write_order, FunctionEncoder};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, DataSegment, DataSegmentMode, ElementSection, Elements,
     EntityType, ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType,
-    ImportSection, MemorySection, MemoryType, Module, RefType, StartSection, TableSection,
-    TableType, TypeSection, ValType,
+    ImportSection, MemoryType, Module, RefType, StartSection, TableSection, TableType, TypeSection,
+    ValType,
 };
 
 mod function_bodies;
@@ -22,10 +22,8 @@ mod runtime;
  * more
  */
 const MAIN_MEMORY: u32 = 0;
-const STACK_PAGES: u64 = 16;
-const HEAP_MINIMUM_PAGES: u64 = 48;
-const MEMORY_MINIMUM_PAGES: u64 = STACK_PAGES + HEAP_MINIMUM_PAGES;
-const MAXIMUM_MEMORY: u64 = 16_384;
+const STACK_PAGES: i32 = 16;
+const HEAP_MINIMUM_PAGES: i32 = 48;
 
 const WASM_BOOL_SIZE: usize = 4;
 const WASM_USIZE: usize = 4;
@@ -74,7 +72,6 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     let mut import_section = ImportSection::new();
     let mut fn_section = FunctionSection::new();
     let mut table_section = TableSection::new();
-    let mut memories = MemorySection::new();
     let mut globals = GlobalSection::new();
     let mut exports = ExportSection::new();
     let mut elem_section = ElementSection::new();
@@ -124,6 +121,19 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     }
     let runtime_init_idx = fn_section.len() + import_section.len();
     runtime::add_init_import(&mut import_section, &mut ty_section);
+    let imported_functions = import_section.len();
+
+    import_section.import(
+        "brick-runtime",
+        "memory",
+        EntityType::Memory(MemoryType {
+            minimum: 16,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        }),
+    );
 
     // Function headers
     let main_index = ty_section.len();
@@ -131,7 +141,7 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
         if function_id_to_ty_idx.contains_key(&function.id) {
             continue;
         }
-        function_id_to_fn_idx.insert(function.id, fn_section.len() + import_section.len());
+        function_id_to_fn_idx.insert(function.id, fn_section.len() + imported_functions);
         fn_section.function(ty_section.len());
         function_id_to_ty_idx.insert(function.id, ty_section.len());
         function_headers::encode_linear(&type_layouts, function, &mut ty_section);
@@ -186,7 +196,7 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     }
 
     // Start section
-    let start_index = import_section.len() + fn_section.len();
+    let start_index = imported_functions + fn_section.len();
     fn_section.function(ty_section.len());
     ty_section.function([], main_fn_results);
     runtime::add_start(
@@ -195,15 +205,9 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
         main_index,
         alloc_pointer,
         HEAP_SIZE,
+        STACK_PAGES + HEAP_MINIMUM_PAGES,
     );
 
-    memories.memory(MemoryType {
-        minimum: MEMORY_MINIMUM_PAGES,
-        maximum: Some(MAXIMUM_MEMORY),
-        memory64: false,
-        shared: false,
-        page_size_log2: None,
-    });
     exports.export("memory", ExportKind::Memory, MAIN_MEMORY);
     exports.export("main", ExportKind::Func, start_index);
     for (name, func_id) in declarations.extern_function_exports.iter() {
@@ -215,7 +219,6 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     module.section(&import_section);
     module.section(&fn_section);
     module.section(&table_section);
-    module.section(&memories);
     module.section(&globals);
     module.section(&exports);
     if is_start_function {

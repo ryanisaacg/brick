@@ -85,7 +85,9 @@ pub unsafe extern "C" fn brick_string_concat(
     a_len: usize,
     b_ptr: *const u8,
     b_len: usize,
-) -> *mut u8 {
+    c_ptr_ptr: *mut *const u8,
+    c_len_ptr: *mut usize,
+) {
     let a_slice = core::slice::from_raw_parts(a_ptr, a_len);
     let b_slice = core::slice::from_raw_parts(b_ptr, b_len);
 
@@ -95,7 +97,8 @@ pub unsafe extern "C" fn brick_string_concat(
     let target = core::slice::from_raw_parts_mut(memory_region.add(a_len), b_len);
     target.copy_from_slice(b_slice);
 
-    memory_region
+    *c_ptr_ptr = memory_region;
+    *c_len_ptr = a_len + b_len;
 }
 
 #[no_mangle]

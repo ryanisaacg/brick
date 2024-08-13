@@ -38,7 +38,7 @@ fn data() {
             let engine = Engine::default();
             let mut store = Store::new(&engine, ());
             let mut linker = Linker::new(&engine);
-            add_runtime_functions(&mut linker)?;
+            add_runtime_functions(&mut linker, &mut store)?;
 
             let fn_counter = counter.clone();
             linker.func_wrap("bindings", "incr_test_counter", move || {

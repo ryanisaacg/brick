@@ -198,6 +198,17 @@ impl LinearNode {
         }
     }
 
+    fn var_location(var: VariableID) -> LinearNode {
+        LinearNode {
+            value: LinearNodeValue::VariableLocation(var),
+            provenance: None,
+        }
+    }
+
+    fn read_var(var: VariableID, offset: usize, ty: PhysicalType) -> LinearNode {
+        LinearNode::read_memory(LinearNode::var_location(var), offset, ty)
+    }
+
     pub fn ty(
         &self,
         function_returns: &HashMap<FunctionID, Option<PhysicalType>>,
@@ -232,10 +243,9 @@ impl LinearNode {
                 function_returns.get(fn_id).and_then(|x| x.clone())
             }
             LinearNodeValue::RuntimeCall(func, _) => match func {
-                RuntimeFunction::StringConcat => {
-                    Some(PhysicalType::Collection(PhysicalCollection::String))
-                }
-                RuntimeFunction::Memcpy | RuntimeFunction::Dealloc => None,
+                RuntimeFunction::StringConcat
+                | RuntimeFunction::Memcpy
+                | RuntimeFunction::Dealloc => None,
                 RuntimeFunction::Realloc | RuntimeFunction::Alloc { .. } => {
                     Some(PhysicalType::Primitive(PhysicalPrimitive::PointerSize))
                 }
@@ -355,7 +365,7 @@ pub enum RuntimeFunction {
     Realloc,
     // (ptr) -> void
     Dealloc,
-    // (str, str) -> str
+    // (str, str, *str_ptr, *str_len) -> void
     StringConcat,
     // (dest, src, size) -> void
     Memcpy,
@@ -638,9 +648,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         HirNodeValue::VariableReference(id) => {
             let ty = expr_ty_to_physical(&ty);
             LinearNodeValue::ReadMemory {
-                location: Box::new(LinearNode::new(LinearNodeValue::VariableLocation(
-                    id.as_var(),
-                ))),
+                location: Box::new(LinearNode::var_location(id.as_var())),
                 offset: 0,
                 ty,
             }
@@ -755,21 +763,13 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             LinearNodeValue::Sequence(vec![
                 LinearNode::new(LinearNodeValue::VariableInit(temp_id, lhs_ty.clone())),
                 LinearNode::write_memory(
-                    LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
+                    LinearNode::var_location(temp_id),
                     0,
                     lhs_ty,
                     lower_expression(ctx, *lhs),
                 ),
-                LinearNode::read_memory(
-                    LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
-                    read_offset,
-                    ty,
-                ),
-                LinearNode::read_memory(
-                    LinearNode::new(LinearNodeValue::VariableLocation(temp_id)),
-                    0,
-                    PhysicalType::Primitive(PhysicalPrimitive::Byte),
-                ),
+                LinearNode::read_var(temp_id, read_offset, ty),
+                LinearNode::read_var(temp_id, 0, PhysicalType::Primitive(PhysicalPrimitive::Byte)),
                 LinearNode::new(LinearNodeValue::VariableDestroy(temp_id)),
             ])
         }
@@ -818,7 +818,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             LinearNodeValue::Sequence(vec![
                 LinearNode::new(LinearNodeValue::VariableInit(id, ty.clone())),
                 LinearNode::write_memory(
-                    LinearNode::new(LinearNodeValue::VariableLocation(id)),
+                    LinearNode::var_location(id),
                     0,
                     ty.clone(),
                     LinearNode::new(LinearNodeValue::Parameter(ty, idx)),
@@ -1175,20 +1175,15 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
 
             LinearNodeValue::Sequence(vec![
                 LinearNode::new(LinearNodeValue::VariableInit(temp_var_id, lhs_ty.clone())),
-                LinearNode::write_memory(
-                    LinearNode::new(LinearNodeValue::VariableLocation(temp_var_id)),
-                    0,
-                    lhs_ty,
-                    lhs,
-                ),
+                LinearNode::write_memory(LinearNode::var_location(temp_var_id), 0, lhs_ty, lhs),
                 LinearNode::if_node_value(
                     LinearNode::read_memory(
-                        LinearNode::new(LinearNodeValue::VariableLocation(temp_var_id)),
+                        LinearNode::var_location(temp_var_id),
                         0,
                         PhysicalType::Primitive(PhysicalPrimitive::Byte),
                     ),
                     vec![LinearNode::read_memory(
-                        LinearNode::new(LinearNodeValue::VariableLocation(temp_var_id)),
+                        LinearNode::var_location(temp_var_id),
                         NULL_TAG_SIZE.size(ctx.pointer_size),
                         result_ty.clone(),
                     )],
@@ -1283,7 +1278,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 // pointer to dict
                 LinearNode::write_register(ptr, dict_location),
                 LinearNode::write_memory(
-                    LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
+                    LinearNode::var_location(temp_key_id),
                     0,
                     PhysicalType::Primitive(key_ty),
                     key.clone(),
@@ -1295,7 +1290,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                             0,
                             PhysicalType::Collection(PhysicalCollection::Dict),
                         ),
-                        LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
+                        LinearNode::var_location(temp_key_id),
                         0,
                         key_ty,
                         entry_size,
@@ -1555,7 +1550,38 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         HirNodeValue::StringConcat(left, right) => {
             let left = lower_expression(ctx, *left);
             let right = lower_expression(ctx, *right);
-            LinearNodeValue::RuntimeCall(RuntimeFunction::StringConcat, vec![left, right])
+            let new_string_pointer_id = VariableID::new();
+            let new_string_len_id = VariableID::new();
+
+            LinearNodeValue::Sequence(vec![
+                LinearNode::new(LinearNodeValue::VariableInit(
+                    new_string_pointer_id,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                )),
+                LinearNode::new(LinearNodeValue::VariableInit(
+                    new_string_len_id,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                )),
+                LinearNode::call_runtime(
+                    RuntimeFunction::StringConcat,
+                    vec![
+                        left,
+                        right,
+                        LinearNode::var_location(new_string_pointer_id),
+                        LinearNode::var_location(new_string_len_id),
+                    ],
+                ),
+                LinearNode::read_var(
+                    new_string_pointer_id,
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                ),
+                LinearNode::read_var(
+                    new_string_len_id,
+                    0,
+                    PhysicalType::Primitive(PhysicalPrimitive::PointerSize),
+                ),
+            ])
         }
         HirNodeValue::Switch { value, cases } => LinearNodeValue::Switch {
             value: Box::new(lower_expression(ctx, *value)),
@@ -1610,10 +1636,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
 
 fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, usize) {
     match lvalue.value {
-        HirNodeValue::VariableReference(id) => (
-            LinearNode::new(LinearNodeValue::VariableLocation(id.as_var())),
-            0,
-        ),
+        HirNodeValue::VariableReference(id) => (LinearNode::var_location(id.as_var()), 0),
         HirNodeValue::Access(lhs, rhs) => access_location(ctx, *lhs, rhs),
         HirNodeValue::Dereference(inner) => (lower_expression(ctx, *inner), 0),
         HirNodeValue::ArrayIndex(arr, idx) => array_index_location(ctx, *arr, *idx, &lvalue.ty),
@@ -1770,7 +1793,7 @@ fn dict_index_location_or_abort(
         LinearNode::new(LinearNodeValue::Sequence(vec![
             LinearNode::new(LinearNodeValue::VariableInit(temp_key_id, key_ty)),
             LinearNode::write_memory(
-                LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
+                LinearNode::var_location(temp_key_id),
                 0,
                 PhysicalType::Primitive(idx_ty),
                 idx,
@@ -1778,7 +1801,7 @@ fn dict_index_location_or_abort(
             LinearNode::if_node_value(
                 dict_get_entry_for_key(
                     dict,
-                    LinearNode::new(LinearNodeValue::VariableLocation(temp_key_id)),
+                    LinearNode::var_location(temp_key_id),
                     0,
                     idx_ty,
                     entry_size,
