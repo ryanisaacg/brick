@@ -18,11 +18,11 @@ It's just barely ready to write toys in, if you're willing to get your hands dir
 - `brick/`: Core language code (parse, typeheck, de-sugar, borrowcheck, low-level IR, and a basic tree-walking interpreter)
 - `brick-wasm-backend/`: Emits WebAssembly, plus a wasmtime-based test harness. Not yet capable of producing linked binaries with `rust-runtime`
 - `brick-runtime/`: Rust-based runtime for the language, linked into both the interpreter and the wasmtime test harness
+- `runtime-binary/`: Helper crate to build `brick-runtime` for wasm, and provide the runtime bytes to other crates
 - `brick-wasmtime/`: Helper to create a linked wasmtime module that includes the brick runtime
 - `brick-lsp/`: A proof-of-concept implementation of the Language Server Protocol, currently all it can do is go-to-definition for functions
 - `data-test-driver/`: Helper project to run both interpreter and wasm tests over a few hundred test scripts in `tests/`. Originally they were written via the Rust `#[test]` handlers but that was slowing compile and testing across two different implementations was difficult
 - `brick-fmt/`: A proof-of-concept autoformatter. It does produce *an* output but currently strips comments and whitespace, doesn't break lines, and has many quirks
-- `brick-browser-runtime/`: Literally just `brick-runtime/` but re-exported as a `cdylib` so it can produce a wasm binary.
 - `brick-wasmc/`: Currently it just compiles a given set of source files into a wasm file, and then dumps the runtime wasm next to it. Ideally it will link to [`wasm-merge`](https://github.com/WebAssembly/binaryen?tab=readme-ov-file#tools) and link the given source files with the runtime, and produce a single linked wasm module.
 
 
