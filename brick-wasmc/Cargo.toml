@@ -8,6 +8,5 @@ edition = "2021"
 [dependencies]
 brick = { path = "../brick" }
 brick-wasm-backend = { path = "../brick-wasm-backend" }
+runtime-binary = { path = "../runtime-binary" }
 
-[build-dependencies]
-brick-browser-runtime = { path = "../brick-browser-runtime" }

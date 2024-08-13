@@ -101,13 +101,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "brick-browser-runtime"
-version = "0.1.0"
-dependencies = [
- "brick-runtime",
-]
-
-[[package]]
 name = "brick-fmt"
 version = "0.1.0"
 dependencies = [
@@ -148,8 +141,8 @@ name = "brick-wasmc"
 version = "0.1.0"
 dependencies = [
  "brick",
- "brick-browser-runtime",
  "brick-wasm-backend",
+ "runtime-binary",
 ]
 
 [[package]]
@@ -158,9 +151,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "brick",
- "brick-runtime",
  "brick-wasm-backend",
  "data-test-driver",
+ "runtime-binary",
  "wasmtime",
 ]
 
@@ -900,6 +893,13 @@ dependencies = [
  "rustc-hash",
  "slice-group-by",
  "smallvec",
+]
+
+[[package]]
+name = "runtime-binary"
+version = "0.1.0"
+dependencies = [
+ "brick-runtime",
 ]
 
 [[package]]

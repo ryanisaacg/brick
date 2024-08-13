@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "brick",
-    "brick-browser-runtime",
     "brick-fmt",
     "brick-lsp",
     "brick-runtime",
@@ -10,4 +9,5 @@ members = [
     "brick-wasmc",
     "brick-wasmtime",
     "data-test-driver",
+    "runtime-binary",
 ]

@@ -1,3 +1,0 @@
-fn incr(x: unique i32) {
-    *x += 1;
-}

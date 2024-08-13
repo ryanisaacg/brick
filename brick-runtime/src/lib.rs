@@ -1,9 +1,15 @@
 #![allow(clippy::missing_safety_doc)]
-#![no_std]
+#![cfg_attr(target_arch = "wasm32", no_std)]
 
 use core::alloc::{GlobalAlloc, Layout};
 
 use linked_list_allocator::LockedHeap as Heap;
+
+#[cfg(target_arch = "wasm32")]
+#[cfg_attr(target_arch = "wasm32", panic_handler)]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    core::arch::wasm32::unreachable()
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn brick_runtime_init(heap_start: *mut u8, size: usize) -> *mut Heap {
