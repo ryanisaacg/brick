@@ -1,12 +1,12 @@
 #![allow(clippy::missing_safety_doc)]
-#![cfg_attr(target_arch = "wasm32", no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 use core::alloc::{GlobalAlloc, Layout};
 
 use linked_list_allocator::LockedHeap as Heap;
 
-#[cfg(target_arch = "wasm32")]
-#[cfg_attr(target_arch = "wasm32", panic_handler)]
+#[cfg(all(target_arch = "wasm32", not(feature = "std")))]
+#[cfg_attr(all(target_arch = "wasm32", not(feature = "std")), panic_handler)]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
