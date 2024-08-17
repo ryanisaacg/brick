@@ -40,6 +40,8 @@ wasm backend:
 - handle coroutines
 - figure out and fix issue with dictionaries
 - bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
+- explicitly handle stack overflows
+- correctly arrange stack, data, and heap segments of memory
 
 diagnostics:
 - parsing recovery during errors

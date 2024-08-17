@@ -5,6 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[dependencies]
+rust-wasm-exporter = { path = "../rust-wasm-exporter" }
+
 [build-dependencies]
 brick-runtime = { path = "../brick-runtime" }
 

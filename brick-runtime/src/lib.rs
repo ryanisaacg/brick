@@ -23,6 +23,8 @@ pub unsafe extern "C" fn brick_runtime_init(heap_start: *mut u8, size: usize) ->
 }
 
 const LAYOUT_SIZE: usize = core::mem::size_of::<Layout>();
+#[cfg(target_arch = "wasm32")]
+const WASM_PAGE_SIZE: usize = 65536;
 
 #[no_mangle]
 pub unsafe extern "C" fn brick_runtime_alloc(
@@ -31,6 +33,25 @@ pub unsafe extern "C" fn brick_runtime_alloc(
     alloc_align: usize,
 ) -> *mut u8 {
     let heap = (allocator as *mut Heap).as_ref().unwrap();
+    let locked_heap = heap.lock();
+    let free_space = locked_heap.free();
+    let used_space = locked_heap.used();
+    drop(locked_heap);
+
+    if free_space <= alloc_size {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let missing_space = alloc_size - free_space;
+            let amount_to_alloc = (missing_space * 2).max(used_space);
+            let alloc_pages = (amount_to_alloc / WASM_PAGE_SIZE) + 1;
+            core::arch::wasm32::memory_grow(0, alloc_pages);
+            heap.lock().extend(alloc_pages * WASM_PAGE_SIZE);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            unimplemented!("can't request more memory outside of WASM, tried to allocate {alloc_size} with {free_space} free and {used_space} used");
+        }
+    }
     let alloc_align = core::mem::align_of::<Layout>().max(alloc_align);
     let alloc_size = alloc_size + LAYOUT_SIZE;
     let layout = Layout::from_size_align(alloc_size, alloc_align).unwrap();

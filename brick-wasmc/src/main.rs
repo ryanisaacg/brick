@@ -13,7 +13,7 @@ fn main() {
     match compile(sources, true) {
         Ok(module) => {
             std::fs::write("out.wasm", module.as_slice()).unwrap();
-            std::fs::write("runtime.wasm", runtime_binary::RUNTIME_WASM_BINARY).unwrap();
+            std::fs::write("runtime.wasm", runtime_binary::wasm_runtime()).unwrap();
         }
         Err(e) => {
             println!("{e}");

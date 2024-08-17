@@ -7,9 +7,8 @@ use brick::{
 use function_bodies::{walk_vals_write_order, FunctionEncoder};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, DataSegment, DataSegmentMode, ElementSection, Elements,
-    EntityType, ExportKind, ExportSection, FunctionSection, GlobalSection, GlobalType,
-    ImportSection, MemoryType, Module, RefType, StartSection, TableSection, TableType, TypeSection,
-    ValType,
+    EntityType, ExportKind, ExportSection, FunctionSection, GlobalType, ImportSection, MemoryType,
+    Module, RefType, StartSection, TableSection, TableType, TypeSection, ValType,
 };
 
 mod function_bodies;
@@ -22,13 +21,13 @@ mod runtime;
  * more
  */
 const MAIN_MEMORY: u32 = 0;
-const STACK_PAGES: i32 = 16;
-const HEAP_MINIMUM_PAGES: i32 = 48;
+/**
+ * Defined by the spec
+ */
+const WASM_PAGE_SIZE: i32 = 65536;
 
 const WASM_BOOL_SIZE: usize = 4;
 const WASM_USIZE: usize = 4;
-const HEAP_SIZE: i32 = 1024 * 1024 * 2;
-const STACK_SIZE: i32 = 1024;
 
 pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Module, CompileError> {
     let LowerResults {
@@ -72,14 +71,12 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     let mut import_section = ImportSection::new();
     let mut fn_section = FunctionSection::new();
     let mut table_section = TableSection::new();
-    let mut globals = GlobalSection::new();
     let mut exports = ExportSection::new();
     let mut elem_section = ElementSection::new();
     let mut codes = CodeSection::new();
     let mut data_section = DataSection::new();
 
     let constant_data_start = 4;
-    let constant_data_offset = constant_data.len() as i32;
     data_section.segment(DataSegment {
         mode: DataSegmentMode::Active {
             memory_index: 0,
@@ -87,26 +84,6 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
         },
         data: constant_data,
     });
-
-    let stack_pointer = 0;
-    globals.global(
-        GlobalType {
-            val_type: ValType::I32,
-            mutable: true,
-            shared: false,
-        },
-        // TODO
-        &ConstExpr::i32_const(HEAP_SIZE + STACK_SIZE),
-    );
-    let alloc_pointer = 1;
-    globals.global(
-        GlobalType {
-            val_type: ValType::I32,
-            mutable: true,
-            shared: false,
-        },
-        &ConstExpr::i32_const(constant_data_offset + 4),
-    );
 
     let mut function_id_to_fn_idx = HashMap::new();
     let mut function_id_to_ty_idx = HashMap::new();
@@ -132,6 +109,27 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
             memory64: false,
             shared: false,
             page_size_log2: None,
+        }),
+    );
+
+    let stack_pointer = 0;
+    import_section.import(
+        "brick-runtime",
+        "__stack_pointer",
+        EntityType::Global(GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        }),
+    );
+    let heap_base_pointer = 1;
+    import_section.import(
+        "brick-runtime",
+        "__heap_base",
+        EntityType::Global(GlobalType {
+            val_type: ValType::I32,
+            mutable: false,
+            shared: false,
         }),
     );
 
@@ -185,7 +183,7 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
         type_layouts: &type_layouts,
         function_return_types: &function_return_types,
         stackptr_global_idx: stack_pointer,
-        allocptr_global_idx: alloc_pointer,
+        allocptr_global_idx: heap_base_pointer,
         linear_function_to_id: &linear_function_to_id,
         constant_data_start,
         indirect_call_table,
@@ -199,14 +197,7 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     let start_index = imported_functions + fn_section.len();
     fn_section.function(ty_section.len());
     ty_section.function([], main_fn_results);
-    runtime::add_start(
-        &mut codes,
-        runtime_init_idx,
-        main_index,
-        alloc_pointer,
-        HEAP_SIZE,
-        STACK_PAGES + HEAP_MINIMUM_PAGES,
-    );
+    runtime::add_start(&mut codes, runtime_init_idx, main_index, heap_base_pointer);
 
     exports.export("memory", ExportKind::Memory, MAIN_MEMORY);
     exports.export("main", ExportKind::Func, start_index);
@@ -219,7 +210,6 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     module.section(&import_section);
     module.section(&fn_section);
     module.section(&table_section);
-    module.section(&globals);
     module.section(&exports);
     if is_start_function {
         module.section(&StartSection {

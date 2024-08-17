@@ -9,7 +9,7 @@ pub fn add_runtime_functions(linker: &mut Linker<()>, store: &mut Store<()>) -> 
         let runtime_module = COMPILE_RUNTIME_MODULE.get_or_init(|| {
             linker
                 .engine()
-                .precompile_module(runtime_binary::RUNTIME_WASM_BINARY)
+                .precompile_module(runtime_binary::wasm_runtime())
                 .unwrap()
         });
         Module::deserialize(linker.engine(), runtime_module)

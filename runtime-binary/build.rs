@@ -2,6 +2,7 @@ use std::process::Command;
 
 // Example custom build script.
 fn main() {
+    println!("cargo::rerun-if-changed=../brick-runtime/src");
     let mut crate_path = std::env::current_dir().unwrap().canonicalize().unwrap();
     crate_path.push("../brick-runtime");
     let crate_path = crate_path.canonicalize().unwrap();
