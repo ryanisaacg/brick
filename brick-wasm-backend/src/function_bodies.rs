@@ -227,19 +227,19 @@ fn encode_node(
         }
         LinearNodeValue::ReadMemory {
             location,
-            offset,
+            mut offset,
             ty,
         } => {
-            encode_node(ctx, location, None);
+            offset += encode_location_optimize_offset(ctx, location);
             if let PhysicalType::Primitive(prim) = ty {
-                read_primitive(ctx, primitive_to_val_type(*prim), *offset as u64);
+                read_primitive(ctx, primitive_to_val_type(*prim), offset as u64);
             } else {
                 let location_var = ctx.alloc_local(ValType::I32);
                 ctx.instructions.push(Instruction::LocalSet(location_var));
                 walk_vals_read_order(
                     ctx.declarations,
                     ty,
-                    *offset as u64,
+                    offset as u64,
                     &mut |val_ty, offset| {
                         if let Some(callbacks) = callbacks {
                             callbacks.call_before(ctx, val_ty);
@@ -255,15 +255,15 @@ fn encode_node(
         }
         LinearNodeValue::WriteMemory {
             location,
-            offset,
+            mut offset,
             ty,
             value,
         } => {
             if let PhysicalType::Primitive(prim) = ty {
-                encode_node(ctx, location, None);
+                offset += encode_location_optimize_offset(ctx, location);
                 encode_node(ctx, value, None);
                 let mem = MemArg {
-                    offset: *offset as u64,
+                    offset: offset as u64,
                     align: 0,
                     memory_index: 0,
                 };
@@ -285,12 +285,12 @@ fn encode_node(
                     }
                 }
             } else {
-                encode_node(ctx, location, None);
+                offset += encode_location_optimize_offset(ctx, location);
                 let location_var = ctx.alloc_local(ValType::I32);
                 ctx.instructions.push(Instruction::LocalSet(location_var));
                 // TODO: cache this
                 let mut offsets = Vec::new();
-                walk_vals_write_order(ctx.declarations, ty, *offset as u64, &mut |_, offset| {
+                walk_vals_write_order(ctx.declarations, ty, offset as u64, &mut |_, offset| {
                     offsets.push(offset)
                 });
                 offsets.reverse();
@@ -980,4 +980,38 @@ fn primitive_to_val_type(primitive: PhysicalPrimitive) -> ValType {
         PhysicalPrimitive::Int64 => ValType::I64,
         PhysicalPrimitive::Float64 => ValType::F64,
     }
+}
+
+/**
+ * Given a linear node, encode its location instructions. If possible, optimize out offset
+ * calculations and return a constant offset instead
+ */
+fn encode_location_optimize_offset(ctx: &mut FunctionContext<'_>, location: &LinearNode) -> usize {
+    if let Some((inner_location, inner_offset)) = constant_offset_and_location(location) {
+        encode_node(ctx, inner_location, None);
+
+        inner_offset
+    } else if let LinearNodeValue::VariableLocation(var_id) = &location.value {
+        ctx.instructions
+            .push(Instruction::GlobalGet(ctx.stackptr_global_idx));
+
+        ctx.variable_locations[var_id] as usize
+    } else {
+        encode_node(ctx, location, None);
+
+        0
+    }
+}
+
+fn constant_offset_and_location(node: &LinearNode) -> Option<(&LinearNode, usize)> {
+    let LinearNodeValue::Arithmetic(ArithmeticOp::Add, PhysicalPrimitive::PointerSize, lhs, rhs) =
+        &node.value
+    else {
+        return None;
+    };
+    let LinearNodeValue::Size(offset) = &rhs.value else {
+        return None;
+    };
+
+    Some((lhs, *offset))
 }
