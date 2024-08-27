@@ -1,6 +1,7 @@
 use std::env;
 
 use brick::SourceFile;
+use brick_ld::InputModule;
 use brick_wasm_backend::compile;
 
 fn main() {
@@ -12,8 +13,27 @@ fn main() {
 
     match compile(sources, true) {
         Ok(module) => {
-            std::fs::write("out.wasm", module.as_slice()).unwrap();
-            std::fs::write("runtime.wasm", runtime_binary::wasm_runtime()).unwrap();
+            match brick_ld::link(&[
+                InputModule {
+                    name: "main",
+                    definition: module.as_slice(),
+                    public_exports: true,
+                    is_start: true,
+                },
+                InputModule {
+                    name: "brick-runtime",
+                    definition: runtime_binary::wasm_runtime(),
+                    public_exports: false,
+                    is_start: false,
+                },
+            ]) {
+                Ok(module) => {
+                    std::fs::write("out.wasm", module).unwrap();
+                }
+                Err(err) => {
+                    println!("internal compiler error: {err}");
+                }
+            }
         }
         Err(e) => {
             println!("{e}");

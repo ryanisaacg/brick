@@ -110,6 +110,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "brick-ld"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "brick",
+ "brick-wasm-backend",
+ "data-test-driver",
+ "runtime-binary",
+ "thiserror",
+ "wabt",
+ "wasm-encoder 0.215.0",
+ "wasmparser 0.215.0",
+ "wasmtime",
+]
+
+[[package]]
 name = "brick-lsp"
 version = "0.1.0"
 dependencies = [
@@ -141,6 +157,7 @@ name = "brick-wasmc"
 version = "0.1.0"
 dependencies = [
  "brick",
+ "brick-ld",
  "brick-wasm-backend",
  "runtime-binary",
 ]

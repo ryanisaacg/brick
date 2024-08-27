@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "brick",
-    "brick-fmt",
+    "brick-fmt", "brick-ld",
     "brick-lsp",
     "brick-runtime",
     "brick-wasm-backend",

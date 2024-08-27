@@ -1,12 +1,20 @@
 [package]
-name = "brick-wasmc"
+name = "brick-ld"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+thiserror = "1.0.63"
+wasm-encoder = { version = "0.215.0", features = ["wasmparser"] }
+wasmparser = "0.215.0"
+
+[dev-dependencies]
+anyhow = "1.0"
 brick = { path = "../brick" }
 brick-wasm-backend = { path = "../brick-wasm-backend" }
+data-test-driver = { path = "../data-test-driver" }
 runtime-binary = { path = "../runtime-binary" }
-brick-ld = { path = "../brick-ld" }
+wasmtime = "23"
+wabt = "0.10.0"
