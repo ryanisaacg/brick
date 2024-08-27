@@ -3,108 +3,106 @@ use std::sync::{Arc, Mutex};
 use anyhow::{bail, Context};
 use brick::SourceFile;
 use brick_ld::InputModule;
-use brick_wasm_backend::compile;
-use data_test_driver::TestValue;
+use brick_wasm_backend::{compile, BackendOptions};
+use data_test_driver::{find_tests, load_test_contents, TestExpectation, TestValue};
+use rayon::prelude::*;
 use runtime_binary::wasm_runtime;
 use wasmtime::{Engine, Func, Linker, Memory, Module, Store, Val};
 
 #[test]
 fn data() {
-    let mut working_dir = std::env::current_dir().unwrap();
-    working_dir.pop();
-    working_dir.push("tests");
-    data_test_driver::test_folder(
-        working_dir,
-        |contents| -> anyhow::Result<()> {
-            compile(
-                contents
-                    .iter()
-                    .map(|path| SourceFile::from_filename(path).unwrap())
-                    .collect(),
-                false,
-            )?;
-            Ok(())
-        },
-        |contents, expected| -> anyhow::Result<TestValue> {
-            let counter = Arc::new(Mutex::new(0));
+    let mut test_dir = std::env::current_dir().unwrap();
+    test_dir.pop();
+    test_dir.push("tests");
 
-            let binary = compile(
-                contents
-                    .iter()
-                    .map(|path| SourceFile::from_filename(path).unwrap())
-                    .collect(),
-                false,
-            )?
-            .finish();
-            let linked_module = brick_ld::link(&[
-                InputModule {
-                    name: "binary",
-                    definition: &binary[..],
-                    public_exports: true,
-                    is_start: true,
-                },
-                InputModule {
-                    name: "brick-runtime",
-                    definition: wasm_runtime(),
-                    public_exports: false,
-                    is_start: false,
-                },
-            ])?;
-
-            let engine = Engine::default();
-            let mut store = Store::new(&engine, ());
-            let mut linker = Linker::new(&engine);
-
-            let fn_counter = counter.clone();
-            linker
-                .func_wrap("bindings", "incr_test_counter", move || {
-                    *fn_counter.lock().unwrap() += 1;
+    let test_contents: Vec<_> = find_tests(test_dir)
+        .iter()
+        .map(load_test_contents)
+        .filter(|contents| {
+            // Only include tests that meaningfully run - compiles/nocompiles/aborts all handled by
+            // brick-wasmtime's tests
+            matches!(contents.expectation, TestExpectation::ProducesValue(_))
+        })
+        .collect();
+    test_contents
+        .into_par_iter()
+        // Chunked because of 100-table-limit from wasmtime. combining funcref tables would obviate
+        // the need for chunking
+        .chunks(99)
+        .for_each(|test_contents| {
+            // Compile all code in the chunk
+            let binaries = test_contents
+                .iter()
+                .map(|contents| -> anyhow::Result<Vec<u8>> {
+                    Ok(compile(
+                        contents
+                            .sources
+                            .iter()
+                            .map(|path| SourceFile::from_filename(path).unwrap())
+                            .collect(),
+                        BackendOptions {
+                            include_start_marker: false,
+                            top_level_name: contents.name.as_str(),
+                        },
+                    )?
+                    .finish())
                 })
-                .context("linking")?;
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            // Link the code in the chunk
+            let mut modules: Vec<_> = test_contents
+                .iter()
+                .zip(binaries.iter())
+                .map(|(content, binary)| InputModule {
+                    name: content.name.as_str(),
+                    definition: binary,
+                    public_exports: true,
+                    is_start: false,
+                })
+                .collect();
+            modules.push(InputModule {
+                name: "brick-runtime",
+                definition: wasm_runtime(),
+                public_exports: false,
+                is_start: false,
+            });
+            let test_binary = brick_ld::link(&modules).unwrap();
 
-            let module =
-                Module::from_binary(&engine, linked_module.as_slice()).context("parsing")?;
-            let instance = linker
-                .instantiate(&mut store, &module)
-                .context("instantiating")?;
-            let func = instance
-                .get_func(&mut store, "main")
-                .context("failed to find main")?;
-            let memory = instance
-                .get_memory(&mut store, "memory")
-                .context("failed to find memory")?;
+            // Create a WASM engine and instantiate the chunk once
+            let engine = Engine::default();
+            let module = Module::from_binary(&engine, test_binary.as_slice()).unwrap();
 
-            look_for_value(store, memory, func, expected, counter).context("running")
-        },
-        [
-            // Dictionaries don't compile correctly
-            "collections/basic_dict_keys.brick",
-            "collections/dict_contains.brick",
-            "collections/insert_existing_dict.brick",
-            "collections/insert_new_in_dict.brick",
-            "collections/write_to_dict.brick",
-            // Coroutines not yet implemented
-            "coroutine/count_up.brick",
-            "coroutine/echo.brick",
-            "coroutine/infinite.brick",
-            "coroutine/multiple_generators.brick",
-            "coroutine/mutable_ref.brick",
-            "coroutine/mutable_ref_repeated.brick",
-            "coroutine/nested_coroutines.brick",
-            "coroutine/other_functions.brick",
-            "coroutine/regression_test_branch_in_yielding_loop.brick",
-            "coroutine/yield_basic.brick",
-            "coroutine/yield_once.brick",
-            "coroutine/yield_twice.brick",
-            "coroutine/no_yield_value.brick",
-        ]
-        .into_iter()
-        .collect(),
-    );
+            // Run all test cases in the chunk
+            for test_case in test_contents {
+                let mut store = Store::new(&engine, ());
+                let mut linker = Linker::new(&engine);
+                let counter = Arc::new(Mutex::new(0));
+                let fn_counter = counter.clone();
+                linker
+                    .func_wrap("bindings", "incr_test_counter", move || {
+                        *fn_counter.lock().unwrap() += 1;
+                    })
+                    .unwrap();
+
+                let TestExpectation::ProducesValue(test_value) = &test_case.expectation else {
+                    continue;
+                };
+                let instance = linker.instantiate(&mut store, &module).unwrap();
+                let Some(func) = instance.get_func(&mut store, &test_case.name) else {
+                    panic!("test not found: {}", test_case.name);
+                };
+                let memory = instance
+                    .get_memory(&mut store, "memory")
+                    .context("failed to find memory")
+                    .unwrap();
+                look_for_value(&mut store, memory, func, test_value, counter).unwrap();
+                println!("{}", test_case.name);
+            }
+        });
 }
 
 fn look_for_value(
-    mut store: Store<()>,
+    store: &mut Store<()>,
     memory: Memory,
     func: Func,
     expected: &TestValue,
@@ -172,7 +170,7 @@ fn look_for_value(
         }
         TestValue::String(_) => {
             let mut results = [Val::I32(-1), Val::I32(-1)];
-            func.call(&mut store, &[], &mut results)?;
+            func.call(&mut *store, &[], &mut results)?;
             let ptr = results[0].unwrap_i32() as usize;
             let len = results[1].unwrap_i32() as usize;
             let slice = &memory.data(&store)[ptr..(ptr + len)];
@@ -180,7 +178,7 @@ fn look_for_value(
             Ok(TestValue::String(string.to_string()))
         }
         TestValue::Counter(_) => {
-            func.call(&mut store, &[], &mut [])?;
+            func.call(store, &[], &mut [])?;
             let counter = *counter.lock().unwrap();
             Ok(TestValue::Counter(counter))
         }

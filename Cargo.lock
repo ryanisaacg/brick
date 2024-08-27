@@ -117,6 +117,7 @@ dependencies = [
  "brick",
  "brick-wasm-backend",
  "data-test-driver",
+ "rayon",
  "runtime-binary",
  "thiserror",
  "wabt",

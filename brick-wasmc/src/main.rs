@@ -2,7 +2,7 @@ use std::env;
 
 use brick::SourceFile;
 use brick_ld::InputModule;
-use brick_wasm_backend::compile;
+use brick_wasm_backend::{compile, BackendOptions};
 
 fn main() {
     let mut args = env::args();
@@ -11,7 +11,13 @@ fn main() {
         .map(|arg| SourceFile::from_filename(String::leak(arg) as &'static str).unwrap())
         .collect();
 
-    match compile(sources, true) {
+    match compile(
+        sources,
+        BackendOptions {
+            include_start_marker: true,
+            top_level_name: "main",
+        },
+    ) {
         Ok(module) => {
             match brick_ld::link(&[
                 InputModule {

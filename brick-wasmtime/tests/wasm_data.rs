@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context};
 use brick::SourceFile;
-use brick_wasm_backend::compile;
+use brick_wasm_backend::{compile, BackendOptions};
 use brick_wasmtime::add_runtime_functions;
 use data_test_driver::TestValue;
 use wasmtime::{Engine, Func, Linker, Memory, Module, Store, Val};
@@ -20,7 +20,7 @@ fn data() {
                     .iter()
                     .map(|path| SourceFile::from_filename(path).unwrap())
                     .collect(),
-                false,
+                BackendOptions::default(),
             )?;
             Ok(())
         },
@@ -32,7 +32,10 @@ fn data() {
                     .iter()
                     .map(|path| SourceFile::from_filename(path).unwrap())
                     .collect(),
-                false,
+                BackendOptions {
+                    include_start_marker: false,
+                    top_level_name: "main",
+                },
             )?
             .finish();
             let engine = Engine::default();

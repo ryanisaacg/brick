@@ -29,7 +29,27 @@ const WASM_PAGE_SIZE: i32 = 65536;
 const WASM_BOOL_SIZE: usize = 4;
 const WASM_USIZE: usize = 4;
 
-pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Module, CompileError> {
+pub struct BackendOptions<'a> {
+    pub include_start_marker: bool,
+    pub top_level_name: &'a str,
+}
+
+impl Default for BackendOptions<'_> {
+    fn default() -> Self {
+        Self {
+            include_start_marker: true,
+            top_level_name: "main",
+        }
+    }
+}
+
+pub fn compile(
+    sources: Vec<SourceFile>,
+    BackendOptions {
+        include_start_marker,
+        top_level_name,
+    }: BackendOptions,
+) -> Result<Module, CompileError> {
     let LowerResults {
         statements,
         statements_ty,
@@ -200,7 +220,7 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     runtime::add_start(&mut codes, runtime_init_idx, main_index, heap_base_pointer);
 
     exports.export("memory", ExportKind::Memory, MAIN_MEMORY);
-    exports.export("main", ExportKind::Func, start_index);
+    exports.export(top_level_name, ExportKind::Func, start_index);
     for (name, func_id) in declarations.extern_function_exports.iter() {
         let fn_idx = function_id_to_fn_idx[func_id];
         exports.export(name, ExportKind::Func, fn_idx);
@@ -211,7 +231,7 @@ pub fn compile(sources: Vec<SourceFile>, is_start_function: bool) -> Result<Modu
     module.section(&fn_section);
     module.section(&table_section);
     module.section(&exports);
-    if is_start_function {
+    if include_start_marker {
         module.section(&StartSection {
             function_index: start_index,
         });

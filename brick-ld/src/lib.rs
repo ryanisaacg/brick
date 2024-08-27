@@ -27,6 +27,8 @@ pub enum Error {
     MoreThanOneMemory(String),
     #[error("mismatched type between {}'s import of {} from {}: expected {:?}, received {:?}", .0.import_module, .0.name, .0.export_module, .0.import_ty, .0.export_ty)]
     MismatchedType(Box<MismatchedTypeInfo>),
+    #[error("conflicting exports: {0}")]
+    ConflictingExports(String),
 }
 
 #[derive(Debug)]
@@ -303,10 +305,11 @@ impl ParsedModule<'_> {
         let mut import_global_source_idx = 0;
         let mut import_global_dest_idx = self_offset.import_globals;
 
-        for import in self.imports.iter() {
+        for import in self.imports.iter_mut() {
             match import {
-                Import::Unresolved(import) => match import.ty {
-                    TypeRef::Func(_) => {
+                Import::Unresolved(import) => match &mut import.ty {
+                    TypeRef::Func(func_ty) => {
+                        *func_ty += self_offset.types;
                         function_remap.insert(import_func_source_idx, import_func_dest_idx);
                         import_func_dest_idx += 1;
                         import_func_source_idx += 1;
@@ -324,12 +327,17 @@ impl ParsedModule<'_> {
                     TypeRef::Memory(_) | TypeRef::Tag(_) => {}
                 },
                 Import::Function { module, index } => {
-                    function_remap
-                        .insert(import_func_source_idx, offsets[module].functions + index);
+                    function_remap.insert(
+                        import_func_source_idx,
+                        offsets[module as &str].functions + *index,
+                    );
                     import_func_source_idx += 1;
                 }
                 Import::Global { module, index } => {
-                    global_remap.insert(import_global_source_idx, offsets[module].globals + index);
+                    global_remap.insert(
+                        import_global_source_idx,
+                        offsets[module as &str].globals + *index,
+                    );
                     import_global_source_idx += 1;
                 }
                 Import::Memory => {}
@@ -558,6 +566,8 @@ fn encode(modules: Vec<ParsedModule>) -> Result<Vec<u8>, Error> {
 
     let mut reencode = RoundtripReencoder;
 
+    let mut name_to_export: HashMap<&str, (ExternalKind, u32)> = HashMap::new();
+
     let mut accumulated_memory: Option<wasmparser::MemoryType> = None;
     for module in modules.iter() {
         for memory in module.memory.iter() {
@@ -625,9 +635,17 @@ fn encode(modules: Vec<ParsedModule>) -> Result<Vec<u8>, Error> {
                 },
             });
         }
-        for export in module.exports {
-            if module.public_exports {
-                reencode.parse_export(&mut export_section, export);
+        if module.public_exports {
+            for export in module.exports {
+                // Avoid duplicate exports or export name conflicts
+                if let Some((kind, index)) = name_to_export.get(export.name) {
+                    if *kind != export.kind || *index != export.index {
+                        return Err(Error::ConflictingExports(export.name.to_string()));
+                    }
+                } else {
+                    name_to_export.insert(export.name, (export.kind, export.index));
+                    reencode.parse_export(&mut export_section, export);
+                }
             }
         }
         for body in module.function_bodies {

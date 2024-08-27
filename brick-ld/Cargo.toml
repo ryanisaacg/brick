@@ -15,6 +15,7 @@ anyhow = "1.0"
 brick = { path = "../brick" }
 brick-wasm-backend = { path = "../brick-wasm-backend" }
 data-test-driver = { path = "../data-test-driver" }
+rayon = "1.8.0"
 runtime-binary = { path = "../runtime-binary" }
 wasmtime = "23"
 wabt = "0.10.0"
