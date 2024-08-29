@@ -34,8 +34,6 @@ collections:
 - automatically convert types when assigning collections?
 
 wasm backend:
-- integrate binaryen directly into wasmc so that the output is a single, statically-linked wasm binary
-- compatibility with extern functions (https://github.com/WebAssembly/tool-conventions)
 - handle coroutines
 - figure out and fix issue with dictionaries
 - bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
