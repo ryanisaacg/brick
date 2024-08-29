@@ -12,11 +12,7 @@ use glob::glob;
 
 pub fn test_folder(
     path: PathBuf,
-    check_does_compile: impl Fn(&[&'static str]) -> anyhow::Result<()>
-        + Send
-        + Sync
-        + UnwindSafe
-        + RefUnwindSafe,
+    check_does_compile: impl Fn(&[&'static str]) -> anyhow::Result<()> + Send + Sync,
     execute: impl (Fn(&[&'static str], &TestValue) -> anyhow::Result<TestValue>)
         + Send
         + Sync
@@ -37,7 +33,7 @@ pub fn test_folder(
                 sources,
                 ..
             } = load_test_contents(&test_case);
-            let result = panic::catch_unwind(|| match expectation {
+            let result = match expectation {
                 TestExpectation::Compiles => match check_does_compile(&sources) {
                     Ok(_) => TestSuccessOrFailure::Succeeded(root),
                     Err(error) => TestSuccessOrFailure::FailsToCompile(root, error),
@@ -55,19 +51,24 @@ pub fn test_folder(
                         TestSuccessOrFailure::RanButShouldnt(root)
                     }
                 }
-                TestExpectation::ProducesValue(expected) => match execute(&sources, &expected) {
-                    Ok(received) if expected == received => TestSuccessOrFailure::Succeeded(root),
-                    Ok(received) => TestSuccessOrFailure::MismatchedResult {
-                        path: root,
-                        expected,
-                        received,
-                    },
-                    Err(error) => TestSuccessOrFailure::ErroredWhenRun(root, error),
-                },
-            });
-            let result = match result {
-                Ok(result) => result,
-                Err(panic) => TestSuccessOrFailure::PanickedWhenRun(test_case.root.clone(), panic),
+                TestExpectation::ProducesValue(expected) => {
+                    match panic::catch_unwind(|| execute(&sources, &expected)) {
+                        Ok(result) => match result {
+                            Ok(received) if expected == received => {
+                                TestSuccessOrFailure::Succeeded(root)
+                            }
+                            Ok(received) => TestSuccessOrFailure::MismatchedResult {
+                                path: root,
+                                expected,
+                                received,
+                            },
+                            Err(error) => TestSuccessOrFailure::ErroredWhenRun(root, error),
+                        },
+                        Err(panic) => {
+                            TestSuccessOrFailure::PanickedWhenRun(test_case.root.clone(), panic)
+                        }
+                    }
+                }
             };
             (test_case.root, result)
         })
