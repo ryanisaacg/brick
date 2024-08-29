@@ -463,27 +463,27 @@ impl Diagnostic for ParseError {
                 DiagnosticMarker::error(token.range.clone(), message)
             }
             ParseError::UnexpectedEndOfInput(range, message) => {
-                DiagnosticMarker::error(SourceRange::new(*range, *range), message)
+                DiagnosticMarker::error(SourceRange::new(range.clone(), range), message)
             }
             ParseError::MissingTypeForParam(range) => DiagnosticMarker::error(
-                SourceRange::new(*range, *range),
+                SourceRange::new(range.clone(), range),
                 "expected type for parameter",
             ),
             ParseError::TokenError(token) => match token {
                 LexError::UnexpectedStart(_, marker) => DiagnosticMarker::error(
-                    SourceRange::new(*marker, *marker),
+                    SourceRange::new(marker.clone(), marker),
                     "unexpected character",
                 ),
                 LexError::IllegalNullByte(marker) => DiagnosticMarker::error(
-                    SourceRange::new(*marker, *marker),
+                    SourceRange::new(marker.clone(), marker),
                     "illegal null bytes",
                 ),
                 LexError::UnterminatedLiteral(marker) => DiagnosticMarker::error(
-                    SourceRange::new(*marker, *marker),
+                    SourceRange::new(marker.clone(), marker),
                     "unterminated literal",
                 ),
                 LexError::IllegalEscapeSequence(marker) => DiagnosticMarker::error(
-                    SourceRange::new(*marker, *marker),
+                    SourceRange::new(marker.clone(), marker),
                     "illegal escape sequence",
                 ),
             },
@@ -510,7 +510,7 @@ impl ParsedFile {
 
         while let Some(lexeme) = peek_token_optional(&mut source)? {
             let cursor = lexeme.range.start();
-            let statement = statement(&mut source, &mut arena, cursor)?;
+            let statement = statement(&mut source, &mut arena, &cursor)?;
 
             top_level.push(statement);
         }
@@ -534,7 +534,7 @@ fn add_node(context: &mut AstArena, node: AstNode) -> AstNodeId {
 fn statement(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     Ok(
         match peek_token(source, cursor, "expected let, fn, or expression")?.value {
@@ -552,11 +552,11 @@ fn statement(
                 let Token { range, value, .. } = already_peeked_token(source)?;
                 let cursor = range.end();
                 match value {
-                    TokenValue::Let => variable_declaration(source, context, cursor)?,
-                    TokenValue::Borrow => borrow_declaration(source, context, cursor)?,
-                    TokenValue::Const => const_declaration(source, context, cursor)?,
+                    TokenValue::Let => variable_declaration(source, context, &cursor)?,
+                    TokenValue::Borrow => borrow_declaration(source, context, &cursor)?,
+                    TokenValue::Const => const_declaration(source, context, &cursor)?,
                     TokenValue::Import => {
-                        let statement = import_declaration(source, cursor)?;
+                        let statement = import_declaration(source, &cursor)?;
                         if let Some(Token {
                             value: TokenValue::Semicolon,
                             ..
@@ -567,23 +567,23 @@ fn statement(
 
                         statement
                     }
-                    TokenValue::Extern => extern_function_declaration(source, context, cursor)?,
-                    TokenValue::Function => function_declaration(source, context, cursor, false)?,
+                    TokenValue::Extern => extern_function_declaration(source, context, &cursor)?,
+                    TokenValue::Function => function_declaration(source, context, &cursor, false)?,
                     TokenValue::Gen => {
                         let token = assert_next_lexeme_eq(
                             source,
                             TokenValue::Function,
-                            cursor,
+                            &cursor,
                             "expected fn after gen",
                         )?;
                         let cursor = token.range.end();
-                        function_declaration(source, context, cursor, true)?
+                        function_declaration(source, context, &cursor, true)?
                     }
-                    TokenValue::Struct => struct_declaration(source, context, cursor)?,
-                    TokenValue::Union => union_declaration(source, context, cursor)?,
-                    TokenValue::Interface => interface_declaration(source, context, cursor)?,
+                    TokenValue::Struct => struct_declaration(source, context, &cursor)?,
+                    TokenValue::Union => union_declaration(source, context, &cursor)?,
+                    TokenValue::Interface => interface_declaration(source, context, &cursor)?,
                     TokenValue::Return => {
-                        let statement = return_declaration(source, context, cursor)?;
+                        let statement = return_declaration(source, context, &cursor)?;
                         if let Some(Token {
                             value: TokenValue::Semicolon,
                             ..
@@ -605,7 +605,7 @@ fn statement(
                 }) = peek_token_optional(source)?
                 {
                     let token = already_peeked_token(source)?;
-                    let provenance = SourceRange::new(expr.provenance.start(), token.range.end());
+                    let provenance = SourceRange::new(expr.provenance.start(), &token.range.end());
                     let expr = add_node(context, expr);
                     AstNode::new(AstNodeValue::Statement(expr), provenance)
                 } else {
@@ -619,7 +619,7 @@ fn statement(
 fn return_declaration(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     if let Some(Token {
         value: TokenValue::Semicolon,
@@ -629,7 +629,7 @@ fn return_declaration(
         let token = already_peeked_token(source)?;
         return Ok(AstNode::new(
             AstNodeValue::Return(None),
-            SourceRange::new(cursor, token.range.end()),
+            SourceRange::new(cursor.clone(), &token.range.end()),
         ));
     }
     let value = expression(source, context, cursor, true)?;
@@ -642,14 +642,14 @@ fn return_declaration(
 fn struct_declaration(
     source: &mut TokenIter,
     context: &mut AstArena,
-    mut cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let start = cursor;
     let (name, provenance) = word(source, cursor, "expected name after 'struct'")?;
-    cursor = provenance.end();
-    let (properties, cursor) = property_list(source, cursor)?;
+    let cursor = provenance.end();
+    let (properties, cursor) = property_list(source, &cursor)?;
     let (end, fields, associated_functions) =
-        interface_or_struct_body(source, context, cursor, false)?;
+        interface_or_struct_body(source, context, &cursor, false)?;
 
     Ok(AstNode::new(
         AstNodeValue::StructDeclaration(StructDeclarationValue {
@@ -658,28 +658,29 @@ fn struct_declaration(
             associated_functions,
             properties,
         }),
-        SourceRange::new(start, end),
+        SourceRange::new(start.clone(), &end),
     ))
 }
 
 fn property_list(
     source: &mut TokenIter,
-    mut cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<(Vec<String>, SourceMarker), ParseError> {
+    let mut cursor = cursor.clone();
     Ok((
-        if peek_token(source, cursor, "unexpected EOL in struct")?.value == TokenValue::Colon {
+        if peek_token(source, &cursor, "unexpected EOL in struct")?.value == TokenValue::Colon {
             cursor = already_peeked_token(source)?.range.end();
             let mut properties = Vec::new();
             loop {
-                let (word, range) = word(source, cursor, "expected property name")?;
+                let (word, range) = word(source, &cursor, "expected property name")?;
                 properties.push(word);
                 cursor = range.end();
-                if peek_token(source, cursor, "unexpected EOL in struct properties")?.value
+                if peek_token(source, &cursor, "unexpected EOL in struct properties")?.value
                     == TokenValue::Comma
                 {
                     cursor = already_peeked_token(source)?.range.end();
                 }
-                if peek_token(source, cursor, "unexpected EOL in struct properties")?.value
+                if peek_token(source, &cursor, "unexpected EOL in struct properties")?.value
                     == TokenValue::OpenBracket
                 {
                     break;
@@ -696,25 +697,25 @@ fn property_list(
 fn interface_declaration(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let (name, provenance) = word(source, cursor, "expected name after 'interface'")?;
     let (end, _, associated_functions) =
-        interface_or_struct_body(source, context, provenance.end(), true)?;
+        interface_or_struct_body(source, context, &provenance.end(), true)?;
 
     Ok(AstNode::new(
         AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
             name,
             associated_functions,
         }),
-        SourceRange::new(cursor, end),
+        SourceRange::new(cursor.clone(), &end),
     ))
 }
 
 fn interface_or_struct_body(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
     is_interface: bool,
 ) -> Result<(SourceMarker, Vec<NameAndType>, Vec<AstNodeId>), ParseError> {
     let mut cursor = assert_next_lexeme_eq(
@@ -733,13 +734,13 @@ fn interface_or_struct_body(
         if peek_for_closed(
             source,
             TokenValue::CloseBracket,
-            cursor,
+            &cursor,
             "expected either fields or close bracket",
         )? {
             break;
         }
 
-        if peek_token(source, cursor, "expected associated function, field, or }")?.value
+        if peek_token(source, &cursor, "expected associated function, field, or }")?.value
             == TokenValue::Function
         {
             let start = cursor;
@@ -750,10 +751,10 @@ fn interface_or_struct_body(
                 params,
                 returns,
                 end,
-            } = function_header(source, context, cursor)?;
+            } = function_header(source, context, &cursor)?;
             cursor = end;
 
-            let next = peek_token(source, cursor, "expected ',', }, or body")?;
+            let next = peek_token(source, &cursor, "expected ',', }, or body")?;
             if is_interface
                 && (next.value == TokenValue::Comma || next.value == TokenValue::CloseBracket)
             {
@@ -766,17 +767,17 @@ fn interface_or_struct_body(
                         params,
                         returns,
                     }),
-                    SourceRange::new(start, cursor),
+                    SourceRange::new(start, &cursor),
                 )));
             } else {
                 let token = assert_next_lexeme_eq(
                     source,
                     TokenValue::OpenBracket,
-                    cursor,
+                    &cursor,
                     "expected open bracket to start function body",
                 )?;
                 cursor = token.range.end();
-                let body = block(source, context, cursor)?;
+                let body = block(source, context, &cursor)?;
                 cursor = body.provenance.end();
                 let body = add_node(context, body);
                 associated_functions.push(context.add(AstNode::new(
@@ -788,7 +789,7 @@ fn interface_or_struct_body(
                         is_extern: false,
                         is_coroutine: false,
                     }),
-                    SourceRange::new(start, cursor),
+                    SourceRange::new(start, &cursor),
                 )));
             }
         } else {
@@ -800,21 +801,21 @@ fn interface_or_struct_body(
                 ));
             }
             let (name, range, type_hint) =
-                name_and_type_hint(source, context, cursor, "expected parameter")?;
+                name_and_type_hint(source, context, &cursor, "expected parameter")?;
             cursor = range.end();
-            let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
+            let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor.clone()))?;
             let end = kind.provenance.end();
             let kind = add_node(context, kind);
             fields.push(NameAndType {
                 name,
                 ty: kind,
-                provenance: SourceRange::new(range.start(), end),
+                provenance: SourceRange::new(range.start(), &end),
             });
 
             let (should_end, range) = comma_or_end_list(
                 source,
                 TokenValue::CloseBracket,
-                cursor,
+                &cursor,
                 "expected either fields, comma, or close bracket",
             )?;
             if should_end {
@@ -830,16 +831,16 @@ fn interface_or_struct_body(
 fn union_declaration(
     source: &mut TokenIter,
     context: &mut AstArena,
-    mut cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let (name, mut provenance) = word(source, cursor, "expected name after 'union'")?;
-    cursor = provenance.end();
-    let (properties, mut cursor) = property_list(source, cursor)?;
+    let cursor = provenance.end();
+    let (properties, mut cursor) = property_list(source, &cursor)?;
 
     cursor = assert_next_lexeme_eq(
         source,
         TokenValue::OpenBracket,
-        cursor,
+        &cursor,
         "expected open bracket to start variants",
     )?
     .range
@@ -849,19 +850,19 @@ fn union_declaration(
 
     let mut closed = false;
     while !closed {
-        let (name, name_range) = word(source, cursor, "expected variant name")?;
+        let (name, name_range) = word(source, &cursor, "expected variant name")?;
         cursor = name_range.end();
-        if peek_token(source, cursor, "unexpected EOF in union declaration")?.value
+        if peek_token(source, &cursor, "unexpected EOF in union declaration")?.value
             == TokenValue::OpenParen
         {
             let paren = already_peeked_token(source)?;
-            let ty = type_expression(source, context, paren.range.end())?;
+            let ty = type_expression(source, context, &paren.range.end())?;
             let end = ty.provenance.end();
             let ty = add_node(context, ty);
             let paren = assert_next_lexeme_eq(
                 source,
                 TokenValue::CloseParen,
-                end,
+                &end,
                 "expected ) after variant type",
             )?;
             cursor = paren.range.end();
@@ -869,7 +870,7 @@ fn union_declaration(
             variants.push(UnionDeclarationVariant::WithValue(NameAndType {
                 name,
                 ty,
-                provenance: SourceRange::new(name_range.start(), end),
+                provenance: SourceRange::new(name_range.start(), &end),
             }));
         } else {
             variants.push(UnionDeclarationVariant::WithoutValue(name));
@@ -878,7 +879,7 @@ fn union_declaration(
         let (should_end, range) = comma_or_end_list(
             source,
             TokenValue::CloseBracket,
-            cursor,
+            &cursor,
             "expected either more variants or close bracket",
         )?;
         closed = should_end;
@@ -899,7 +900,7 @@ fn union_declaration(
 fn extern_function_declaration(
     source: &mut TokenIter,
     context: &mut AstArena,
-    start: SourceMarker,
+    start: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let mut provenance = assert_next_lexeme_eq(
         source,
@@ -913,10 +914,10 @@ fn extern_function_declaration(
         params,
         returns,
         end,
-    } = function_header(source, context, provenance.end())?;
-    provenance.set_end(end);
+    } = function_header(source, context, &provenance.end())?;
+    provenance.set_end(end.clone());
 
-    let next = next_token(source, end, "expected ; or { after extern fn decl")?;
+    let next = next_token(source, &end, "expected ; or { after extern fn decl")?;
     let (value, end) = match &next.value {
         TokenValue::Semicolon => (
             AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
@@ -927,7 +928,7 @@ fn extern_function_declaration(
             next.range.end(),
         ),
         TokenValue::OpenBracket => {
-            let body = block(source, context, next.range.end())?;
+            let body = block(source, context, &next.range.end())?;
             let end = body.provenance.end();
             (
                 AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
@@ -956,7 +957,7 @@ fn extern_function_declaration(
 fn function_declaration(
     source: &mut TokenIter,
     context: &mut AstArena,
-    start: SourceMarker,
+    start: &SourceMarker,
     is_generator: bool,
 ) -> Result<AstNode, ParseError> {
     let FunctionHeader {
@@ -965,14 +966,14 @@ fn function_declaration(
         returns,
         end,
     } = function_header(source, context, start)?;
-    let mut provenance = SourceRange::new(start, end);
+    let mut provenance = SourceRange::new(start.clone(), &end);
     let next_token = assert_next_lexeme_eq(
         source,
         TokenValue::OpenBracket,
         start,
         "expected { after function declaration",
     )?;
-    let body = block(source, context, next_token.range.end())?;
+    let body = block(source, context, &next_token.range.end())?;
     provenance.set_end(body.provenance.end());
 
     Ok(AstNode::new(
@@ -998,20 +999,20 @@ struct FunctionHeader {
 fn function_header(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<FunctionHeader, ParseError> {
     let (name, provenance) = word(source, cursor, "expected name after 'fn'")?;
 
     let next_token = assert_next_lexeme_eq(
         source,
         TokenValue::OpenParen,
-        provenance.end(),
+        &provenance.end(),
         "expected open parenthesis to start parameters",
     )?;
     let mut cursor = next_token.range.end();
     let mut params = Vec::new();
     loop {
-        let token = peek_token(source, cursor, "expected either parameters or close paren")?;
+        let token = peek_token(source, &cursor, "expected either parameters or close paren")?;
         cursor = token.range.start();
         match token.value {
             TokenValue::CloseParen => break,
@@ -1020,16 +1021,16 @@ fn function_header(
             }
             _ => {
                 let (name, range, type_hint) =
-                    name_and_type_hint(source, context, cursor, "expected parameter")?;
+                    name_and_type_hint(source, context, &cursor, "expected parameter")?;
                 cursor = range.end();
-                let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor))?;
+                let kind = type_hint.ok_or(ParseError::MissingTypeForParam(cursor.clone()))?;
                 let end = kind.provenance.end();
                 let kind = add_node(context, kind);
 
                 params.push(NameAndType {
                     name,
                     ty: kind,
-                    provenance: SourceRange::new(range.start(), end),
+                    provenance: SourceRange::new(range.start(), &end),
                 });
             }
         }
@@ -1037,19 +1038,19 @@ fn function_header(
     let next_token = assert_next_lexeme_eq(
         source,
         TokenValue::CloseParen,
-        cursor,
+        &cursor,
         "expected closing parenthesis to end parameters",
     )?;
     cursor = next_token.range.end();
     let returns = if let Token {
         value: TokenValue::Colon,
         range,
-    } = peek_token(source, cursor, "expected body after function declaration")?
+    } = peek_token(source, &cursor, "expected body after function declaration")?
     {
         let start = range.start();
         cursor = range.end();
         source.next();
-        let kind = type_expression(source, context, start)?;
+        let kind = type_expression(source, context, &start)?;
         let kind = add_node(context, kind);
 
         Some(kind)
@@ -1065,18 +1066,18 @@ fn function_header(
     })
 }
 
-fn import_declaration(source: &mut TokenIter, start: SourceMarker) -> Result<AstNode, ParseError> {
+fn import_declaration(source: &mut TokenIter, start: &SourceMarker) -> Result<AstNode, ParseError> {
     let (name, provenance) = word(source, start, "expected word after 'import'")?;
     let mut cursor = provenance.end();
     let mut components = vec![name];
 
     loop {
-        let next = next_token(source, cursor, "expected . or ; in import declaration")?;
+        let next = next_token(source, &cursor, "expected . or ; in import declaration")?;
         cursor = next.range.end();
         match &next.value {
             TokenValue::Semicolon => break,
             TokenValue::Period => {
-                let (name, provenance) = word(source, cursor, "expected word after . in import")?;
+                let (name, provenance) = word(source, &cursor, "expected word after . in import")?;
                 cursor = provenance.end();
                 components.push(name);
             }
@@ -1091,14 +1092,14 @@ fn import_declaration(source: &mut TokenIter, start: SourceMarker) -> Result<Ast
 
     Ok(AstNode::new(
         AstNodeValue::Import(components),
-        SourceRange::new(start, provenance.end()),
+        SourceRange::new(start.clone(), &provenance.end()),
     ))
 }
 
 fn variable_declaration(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let (name, mut provenance, type_hint) = name_and_type_hint(
         source,
@@ -1109,12 +1110,12 @@ fn variable_declaration(
     let cursor = assert_next_lexeme_eq(
         source,
         TokenValue::Assign,
-        provenance.end(),
+        &provenance.end(),
         "expected = after let binding target",
     )?
     .range
     .end();
-    let value = expression(source, context, cursor, true)?;
+    let value = expression(source, context, &cursor, true)?;
     provenance.set_end(value.provenance.end());
 
     let type_hint = type_hint.map(|type_hint| add_node(context, type_hint));
@@ -1122,7 +1123,7 @@ fn variable_declaration(
     assert_next_lexeme_eq(
         source,
         TokenValue::Semicolon,
-        provenance.end(),
+        &provenance.end(),
         "expected ; after 'let' statement",
     )?;
 
@@ -1135,40 +1136,40 @@ fn variable_declaration(
 fn borrow_declaration(
     source: &mut TokenIter,
     context: &mut AstArena,
-    mut cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let start = cursor;
     let (name, span) = word(source, cursor, "expected name after borrow")?;
-    cursor = span.end();
+    let mut cursor = span.end();
     cursor = assert_next_lexeme_eq(
         source,
         TokenValue::Assign,
-        cursor,
+        &cursor,
         "expected = after let binding target",
     )?
     .range
     .end();
-    let rhs = expression(source, context, cursor, true)?;
+    let rhs = expression(source, context, &cursor, true)?;
     cursor = rhs.provenance.end();
     let rhs = context.add(rhs);
 
     assert_next_lexeme_eq(
         source,
         TokenValue::Semicolon,
-        cursor,
+        &cursor,
         "expected ; after 'borrow' statement",
     )?;
 
     Ok(AstNode::new(
         AstNodeValue::BorrowDeclaration(name, rhs, VariableID::new()),
-        SourceRange::new(start, cursor),
+        SourceRange::new(start.clone(), &cursor),
     ))
 }
 
 fn const_declaration(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let (name, mut provenance, type_hint) = name_and_type_hint(
         source,
@@ -1179,12 +1180,12 @@ fn const_declaration(
     let cursor = assert_next_lexeme_eq(
         source,
         TokenValue::Assign,
-        provenance.end(),
+        &provenance.end(),
         "expected = after let binding target",
     )?
     .range
     .end();
-    let value = expression(source, context, cursor, true)?;
+    let value = expression(source, context, &cursor, true)?;
     provenance.set_end(value.provenance.end());
 
     let type_hint = type_hint.map(|type_hint| add_node(context, type_hint));
@@ -1192,7 +1193,7 @@ fn const_declaration(
     assert_next_lexeme_eq(
         source,
         TokenValue::Semicolon,
-        provenance.end(),
+        &provenance.end(),
         "expected ; after 'let' statement",
     )?;
 
@@ -1210,7 +1211,7 @@ fn const_declaration(
 fn name_and_type_hint(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
     reason: &'static str,
 ) -> Result<(String, SourceRange, Option<AstNode>), ParseError> {
     let (name, mut provenance) = word(source, cursor, reason)?;
@@ -1223,7 +1224,7 @@ fn name_and_type_hint(
     {
         let cursor = token_range.end();
         source.next();
-        let type_hint = type_expression(source, context, cursor)?;
+        let type_hint = type_expression(source, context, &cursor)?;
         provenance.set_end(type_hint.provenance.end());
         Some(type_hint)
     } else {
@@ -1236,13 +1237,13 @@ fn name_and_type_hint(
 fn type_expression(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let next = next_token(source, cursor, "expected type")?;
     let node = match next.value {
         TokenValue::Void => AstNode::new(AstNodeValue::VoidType, next.range),
         ptr @ (TokenValue::Unique | TokenValue::Ref) => {
-            let subtype = type_expression(source, context, next.range.end())?;
+            let subtype = type_expression(source, context, &next.range.end())?;
             let end = subtype.provenance.end();
             let subtype = add_node(context, subtype);
             AstNode::new(
@@ -1251,109 +1252,109 @@ fn type_expression(
                     TokenValue::Ref => AstNodeValue::SharedType(subtype),
                     _ => unreachable!(),
                 },
-                SourceRange::new(next.range.start(), end),
+                SourceRange::new(next.range.start(), &end),
             )
         }
         TokenValue::Dict => {
             let token = assert_next_lexeme_eq(
                 source,
                 TokenValue::OpenSquare,
-                next.range.end(),
+                &next.range.end(),
                 "expected [ after dict type",
             )?;
-            let key = type_expression(source, context, token.range.end())?;
+            let key = type_expression(source, context, &token.range.end())?;
             let end = key.provenance.end();
             let key = add_node(context, key);
 
             let token = assert_next_lexeme_eq(
                 source,
                 TokenValue::Comma,
-                end,
+                &end,
                 "expected , after dict key type",
             )?;
 
-            let value = type_expression(source, context, token.range.end())?;
+            let value = type_expression(source, context, &token.range.end())?;
             let end = value.provenance.end();
             let value = add_node(context, value);
 
             let token = assert_next_lexeme_eq(
                 source,
                 TokenValue::CloseSquare,
-                end,
+                &end,
                 "expected ] after dict type",
             )?;
 
             AstNode::new(
                 AstNodeValue::DictType(key, value),
-                SourceRange::new(next.range.start(), token.range.end()),
+                SourceRange::new(next.range.start(), &token.range.end()),
             )
         }
         TokenValue::List => {
             let token = assert_next_lexeme_eq(
                 source,
                 TokenValue::OpenSquare,
-                next.range.end(),
+                &next.range.end(),
                 "expected [ after array type",
             )?;
 
-            let value = type_expression(source, context, token.range.end())?;
+            let value = type_expression(source, context, &token.range.end())?;
             let end = value.provenance.end();
             let value = add_node(context, value);
 
             let token = assert_next_lexeme_eq(
                 source,
                 TokenValue::CloseSquare,
-                end,
+                &end,
                 "expected ] after array type",
             )?;
 
             AstNode::new(
                 AstNodeValue::ArrayType(value),
-                SourceRange::new(next.range.start(), token.range.end()),
+                SourceRange::new(next.range.start(), &token.range.end()),
             )
         }
         TokenValue::Rc => {
             let token = assert_next_lexeme_eq(
                 source,
                 TokenValue::OpenSquare,
-                next.range.end(),
+                &next.range.end(),
                 "expected [ after rc type",
             )?;
 
-            let value = type_expression(source, context, token.range.end())?;
+            let value = type_expression(source, context, &token.range.end())?;
             let end = value.provenance.end();
             let value = add_node(context, value);
 
             let token = assert_next_lexeme_eq(
                 source,
                 TokenValue::CloseSquare,
-                end,
+                &end,
                 "expected ] after rc type",
             )?;
 
             AstNode::new(
                 AstNodeValue::RcType(value),
-                SourceRange::new(next.range.start(), token.range.end()),
+                SourceRange::new(next.range.start(), &token.range.end()),
             )
         }
         TokenValue::Cell => {
             let token = assert_next_lexeme_eq(
                 source,
                 TokenValue::OpenSquare,
-                next.range.end(),
+                &next.range.end(),
                 "expected [ after cell type",
             )?;
-            let inner_ty = type_expression(source, context, token.range.end())?;
+            let inner_ty = type_expression(source, context, &token.range.end())?;
             let token = assert_next_lexeme_eq(
                 source,
                 TokenValue::CloseSquare,
-                inner_ty.provenance.end(),
+                &inner_ty.provenance.end(),
                 "expected ] after cell type",
             )?;
 
             AstNode::new(
                 AstNodeValue::CellType(context.add(inner_ty)),
-                SourceRange::new(next.range.start(), token.range.end()),
+                SourceRange::new(next.range.start(), &token.range.end()),
             )
         }
         TokenValue::Word(name) => match name.as_str() {
@@ -1361,35 +1362,35 @@ fn type_expression(
                 let token = assert_next_lexeme_eq(
                     source,
                     TokenValue::OpenSquare,
-                    next.range.end(),
+                    &next.range.end(),
                     "expected [ after generator type",
                 )?;
 
-                let yield_ty = type_expression(source, context, token.range.end())?;
+                let yield_ty = type_expression(source, context, &token.range.end())?;
                 let cursor = yield_ty.provenance.end();
                 let yield_ty = add_node(context, yield_ty);
 
                 assert_next_lexeme_eq(
                     source,
                     TokenValue::Comma,
-                    cursor,
+                    &cursor,
                     "expected , after yield type",
                 )?;
 
-                let param_ty = type_expression(source, context, token.range.end())?;
+                let param_ty = type_expression(source, context, &token.range.end())?;
                 let cursor = param_ty.provenance.end();
                 let param_ty = add_node(context, param_ty);
 
                 let token = assert_next_lexeme_eq(
                     source,
                     TokenValue::CloseSquare,
-                    cursor,
+                    &cursor,
                     "expected ] after generator type",
                 )?;
 
                 AstNode::new(
                     AstNodeValue::GeneratorType { yield_ty, param_ty },
-                    SourceRange::new(next.range.start(), token.range.end()),
+                    SourceRange::new(next.range.start(), &token.range.end()),
                 )
             }
             _ => AstNode::new(AstNodeValue::name(name), next.range),
@@ -1412,7 +1413,7 @@ fn type_expression(
         let question_mark = already_peeked_token(source)?;
         let start = node.provenance.start();
         let inner = add_node(context, node);
-        let provenance = SourceRange::new(start, question_mark.range.end());
+        let provenance = SourceRange::new(start, &question_mark.range.end());
         Ok(AstNode::new(AstNodeValue::NullableType(inner), provenance))
     } else {
         Ok(node)
@@ -1422,7 +1423,7 @@ fn type_expression(
 fn expression(
     source: &mut TokenIter,
     context: &mut AstArena,
-    provenance: SourceMarker,
+    provenance: &SourceMarker,
     can_be_struct: bool,
 ) -> Result<AstNode, ParseError> {
     expression_pratt(source, context, provenance, 0, can_be_struct)
@@ -1433,7 +1434,7 @@ fn expression(
 fn expression_pratt(
     source: &mut TokenIter,
     context: &mut AstArena,
-    start: SourceMarker,
+    start: &SourceMarker,
     min_binding: u8,
     can_be_struct: bool,
 ) -> Result<AstNode, ParseError> {
@@ -1443,30 +1444,30 @@ fn expression_pratt(
     let mut left = match value {
         // TODO: should this be treated as a unary operator instead?
         TokenValue::Minus => {
-            let (int, range) = integer(source, cursor, "expected digit after negative sign")?;
+            let (int, range) = integer(source, &cursor, "expected digit after negative sign")?;
             try_decimal(source, -(int as i64), range)?
         }
         TokenValue::OpenParen => {
-            let left = expression_pratt(source, context, cursor, 0, can_be_struct)?;
+            let left = expression_pratt(source, context, &cursor, 0, can_be_struct)?;
             assert_next_lexeme_eq(
                 source,
                 TokenValue::CloseParen,
-                left.provenance.end(),
+                &left.provenance.end(),
                 "expected ) to match (",
             )?;
 
             left
         }
-        TokenValue::Dict => dict_literal(source, context, cursor)?,
-        TokenValue::List => array_literal(source, context, cursor, can_be_struct)?,
-        TokenValue::Rc => rc_literal(source, context, cursor)?,
-        TokenValue::Cell => cell_literal(source, context, cursor)?,
+        TokenValue::Dict => dict_literal(source, context, &cursor)?,
+        TokenValue::List => array_literal(source, context, &cursor, can_be_struct)?,
+        TokenValue::Rc => rc_literal(source, context, &cursor)?,
+        TokenValue::Cell => cell_literal(source, context, &cursor)?,
         token @ (TokenValue::If | TokenValue::While) => {
-            if_or_while(source, context, token, cursor)?
+            if_or_while(source, context, token, &cursor)?
         }
-        TokenValue::Case => match_statement(source, context, cursor)?,
-        TokenValue::Loop => parse_loop(source, context, cursor)?,
-        TokenValue::OpenBracket => block(source, context, cursor)?,
+        TokenValue::Case => match_statement(source, context, &cursor)?,
+        TokenValue::Loop => parse_loop(source, context, &cursor)?,
+        TokenValue::OpenBracket => block(source, context, &cursor)?,
         // Atoms
         TokenValue::True => AstNode::new(AstNodeValue::Bool(true), range),
         TokenValue::False => AstNode::new(AstNodeValue::Bool(false), range),
@@ -1476,13 +1477,13 @@ fn expression_pratt(
         TokenValue::StringLiteral(s) => AstNode::new(AstNodeValue::StringLiteral(s), range),
         TokenValue::Int(int) => try_decimal(source, int as i64, range)?,
         TokenValue::Yield => {
-            let next = peek_token(source, cursor, "expected yielded value after yield")?;
+            let next = peek_token(source, &cursor, "expected yielded value after yield")?;
             if next.value.is_expression_boundary() {
-                let range = SourceRange::new(start, cursor);
+                let range = SourceRange::new(start.clone(), &cursor);
                 AstNode::new(AstNodeValue::Yield(None), range)
             } else {
-                let inner = expression(source, context, cursor, true)?;
-                let range = SourceRange::new(start, inner.provenance.end());
+                let inner = expression(source, context, &cursor, true)?;
+                let range = SourceRange::new(start.clone(), &inner.provenance.end());
                 let inner = context.add(inner);
                 AstNode::new(AstNodeValue::Yield(Some(inner)), range)
             }
@@ -1495,7 +1496,7 @@ fn expression_pratt(
                     "expected an expression",
                 ));
             };
-            let right = expression_pratt(source, context, cursor, right_binding, can_be_struct)?;
+            let right = expression_pratt(source, context, &cursor, right_binding, can_be_struct)?;
             let end = right.provenance.end();
             let right = add_node(context, right);
             AstNode::new(
@@ -1506,7 +1507,7 @@ fn expression_pratt(
                     TokenValue::Exclamation => AstNodeValue::UnaryExpr(UnaryOp::BooleanNot, right),
                     other => unreachable!("prefix operator {:?}", other),
                 },
-                SourceRange::new(range.start(), end),
+                SourceRange::new(range.start(), &end),
             )
         }
     };
@@ -1534,19 +1535,19 @@ fn expression_pratt(
                     let mut closed = peek_for_closed(
                         source,
                         TokenValue::CloseParen,
-                        end,
+                        &end,
                         "expected ) or next argument",
                     )?;
 
                     while !closed {
-                        let argument = expression(source, context, end, can_be_struct)?;
+                        let argument = expression(source, context, &end, can_be_struct)?;
                         end = argument.provenance.end();
                         arguments.push(context.add(argument));
 
                         let (should_break, new_end) = comma_or_end_list(
                             source,
                             TokenValue::CloseParen,
-                            end,
+                            &end,
                             "expected comma or ) to end function call",
                         )?;
                         end = new_end.end();
@@ -1555,15 +1556,15 @@ fn expression_pratt(
 
                     left = AstNode::new(
                         AstNodeValue::Call(add_node(context, left), arguments),
-                        SourceRange::new(start, end),
+                        SourceRange::new(start.clone(), &end),
                     );
                 }
                 TokenValue::OpenSquare => {
-                    let index = expression(source, context, range.end(), can_be_struct)?;
+                    let index = expression(source, context, &range.end(), can_be_struct)?;
                     let Token { range, .. } = assert_next_lexeme_eq(
                         source,
                         TokenValue::CloseSquare,
-                        index.provenance.end(),
+                        &index.provenance.end(),
                         "expected ] to follow array index",
                     )?;
                     left = AstNode::new(
@@ -1572,7 +1573,7 @@ fn expression_pratt(
                             add_node(context, left),
                             add_node(context, index),
                         ),
-                        SourceRange::new(start, range.end()),
+                        SourceRange::new(start.clone(), &range.end()),
                     );
                 }
                 TokenValue::OpenBracket if can_be_struct => {
@@ -1582,16 +1583,16 @@ fn expression_pratt(
 
                     loop {
                         if TokenValue::CloseBracket
-                            == peek_token(source, end, "expected } or next field")?.value
+                            == peek_token(source, &end, "expected } or next field")?.value
                         {
                             source.next();
                             break;
                         }
 
                         let (field, field_range) =
-                            word(source, end, "expected field in struct literal")?;
+                            word(source, &end, "expected field in struct literal")?;
                         if let lex @ (TokenValue::Comma | TokenValue::CloseBracket) =
-                            &peek_token(source, end, "expected comma or } to end struct literal")?
+                            &peek_token(source, &end, "expected comma or } to end struct literal")?
                                 .value
                         {
                             let lex = lex.clone();
@@ -1606,17 +1607,17 @@ fn expression_pratt(
                             let token = assert_next_lexeme_eq(
                                 source,
                                 TokenValue::Colon,
-                                end,
+                                &end,
                                 "expected colon after field name",
                             )?;
                             let cursor = token.range.end();
-                            let argument = expression(source, context, cursor, can_be_struct)?;
+                            let argument = expression(source, context, &cursor, can_be_struct)?;
                             end = argument.provenance.end();
                             fields.insert(field, context.add(argument));
 
                             if let TokenValue::Comma = peek_token(
                                 source,
-                                end,
+                                &end,
                                 "expected comma or } to end struct literal",
                             )?
                             .value
@@ -1626,7 +1627,7 @@ fn expression_pratt(
                                 assert_next_lexeme_eq(
                                     source,
                                     TokenValue::CloseBracket,
-                                    end,
+                                    &end,
                                     "expected close parenthesis or comma after argument",
                                 )?;
                                 break;
@@ -1643,7 +1644,7 @@ fn expression_pratt(
                             name: context.add(left),
                             fields,
                         },
-                        SourceRange::new(start, end),
+                        SourceRange::new(start.clone(), &end),
                     );
                 }
                 token => unreachable!("postfix operator {:?}", token),
@@ -1662,8 +1663,13 @@ fn expression_pratt(
                 ..
             } = already_peeked_token(source)?;
 
-            let right =
-                expression_pratt(source, context, current.end(), right_binding, can_be_struct)?;
+            let right = expression_pratt(
+                source,
+                context,
+                &current.end(),
+                right_binding,
+                can_be_struct,
+            )?;
 
             let bin_op = match value {
                 TokenValue::Assign => BinOp::Assignment,
@@ -1694,7 +1700,7 @@ fn expression_pratt(
             let end = right.provenance.end();
             left = AstNode::new(
                 AstNodeValue::BinExpr(bin_op, add_node(context, left), add_node(context, right)),
-                SourceRange::new(start, end),
+                SourceRange::new(start, &end),
             );
 
             continue;
@@ -1769,7 +1775,7 @@ fn infix_binding_power(op: &TokenValue) -> Option<(u8, u8)> {
 fn array_literal(
     source: &mut TokenIter,
     context: &mut AstArena,
-    start: SourceMarker,
+    start: &SourceMarker,
     can_be_struct: bool,
 ) -> Result<AstNode, ParseError> {
     let token = assert_next_lexeme_eq(
@@ -1778,10 +1784,10 @@ fn array_literal(
         start,
         "expected [ to start list literal",
     )?;
-    let expr = expression(source, context, token.range.start(), can_be_struct)?;
+    let expr = expression(source, context, &token.range.start(), can_be_struct)?;
     let separator = next_token(
         source,
-        expr.provenance.start(),
+        &expr.provenance.start(),
         "expected comma, semicolon or ]",
     )?;
     match separator.value {
@@ -1792,25 +1798,25 @@ fn array_literal(
             let mut closed = peek_for_closed(
                 source,
                 TokenValue::CloseSquare,
-                end,
+                &end,
                 "expected ] or next argument",
             )?;
 
             while !closed {
-                let peeked = peek_token(source, end, "expected , or ]")?;
+                let peeked = peek_token(source, &end, "expected , or ]")?;
                 if TokenValue::CloseSquare == peeked.value {
                     source.next();
                     break;
                 }
                 end = peeked.range.end();
-                let expr = expression(source, context, end, can_be_struct)?;
+                let expr = expression(source, context, &end, can_be_struct)?;
                 end = expr.provenance.end();
                 children.push(context.add(expr));
 
                 let (should_break, new_end) = comma_or_end_list(
                     source,
                     TokenValue::CloseSquare,
-                    end,
+                    &end,
                     "expected comma or ] to end list literal",
                 )?;
                 end = new_end.end();
@@ -1818,27 +1824,27 @@ fn array_literal(
             }
             Ok(AstNode::new(
                 AstNodeValue::ArrayLiteral(children),
-                SourceRange::new(start, end),
+                SourceRange::new(start.clone(), &end),
             ))
         }
         TokenValue::Semicolon => {
-            let length = expression(source, context, separator.range.end(), true)?;
+            let length = expression(source, context, &separator.range.end(), true)?;
             let close = assert_next_lexeme_eq(
                 source,
                 TokenValue::CloseSquare,
-                length.provenance.end(),
+                &length.provenance.end(),
                 "expected ] after list length in list literal",
             )?;
             let expr = add_node(context, expr);
             let length = add_node(context, length);
             Ok(AstNode::new(
                 AstNodeValue::ArrayLiteralLength(expr, length),
-                SourceRange::new(start, close.range.end()),
+                SourceRange::new(start.clone(), &close.range.end()),
             ))
         }
         TokenValue::CloseSquare => Ok(AstNode::new(
             AstNodeValue::ArrayLiteral(vec![context.add(expr)]),
-            SourceRange::new(start, separator.range.end()),
+            SourceRange::new(start.clone(), &separator.range.end()),
         )),
         _ => Err(ParseError::UnexpectedToken(
             Box::new(separator),
@@ -1850,7 +1856,7 @@ fn array_literal(
 fn rc_literal(
     source: &mut TokenIter,
     context: &mut AstArena,
-    start: SourceMarker,
+    start: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let token = assert_next_lexeme_eq(
         source,
@@ -1859,26 +1865,26 @@ fn rc_literal(
         "expected { to start rc literal",
     )?;
     let mut cursor = token.range.end();
-    let inner = expression(source, context, cursor, true)?;
+    let inner = expression(source, context, &cursor, true)?;
     cursor = inner.provenance.end();
     let token = assert_next_lexeme_eq(
         source,
         TokenValue::CloseBracket,
-        cursor,
+        &cursor,
         "expected } to end rc literal",
     )?;
     cursor = token.range.end();
     let inner = context.add(inner);
     Ok(AstNode::new(
         AstNodeValue::ReferenceCountLiteral(inner),
-        SourceRange::new(start, cursor),
+        SourceRange::new(start.clone(), &cursor),
     ))
 }
 
 fn cell_literal(
     source: &mut TokenIter,
     context: &mut AstArena,
-    start: SourceMarker,
+    start: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let token = assert_next_lexeme_eq(
         source,
@@ -1887,26 +1893,26 @@ fn cell_literal(
         "expected { to start cell literal",
     )?;
     let mut cursor = token.range.end();
-    let inner = expression(source, context, cursor, true)?;
+    let inner = expression(source, context, &cursor, true)?;
     cursor = inner.provenance.end();
     let token = assert_next_lexeme_eq(
         source,
         TokenValue::CloseBracket,
-        cursor,
+        &cursor,
         "expected } to end cell literal",
     )?;
     cursor = token.range.end();
     let inner = context.add(inner);
     Ok(AstNode::new(
         AstNodeValue::CellLiteral(inner),
-        SourceRange::new(start, cursor),
+        SourceRange::new(start.clone(), &cursor),
     ))
 }
 
 fn dict_literal(
     source: &mut TokenIter,
     context: &mut AstArena,
-    start: SourceMarker,
+    start: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let token = assert_next_lexeme_eq(
         source,
@@ -1917,18 +1923,18 @@ fn dict_literal(
     let mut cursor = token.range.end();
     let mut entries = Vec::new();
     loop {
-        let key = match peek_token(source, cursor, "expected } or next entry")?.value {
+        let key = match peek_token(source, &cursor, "expected } or next entry")?.value {
             TokenValue::CloseBracket => {
                 source.next();
                 break;
             }
             TokenValue::OpenSquare => {
                 already_peeked_token(source)?;
-                let key = expression(source, context, cursor, true)?;
+                let key = expression(source, context, &cursor, true)?;
                 let token = assert_next_lexeme_eq(
                     source,
                     TokenValue::CloseSquare,
-                    cursor,
+                    &cursor,
                     "Expected ] after key expression",
                 )?;
                 cursor = token.range.end();
@@ -1936,11 +1942,11 @@ fn dict_literal(
                 key
             }
             _ => {
-                let (key, key_range) = word(source, cursor, "expected key in dict literal")?;
+                let (key, key_range) = word(source, &cursor, "expected key in dict literal")?;
                 cursor = key_range.end();
 
                 if let lex @ (TokenValue::Comma | TokenValue::CloseBracket) =
-                    &peek_token(source, cursor, "expected comma or } to end dict literal")?.value
+                    &peek_token(source, &cursor, "expected comma or } to end dict literal")?.value
                 {
                     let lex = lex.clone();
                     let token = already_peeked_token(source)?;
@@ -1964,17 +1970,17 @@ fn dict_literal(
         let token = assert_next_lexeme_eq(
             source,
             TokenValue::Colon,
-            cursor,
+            &cursor,
             "Expected : after key in dict",
         )?;
         cursor = token.range.end();
-        let value = expression(source, context, cursor, true)?;
+        let value = expression(source, context, &cursor, true)?;
         cursor = value.provenance.end();
         entries.push((context.add(key), context.add(value)));
         let (did_end, range) = comma_or_end_list(
             source,
             TokenValue::CloseBracket,
-            cursor,
+            &cursor,
             "expected , or } in dict literal",
         )?;
         cursor = range.end();
@@ -1985,7 +1991,7 @@ fn dict_literal(
 
     Ok(AstNode::new(
         AstNodeValue::DictLiteral(entries),
-        SourceRange::new(start, cursor),
+        SourceRange::new(start.clone(), &cursor),
     ))
 }
 
@@ -1993,20 +1999,20 @@ fn if_or_while(
     source: &mut TokenIter,
     context: &mut AstArena,
     is_if_or_while: TokenValue,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let predicate = expression(source, context, cursor, false)?;
     let token = assert_next_lexeme_eq(
         source,
         TokenValue::OpenBracket,
-        predicate.provenance.end(),
+        &predicate.provenance.end(),
         "expected { after predicate",
     )?;
     let cursor = token.range.end();
-    let if_block = block(source, context, cursor)?;
+    let if_block = block(source, context, &cursor)?;
 
     let predicate_ptr = add_node(context, predicate);
-    let provenance = SourceRange::new(cursor, if_block.provenance.end());
+    let provenance = SourceRange::new(cursor.clone(), &if_block.provenance.end());
     let block_ptr = add_node(context, if_block);
 
     Ok(if is_if_or_while == TokenValue::If {
@@ -2018,18 +2024,18 @@ fn if_or_while(
                 let else_token = already_peeked_token(source)?;
                 let next_token = peek_token(
                     source,
-                    else_token.range.end(),
+                    &else_token.range.end(),
                     "expected { or if after else",
                 )?;
                 let else_block = match next_token.value {
                     TokenValue::OpenBracket => {
                         let token = already_peeked_token(source)?;
-                        block(source, context, token.range.end())?
+                        block(source, context, &token.range.end())?
                     }
                     TokenValue::If => {
                         let token = already_peeked_token(source)?;
                         let if_node =
-                            if_or_while(source, context, TokenValue::If, token.range.end())?;
+                            if_or_while(source, context, TokenValue::If, &token.range.end())?;
                         let provenance = if_node.provenance.clone();
                         AstNode::new(AstNodeValue::Block(vec![context.add(if_node)]), provenance)
                     }
@@ -2040,7 +2046,7 @@ fn if_or_while(
                         ))
                     }
                 };
-                let provenance = SourceRange::new(cursor, else_block.provenance.end());
+                let provenance = SourceRange::new(cursor.clone(), &else_block.provenance.end());
                 let else_ptr = add_node(context, else_block);
                 AstNode::new(
                     AstNodeValue::If(IfDeclaration {
@@ -2068,24 +2074,24 @@ fn if_or_while(
 fn match_statement(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let start = cursor;
     let match_value = expression(source, context, cursor, false)?;
     let mut cursor = assert_next_lexeme_eq(
         source,
         TokenValue::OpenBracket,
-        match_value.provenance.end(),
+        &match_value.provenance.end(),
         "expected { after case value",
     )?
     .range
     .end();
     let match_value = context.add(match_value);
     let mut cases = Vec::new();
-    while peek_token(source, cursor, "unexpected EOF in case statement")?.value
+    while peek_token(source, &cursor, "unexpected EOF in case statement")?.value
         != TokenValue::CloseBracket
     {
-        let next_case = match_case_statement(source, context, cursor)?;
+        let next_case = match_case_statement(source, context, &cursor)?;
         cursor = next_case.provenance.end();
         cases.push(next_case);
     }
@@ -2096,49 +2102,49 @@ fn match_statement(
             value: match_value,
             cases,
         }),
-        SourceRange::new(start, cursor),
+        SourceRange::new(start.clone(), &cursor),
     ))
 }
 
 fn match_case_statement(
     source: &mut TokenIter,
     context: &mut AstArena,
-    mut cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<MatchCaseDeclaration, ParseError> {
     let start = cursor;
     let variant = match_case_variant(source, cursor)?;
-    cursor = variant.provenance.end();
+    let mut cursor = variant.provenance.end();
     let mut variants = vec![variant];
 
-    while peek_token(source, cursor, "expected | or => after case variant")?.value
+    while peek_token(source, &cursor, "expected | or => after case variant")?.value
         != TokenValue::CaseRocket
     {
         cursor = assert_next_lexeme_eq(
             source,
             TokenValue::VerticalPipe,
-            cursor,
+            &cursor,
             "expected | or => after case variant",
         )?
         .range
         .end();
-        let variant = match_case_variant(source, cursor)?;
+        let variant = match_case_variant(source, &cursor)?;
         cursor = variant.provenance.end();
         variants.push(variant);
     }
     cursor = already_peeked_token(source)?.range.end();
-    let body = if peek_token(source, cursor, "expected { or expression after =>")?.value
+    let body = if peek_token(source, &cursor, "expected { or expression after =>")?.value
         == TokenValue::OpenBracket
     {
         cursor = already_peeked_token(source)?.range.end();
-        let body = block(source, context, cursor)?;
+        let body = block(source, context, &cursor)?;
         cursor = body.provenance.end();
         body
     } else {
-        let expr = expression(source, context, cursor, true)?;
+        let expr = expression(source, context, &cursor, true)?;
         cursor = assert_next_lexeme_eq(
             source,
             TokenValue::Comma,
-            expr.provenance.end(),
+            &expr.provenance.end(),
             "expected , after variant expression",
         )?
         .range
@@ -2150,30 +2156,30 @@ fn match_case_statement(
         variants,
         var_id: VariableID::new(),
         body: context.add(body),
-        provenance: SourceRange::new(start, cursor),
+        provenance: SourceRange::new(start.clone(), &cursor),
     })
 }
 
 fn match_case_variant(
     source: &mut TokenIter,
-    mut cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<MatchCaseVariant, ParseError> {
     let start = cursor;
     let (name, range) = word(source, cursor, "expected name of case variant")?;
-    cursor = range.end();
+    let mut cursor = range.end();
 
     let mut bindings = Vec::new();
-    if peek_token(source, cursor, "expected (, | or => after case name")?.value
+    if peek_token(source, &cursor, "expected (, | or => after case name")?.value
         == TokenValue::OpenParen
     {
         loop {
             cursor = already_peeked_token(source)?.range.end();
-            let (binding, range) = word(source, cursor, "expected binding in case statement")?;
+            let (binding, range) = word(source, &cursor, "expected binding in case statement")?;
             bindings.push(binding);
             cursor = range.end();
 
             let (list_ended, range) =
-                comma_or_end_list(source, TokenValue::CloseParen, cursor, "expected , or )")?;
+                comma_or_end_list(source, TokenValue::CloseParen, &cursor, "expected , or )")?;
             cursor = range.end();
             if list_ended {
                 break;
@@ -2184,7 +2190,7 @@ fn match_case_variant(
     Ok(MatchCaseVariant {
         name,
         bindings,
-        provenance: SourceRange::new(start, cursor),
+        provenance: SourceRange::new(start.clone(), &cursor),
         ty: OnceLock::new(),
     })
 }
@@ -2192,7 +2198,7 @@ fn match_case_variant(
 fn parse_loop(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let token = assert_next_lexeme_eq(
         source,
@@ -2201,8 +2207,8 @@ fn parse_loop(
         "expected { after loop",
     )?;
 
-    let body = block(source, context, token.range.start())?;
-    let provenance = SourceRange::new(cursor, body.provenance.end());
+    let body = block(source, context, &token.range.start())?;
+    let provenance = SourceRange::new(cursor.clone(), &body.provenance.end());
     let body = add_node(context, body);
 
     Ok(AstNode::new(AstNodeValue::Loop(body), provenance))
@@ -2211,10 +2217,10 @@ fn parse_loop(
 fn block(
     source: &mut TokenIter,
     context: &mut AstArena,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
     let mut statements = Vec::new();
-    let mut provenance = SourceRange::new(cursor, cursor);
+    let mut provenance = SourceRange::new(cursor.clone(), cursor);
     loop {
         match peek_token(source, cursor, "expected statement or close bracket")? {
             Token {
@@ -2227,7 +2233,7 @@ fn block(
                 return Ok(AstNode::new(AstNodeValue::Block(statements), provenance));
             }
             _ => {
-                let statement = statement(source, context, provenance.end())?;
+                let statement = statement(source, context, &provenance.end())?;
                 provenance.set_end(statement.provenance.end());
                 statements.push(context.add(statement));
             }
@@ -2237,7 +2243,7 @@ fn block(
 
 fn integer(
     source: &mut TokenIter,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
     reason: &'static str,
 ) -> Result<(u64, SourceRange), ParseError> {
     match next_token(source, cursor, reason)? {
@@ -2297,7 +2303,7 @@ fn try_decimal(
 
 fn word(
     source: &mut TokenIter,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
     reason: &'static str,
 ) -> Result<(String, SourceRange), ParseError> {
     match next_token(source, cursor, reason)? {
@@ -2316,13 +2322,13 @@ fn already_peeked_token(source: &mut TokenIter) -> Result<Token, ParseError> {
 fn assert_next_lexeme_eq(
     source: &mut TokenIter,
     target: TokenValue,
-    provenance: SourceMarker,
+    provenance: &SourceMarker,
     reason: &'static str,
 ) -> Result<Token, ParseError> {
     skim_off_comments(source);
     let lexeme = source
         .next()
-        .ok_or(ParseError::UnexpectedEndOfInput(provenance, reason))??;
+        .ok_or_else(|| ParseError::UnexpectedEndOfInput(provenance.clone(), reason))??;
     assert_lexeme_eq(&lexeme, target, reason)?;
 
     Ok(lexeme)
@@ -2349,7 +2355,7 @@ fn assert_lexeme_eq(
 fn comma_or_end_list(
     source: &mut TokenIter,
     list_end: TokenValue,
-    start: SourceMarker,
+    start: &SourceMarker,
     reason: &'static str,
 ) -> Result<(bool, SourceRange), ParseError> {
     let next = next_token(source, start, reason)?;
@@ -2370,7 +2376,7 @@ fn comma_or_end_list(
 fn peek_for_closed(
     source: &mut TokenIter,
     list_end: TokenValue,
-    provenance: SourceMarker,
+    provenance: &SourceMarker,
     reason: &'static str,
 ) -> Result<bool, ParseError> {
     let closed = peek_token(source, provenance, reason)?.value == list_end;
@@ -2383,27 +2389,27 @@ fn peek_for_closed(
 
 fn next_token(
     source: &mut TokenIter,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
     reason: &'static str,
 ) -> Result<Token, ParseError> {
     skim_off_comments(source);
     let lex = source
         .next()
-        .ok_or(ParseError::UnexpectedEndOfInput(cursor, reason))??;
+        .ok_or_else(|| ParseError::UnexpectedEndOfInput(cursor.clone(), reason))??;
     Ok(lex)
 }
 
 fn peek_token<'a>(
     source: &'a mut TokenIter,
-    cursor: SourceMarker,
+    cursor: &SourceMarker,
     reason: &'static str,
 ) -> Result<&'a Token, ParseError> {
     skim_off_comments(source);
-    Ok(source
-        .peek()
-        .ok_or(ParseError::UnexpectedEndOfInput(cursor, reason))?
-        .as_ref()
-        .map_err(|e| e.clone())?)
+    if let Some(token) = source.peek() {
+        Ok(token.as_ref().map_err(|e| e.clone())?)
+    } else {
+        Err(ParseError::UnexpectedEndOfInput(cursor.clone(), reason))
+    }
 }
 
 fn peek_token_optional<'a>(source: &'a mut TokenIter) -> Result<Option<&'a Token>, ParseError> {

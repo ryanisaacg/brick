@@ -9,7 +9,7 @@ use brick::{
 };
 
 pub fn format_str(source: &str) -> Result<String, CompileError> {
-    let mut file = parse_file("input", source.to_string())?;
+    let mut file = parse_file("input", source)?;
 
     Ok(format(&mut file))
 }

@@ -1,9 +1,9 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct SourceRange {
-    source_name: &'static str,
-    source_text: &'static str,
+    source_name: Arc<str>,
+    source_text: Arc<str>,
     pub start_line: u32,
     pub start_offset: u32,
     pub end_line: u32,
@@ -11,21 +11,25 @@ pub struct SourceRange {
 }
 
 impl SourceRange {
-    pub fn new(start: SourceMarker, end: SourceMarker) -> SourceRange {
+    pub fn new(start: SourceMarker, end: &SourceMarker) -> SourceRange {
+        SourceRange::new_offset(start, end.line, end.offset)
+    }
+
+    pub fn new_offset(start: SourceMarker, end_line: u32, end_offset: u32) -> SourceRange {
         SourceRange {
             source_name: start.source_name,
             source_text: start.source_text,
             start_line: start.line,
             start_offset: start.offset,
-            end_line: end.line,
-            end_offset: end.offset,
+            end_line,
+            end_offset,
         }
     }
 
     pub fn start(&self) -> SourceMarker {
         SourceMarker {
-            source_name: self.source_name,
-            source_text: self.source_text,
+            source_name: self.source_name.clone(),
+            source_text: self.source_text.clone(),
             line: self.start_line,
             offset: self.start_offset,
         }
@@ -33,8 +37,8 @@ impl SourceRange {
 
     pub fn end(&self) -> SourceMarker {
         SourceMarker {
-            source_name: self.source_name,
-            source_text: self.source_text,
+            source_name: self.source_name.clone(),
+            source_text: self.source_text.clone(),
             line: self.end_line,
             offset: self.end_offset,
         }
@@ -95,19 +99,18 @@ impl fmt::Display for SourceRange {
     }
 }
 
-#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct SourceMarker {
-    source_name: &'static str,
-    #[allow(dead_code)]
-    source_text: &'static str,
+    source_name: Arc<str>,
+    source_text: Arc<str>,
     line: u32,
     offset: u32,
 }
 
 impl SourceMarker {
     pub fn new(
-        source_name: &'static str,
-        source_text: &'static str,
+        source_name: Arc<str>,
+        source_text: Arc<str>,
         line: u32,
         offset: u32,
     ) -> SourceMarker {
@@ -117,6 +120,14 @@ impl SourceMarker {
             line,
             offset,
         }
+    }
+
+    pub fn line(&self) -> u32 {
+        self.line
+    }
+
+    pub fn offset(&self) -> u32 {
+        self.offset
     }
 
     pub fn index(&self) -> usize {

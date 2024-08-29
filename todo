@@ -11,7 +11,6 @@ borrow checker and lifetimes:
     - allow reassignment of affine fields (currently they can't generate drops)
 
 refactors:
-- instead of &'static str for provenance source, maybe Arc<[str]>?
 - do all HirNodes need a ty? I think prrrrrobably not?
 
 collections:

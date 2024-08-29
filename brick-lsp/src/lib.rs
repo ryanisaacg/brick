@@ -71,7 +71,7 @@ impl ServerState {
         let filename = uri.path().to_string().leak() as &'static str;
         let source_file = SourceFile::from_filename_and_contents(filename, text);
 
-        match parse_file(source_file.filename, source_file.contents.clone()) {
+        match parse_file(source_file.filename, source_file.contents.as_ref()) {
             Ok(parsed) => {
                 // TODO: run full type checker async rather than sync
                 if let Err(err) = brick::typecheck_module(&[(source_file.module_name, &parsed)]) {
@@ -118,7 +118,7 @@ impl ServerState {
             }
         }
 
-        match parse_file(entry.source.filename, entry.source.contents.clone()) {
+        match parse_file(entry.source.filename, entry.source.contents.as_ref()) {
             Ok(contents) => {
                 entry.parsed = contents;
                 // TODO: run full type checker async rather than sync

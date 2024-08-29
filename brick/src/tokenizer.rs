@@ -1,5 +1,5 @@
-use std::fmt;
-use std::iter::Peekable;
+use std::collections::VecDeque;
+use std::{fmt, sync::Arc};
 use thiserror::Error;
 
 use crate::provenance::{SourceMarker, SourceRange};
@@ -263,11 +263,10 @@ pub enum LexError {
 }
 
 pub fn lex<'a>(
-    source_name: &'static str,
-    source_text: String,
+    source_name: Arc<str>,
+    source_text: Arc<str>,
 ) -> impl 'a + Iterator<Item = Result<Token, LexError>> {
-    let source_text = Box::leak(source_text.into_boxed_str());
-    let source = source_text.chars().peekable();
+    let source = source_text.chars().collect();
 
     TokenIterator {
         source,
@@ -278,17 +277,17 @@ pub fn lex<'a>(
     }
 }
 
-struct TokenIterator<T: Iterator<Item = char>> {
-    source: Peekable<T>,
-    source_name: &'static str,
-    source_text: &'static str,
+struct TokenIterator {
+    source: VecDeque<char>,
+    source_name: Arc<str>,
+    source_text: Arc<str>,
     line: u32,
     offset: u32,
 }
 
-impl<T: Iterator<Item = char>> TokenIterator<T> {
+impl TokenIterator {
     fn next_char(&mut self) -> Option<(char, SourceMarker)> {
-        match self.source.next() {
+        match self.source.pop_front() {
             None => None,
             Some('\n') => {
                 self.line += 1;
@@ -299,21 +298,26 @@ impl<T: Iterator<Item = char>> TokenIterator<T> {
                 self.offset += 1;
                 Some((
                     chr,
-                    SourceMarker::new(self.source_name, self.source_text, self.line, self.offset),
+                    SourceMarker::new(
+                        self.source_name.clone(),
+                        self.source_text.clone(),
+                        self.line,
+                        self.offset,
+                    ),
                 ))
             }
         }
     }
 
-    fn next_char_literal(&mut self, start: SourceMarker) -> Result<(char, SourceRange), LexError> {
+    fn next_char_literal(&mut self, start: &SourceMarker) -> Result<(char, SourceRange), LexError> {
         match self
             .next_char()
-            .ok_or(LexError::UnterminatedLiteral(start))?
+            .ok_or_else(|| LexError::UnterminatedLiteral(start.clone()))?
         {
             ('\\', cursor) => {
                 let (ch, end) = self
                     .next_char()
-                    .ok_or(LexError::UnterminatedLiteral(cursor))?;
+                    .ok_or_else(|| LexError::UnterminatedLiteral(cursor.clone()))?;
                 Ok((
                     match ch {
                         'n' => '\n',
@@ -326,15 +330,19 @@ impl<T: Iterator<Item = char>> TokenIterator<T> {
                         // TODO: byte and unicode escapes
                         _ => return Err(LexError::IllegalEscapeSequence(cursor)),
                     },
-                    SourceRange::new(start, end),
+                    SourceRange::new(start.clone(), &end),
                 ))
             }
-            (ch, start) => Ok((ch, SourceRange::new(start, start))),
+            (ch, start) => {
+                let line = start.line();
+                let offset = start.offset();
+                Ok((ch, SourceRange::new_offset(start, line, offset)))
+            }
         }
     }
 }
 
-impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
+impl Iterator for TokenIterator {
     type Item = Result<Token, LexError>;
 
     fn next(&mut self) -> Option<Result<Token, LexError>> {
@@ -344,7 +352,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 letter @ ('a'..='z' | 'A'..='Z' | '_') => {
                     let mut word = String::new();
                     word.push(letter);
-                    while let Some(candidate) = self.source.peek() {
+                    while let Some(candidate) = self.source.front() {
                         match candidate {
                             letter @ ('a'..='z' | 'A'..='Z' | '_' | '0'..='9') => {
                                 word.push(*letter);
@@ -391,7 +399,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     let mut number: u64 = (digit as u32 - '0' as u32) as u64;
 
                     // TODO: handle overflow
-                    while let Some(candidate) = self.source.peek() {
+                    while let Some(candidate) = self.source.front() {
                         match candidate {
                             digit @ '0'..='9' => {
                                 number = number * 10 + (*digit as u32 - '0' as u32) as u64;
@@ -406,14 +414,14 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     TokenValue::Int(number)
                 }
                 '!' => {
-                    if let Some('=') = self.source.peek() {
+                    if let Some('=') = self.source.front() {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::NotEquals
                     } else {
                         TokenValue::Exclamation
                     }
                 }
-                '?' => match self.source.peek() {
+                '?' => match self.source.front() {
                     Some('?') => {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::NullCoalesce
@@ -424,7 +432,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     }
                     _ => TokenValue::QuestionMark,
                 },
-                '=' => match self.source.peek() {
+                '=' => match self.source.front() {
                     Some('=') => {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::EqualTo
@@ -436,7 +444,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     _ => TokenValue::Assign,
                 },
                 '<' => {
-                    if let Some('=') = self.source.peek() {
+                    if let Some('=') = self.source.front() {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::LessEqualThan
                     } else {
@@ -444,14 +452,14 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     }
                 }
                 '>' => {
-                    if let Some('=') = self.source.peek() {
+                    if let Some('=') = self.source.front() {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::GreaterEqualThan
                     } else {
                         TokenValue::GreaterThan
                     }
                 }
-                '+' => match self.source.peek() {
+                '+' => match self.source.front() {
                     Some('=') => {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::PlusEquals
@@ -463,7 +471,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     _ => TokenValue::Plus,
                 },
                 '-' => {
-                    if let Some('=') = self.source.peek() {
+                    if let Some('=') = self.source.front() {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::MinusEquals
                     } else {
@@ -471,14 +479,14 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     }
                 }
                 '*' => {
-                    if let Some('=') = self.source.peek() {
+                    if let Some('=') = self.source.front() {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::AsteriskEquals
                     } else {
                         TokenValue::Asterisk
                     }
                 }
-                '/' => match self.source.peek() {
+                '/' => match self.source.front() {
                     Some('=') => {
                         end = Some(self.next_char().unwrap().1);
                         TokenValue::ForwardSlashEquals
@@ -486,11 +494,11 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                     Some('/') => {
                         let mut comment = String::new();
                         loop {
-                            match self.source.next() {
+                            match self.source.pop_front() {
                                 Some('\n') | None => {
                                     end = Some(SourceMarker::new(
-                                        self.source_name,
-                                        self.source_text,
+                                        self.source_name.clone(),
+                                        self.source_text.clone(),
                                         self.line,
                                         self.offset,
                                     ));
@@ -521,7 +529,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 '|' => TokenValue::VerticalPipe,
                 '\0' => return Some(Err(LexError::IllegalNullByte(start))),
                 '\'' => {
-                    let (value, idx) = match self.next_char_literal(start) {
+                    let (value, idx) = match self.next_char_literal(&start) {
                         Ok(val) => val,
                         Err(err) => return Some(Err(err)),
                     };
@@ -536,7 +544,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
                 '"' => {
                     let mut string = String::new();
                     loop {
-                        let (next, idx) = match self.next_char_literal(start) {
+                        let (next, idx) = match self.next_char_literal(&start) {
                             Ok(val) => val,
                             Err(err) => return Some(Err(err)),
                         };
@@ -553,7 +561,7 @@ impl<T: Iterator<Item = char>> Iterator for TokenIterator<T> {
 
             Some(Ok(Token {
                 value,
-                range: SourceRange::new(start, end.unwrap_or(start)),
+                range: SourceRange::new(start.clone(), &end.unwrap_or(start)),
             }))
         } else {
             None
@@ -568,7 +576,7 @@ mod test {
 
     #[test]
     fn reserved_words() {
-        let result = lex("test", "if let true false fn word".to_string())
+        let result = lex("test".into(), "if let true false fn word".into())
             .map(|token| token.map(|token| token.value))
             .collect::<Result<Vec<_>, _>>()
             .unwrap();

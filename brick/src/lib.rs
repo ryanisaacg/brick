@@ -263,7 +263,9 @@ pub fn check_types(sources: Vec<SourceFile>) -> Result<CompilationResults, Compi
                  filename,
                  module_name,
                  contents,
-             }| { parse_file(filename, contents).map(|ast| (module_name, ast)) },
+             }| {
+                parse_file(filename, contents.as_str()).map(|ast| (module_name, ast))
+            },
         )
         .collect::<Result<_, _>>()?;
     let module_refs: Vec<_> = modules.iter().map(|(name, ast)| (*name, ast)).collect();
@@ -322,8 +324,8 @@ pub fn typecheck_module(
     })
 }
 
-pub fn parse_file(filename: &'static str, contents: String) -> Result<ParsedFile, CompileError> {
-    let tokens = tokenizer::lex(filename, contents);
+pub fn parse_file(filename: &str, contents: &str) -> Result<ParsedFile, CompileError> {
+    let tokens = tokenizer::lex(filename.into(), contents.into());
     let parsed_module = ParsedFile::parse(tokens).map_err(CompileError::ParseError)?;
 
     Ok(parsed_module)
