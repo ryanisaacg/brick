@@ -45,6 +45,7 @@ pub enum TypecheckError {
     FileNotFound(SourceRange, String),
     NonConstantInConst(SourceRange),
     SelfParameterInNonAssociatedFunc(SourceRange),
+    ExportNotFound(SourceRange, String),
 }
 
 impl Error for TypecheckError {}
@@ -167,6 +168,11 @@ impl Diagnostic for TypecheckError {
             SelfParameterInNonAssociatedFunc(range) => {
                 DiagnosticMarker::error(range.clone(), "self parameter in non-associated function")
             }
+            ExportNotFound(range, name) => DiagnosticMarker::error_context(
+                range.clone(),
+                "module export not found",
+                name.to_string(),
+            ),
         })
     }
 }

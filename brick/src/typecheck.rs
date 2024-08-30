@@ -549,7 +549,16 @@ fn typecheck_expression<'a>(
                             ExpressionType::InstanceOf(*id)
                         }
                     }
-                    TypeDeclaration::Module(module) => module.exports[name].clone(),
+                    TypeDeclaration::Module(module) => module
+                        .exports
+                        .get(name)
+                        .ok_or_else(|| {
+                            TypecheckError::ExportNotFound(
+                                node.provenance.clone(),
+                                name.to_string(),
+                            )
+                        })?
+                        .clone(),
                     // TODO: static functions on structs?
                     TypeDeclaration::Struct(_) | TypeDeclaration::Interface(_) => {
                         return Err(TypecheckError::IllegalDotLHS(left.provenance.clone()));
