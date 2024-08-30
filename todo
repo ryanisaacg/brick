@@ -38,12 +38,6 @@ wasm backend:
 - explicitly handle stack overflows
 - correctly arrange stack, data, and heap segments of memory
 
-diagnostics:
-- parsing recovery during errors
-- "unknown type" placeholder for better error reporting
-- "u32" used as type results in strange errors
-- output errors in a custom format, not just as a printout of the error implementation
-
 packages:
 - packages can declare dependencies on one another
 - packages can be imported
@@ -135,10 +129,6 @@ unions:
 - ?. operator on union lvalues
 - unions have associated functions (and by extension, destructors)
 - unions can be converted to interfaces
-
-error reporting:
-- typecheck errors
-- error presentation
 
 metaprogramming:
 - proc macros? comptime? compile-time reflection (what is that even)? no metaprogramming?

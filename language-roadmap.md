@@ -69,4 +69,8 @@ linear types (requires destructuring):
 - linear value conditionally being dropped is a compile error
 - linear value re-assigned without dropping is a compile error
 
+partial compilation / error recovery:
+- allow partial parsing with error recovery
+- allow partial typechecking with error recovery
+
 operator overloading?
