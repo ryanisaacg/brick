@@ -97,7 +97,6 @@ dependencies = [
  "matches",
  "petgraph",
  "rayon",
- "thiserror",
 ]
 
 [[package]]

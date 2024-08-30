@@ -1,6 +1,4 @@
-use std::{collections::HashMap, iter::Peekable, sync::OnceLock};
-
-use thiserror::Error;
+use std::{collections::HashMap, error::Error, fmt::Display, iter::Peekable, sync::OnceLock};
 
 use crate::{
     diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
@@ -446,16 +444,33 @@ impl BinOp {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum ParseError {
-    #[error("unexpected token {0}, {1}")]
     UnexpectedToken(Box<Token>, &'static str),
-    #[error("unexpected end of input at {0}, {1}")]
     UnexpectedEndOfInput(SourceMarker, &'static str),
-    #[error("expected type for parameter at {0}")]
     MissingTypeForParam(SourceMarker),
-    #[error("token error: {0}")]
-    TokenError(#[from] LexError),
+    TokenError(LexError),
+}
+
+impl From<LexError> for ParseError {
+    fn from(value: LexError) -> Self {
+        ParseError::TokenError(value)
+    }
+}
+
+impl Error for ParseError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::TokenError(t) => Some(t),
+            _ => None,
+        }
+    }
+}
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.contents().fmt(f)
+    }
 }
 
 impl Diagnostic for ParseError {
@@ -471,24 +486,7 @@ impl Diagnostic for ParseError {
                 SourceRange::new(range.clone(), range),
                 "expected type for parameter",
             ),
-            ParseError::TokenError(token) => match token {
-                LexError::UnexpectedStart(_, marker) => DiagnosticMarker::error(
-                    SourceRange::new(marker.clone(), marker),
-                    "unexpected character",
-                ),
-                LexError::IllegalNullByte(marker) => DiagnosticMarker::error(
-                    SourceRange::new(marker.clone(), marker),
-                    "illegal null bytes",
-                ),
-                LexError::UnterminatedLiteral(marker) => DiagnosticMarker::error(
-                    SourceRange::new(marker.clone(), marker),
-                    "unterminated literal",
-                ),
-                LexError::IllegalEscapeSequence(marker) => DiagnosticMarker::error(
-                    SourceRange::new(marker.clone(), marker),
-                    "illegal escape sequence",
-                ),
-            },
+            ParseError::TokenError(token) => return token.contents(),
         })
     }
 }

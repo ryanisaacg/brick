@@ -1,35 +1,33 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, error::Error, fmt::Display};
 
 use rayon::prelude::*;
-use thiserror::Error;
 
 use crate::{
     diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
-    multi_error::{merge_results, print_multi_errors, MultiError},
+    multi_error::{merge_results, MultiError},
     typecheck::{InterfaceType, PointerKind, StructType, UnionType},
     DeclarationContext, ExpressionType, FuncType, SourceRange, TypeDeclaration, TypeID,
 };
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum TypeValidationError {
-    #[error("{}", print_multi_errors(&.0[..]))]
     MultiError(Vec<TypeValidationError>),
-    #[error("illegal return of a reference from a function: {0}")]
     ReferenceReturn(SourceRange),
-    #[error("drop may not be defined on normal types: {0}")]
     DropOnNormalType(SourceRange),
-    #[error("drop may not be defined on interfaces: {0}")]
     DropOnInterface(SourceRange),
-    #[error("drop must return void: {0}")]
     NonVoidDrop(SourceRange),
-    #[error("drop must have one parameter: {0}")]
     WrongDropParamCount(SourceRange),
-    #[error("parameter to drop must be a mutable self pointer: {0}")]
     IllegalDropParam(SourceRange),
-    #[error("recursive type: {0}")]
     RecursiveType(SourceRange),
-    #[error("non-affine type may not contain non-affine types: {0}")]
     IllegalAffineInNonAffine(SourceRange),
+}
+
+impl Error for TypeValidationError {}
+
+impl Display for TypeValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.contents().fmt(f)
+    }
 }
 
 impl Diagnostic for TypeValidationError {

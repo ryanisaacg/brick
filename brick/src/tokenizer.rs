@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
+use std::error::Error;
+use std::fmt::Display;
 use std::{fmt, sync::Arc};
-use thiserror::Error;
 
+use crate::diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker};
 use crate::provenance::{SourceMarker, SourceRange};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -253,16 +255,41 @@ impl fmt::Display for TokenValue {
     }
 }
 
-#[derive(Clone, Debug, Error)]
+#[derive(Clone, Debug)]
 pub enum LexError {
-    #[error("unexpected character {0} at {1}")]
     UnexpectedStart(char, SourceMarker),
-    #[error("illegal null byte in source code at {0}")]
     IllegalNullByte(SourceMarker),
-    #[error("unterminated literal in source code starting at {0}")]
     UnterminatedLiteral(SourceMarker),
-    #[error("illegal escape sequence at {0}")]
     IllegalEscapeSequence(SourceMarker),
+}
+
+impl Error for LexError {}
+
+impl Display for LexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.contents().fmt(f)
+    }
+}
+
+impl Diagnostic for LexError {
+    fn contents(&self) -> DiagnosticContents {
+        DiagnosticContents::Scalar(match self {
+            LexError::UnexpectedStart(ch, marker) => DiagnosticMarker::error_context(
+                marker.to_range(),
+                "unexpected character",
+                format!("{ch}"),
+            ),
+            LexError::IllegalNullByte(marker) => {
+                DiagnosticMarker::error(marker.to_range(), "illegal null bytes")
+            }
+            LexError::UnterminatedLiteral(marker) => {
+                DiagnosticMarker::error(marker.to_range(), "unterminated literal")
+            }
+            LexError::IllegalEscapeSequence(marker) => {
+                DiagnosticMarker::error(marker.to_range(), "illegal escape sequence")
+            }
+        })
+    }
 }
 
 pub fn lex<'a>(
@@ -336,11 +363,7 @@ impl TokenIterator {
                     SourceRange::new(start.clone(), &end),
                 ))
             }
-            (ch, start) => {
-                let line = start.line();
-                let offset = start.offset();
-                Ok((ch, SourceRange::new_offset(start, line, offset)))
-            }
+            (ch, start) => Ok((ch, start.to_range())),
         }
     }
 }

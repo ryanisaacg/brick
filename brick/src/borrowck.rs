@@ -1,4 +1,8 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    error::Error,
+    fmt::Display,
+};
 
 use petgraph::{
     data::DataMap,
@@ -6,14 +10,13 @@ use petgraph::{
     visit::EdgeRef,
     Direction,
 };
-use thiserror::Error;
 
 use crate::{
     declaration_context::TypeID,
     diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
     hir::{HirModule, HirNode},
     id::{AnyID, NodeID, VariableID},
-    multi_error::{merge_results, print_multi_errors, MultiError},
+    multi_error::{merge_results, MultiError},
     typecheck::{ExpressionType, PointerKind},
     DeclarationContext, HirNodeValue, SourceRange, TypeDeclaration,
 };
@@ -23,37 +26,38 @@ use self::control_flow_graph::{CfgEdge, CfgNode, ControlFlowGraph, FunctionCFG};
 mod control_flow_graph;
 mod drop_points;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum LifetimeError {
-    #[error("{}",  print_multi_errors(&.0[..]))]
     MultiError(Vec<LifetimeError>),
-    #[error("use after move{}; moved{}", maybe_range(.use_point), maybe_range(.move_point))]
     UseAfterMove {
         use_point: Option<SourceRange>,
         move_point: Option<SourceRange>,
     },
-    #[error("borrow used after move{}; moved{}", maybe_range(.use_point), maybe_range(.move_point))]
     BorrowUseAfterMove {
         use_point: Option<SourceRange>,
         move_point: Option<SourceRange>,
     },
-    #[error("borrow used after reassignment{}; assigned{}", maybe_range(.use_point), maybe_range(.reassign_point))]
     BorrowUseAfterReassignment {
         use_point: Option<SourceRange>,
         reassign_point: Option<SourceRange>,
     },
-    #[error("borrow used after unique reference taken{}; reference taken{}", maybe_range(.use_point), maybe_range(.ref_point))]
     BorrowUseAfterMutableRefTaken {
         use_point: Option<SourceRange>,
         ref_point: Option<SourceRange>,
     },
-    #[error("unique borrow used after shared reference taken{}; reference taken{}", maybe_range(.use_point), maybe_range(.ref_point))]
     UniqueBorrowUseAfterSharedRefTaken {
         use_point: Option<SourceRange>,
         ref_point: Option<SourceRange>,
     },
-    #[error("borrow used before initialization. this is almost certainly an ICE. {}", maybe_range(.0))]
     UsedUninitBorrow(Option<SourceRange>),
+}
+
+impl Error for LifetimeError {}
+
+impl Display for LifetimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.contents().fmt(f)
+    }
 }
 
 impl Diagnostic for LifetimeError {
@@ -179,14 +183,6 @@ impl MultiError for LifetimeError {
             LifetimeError::MultiError(list) => Some(list),
             _ => None,
         }
-    }
-}
-
-fn maybe_range(range: &Option<SourceRange>) -> String {
-    if let Some(range) = range {
-        format!(": {range}")
-    } else {
-        " in generated code, this is probably an ICE".to_string()
     }
 }
 

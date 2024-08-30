@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 pub trait MultiError: Sized {
     fn from_error_list(list: Vec<Self>) -> Self;
     fn as_error_list(&mut self) -> Option<&mut Vec<Self>>;
@@ -54,12 +52,4 @@ pub fn merge_results<E: MultiError>(current: &mut Result<(), E>, new: Result<(),
             }
         },
     }
-}
-
-pub fn print_multi_errors<E: Display>(errors: &[E]) -> String {
-    let mut string = String::new();
-    for error in errors.iter() {
-        string.push_str(&format!("{error}\n"));
-    }
-    string
 }

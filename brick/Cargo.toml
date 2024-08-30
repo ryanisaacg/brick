@@ -8,7 +8,6 @@ edition = "2021"
 assert_matches = "1.5.0"
 petgraph = "0.6.4"
 rayon = "1.8.0"
-thiserror = "1.0"
 bytemuck = "1.14.0"
 brick-runtime = { path = "../brick-runtime", features = ["std"] }
 

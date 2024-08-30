@@ -1,12 +1,14 @@
-use std::collections::{HashMap, HashSet};
-
-use thiserror::Error;
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    fmt::Display,
+};
 
 use crate::{
     declaration_context::{resolve_type_expr, DeclarationContext, FileDeclarations, TypeID},
     diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
     id::{AnyID, FunctionID, VariableID},
-    multi_error::{merge_results, merge_results_or_value, print_multi_errors, MultiError},
+    multi_error::{merge_results, merge_results_or_value, MultiError},
     parser::{
         AstArena, AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
         InterfaceDeclarationValue, MatchDeclaration, ParsedFile, StructDeclarationValue, UnaryOp,
@@ -311,78 +313,53 @@ pub enum PrimitiveType {
     PointerSize,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum TypecheckError {
-    #[error("{}", print_multi_errors(&.0[..]))]
     MultiError(Vec<TypecheckError>),
-    #[error("arithmetic")]
     ArithmeticMismatch(SourceRange),
-    #[error("mismatched types at {provenance}: received {received:?}, expected {expected:?}")]
     TypeMismatch {
         provenance: SourceRange,
         expected: ExpressionType,
         received: ExpressionType,
     },
-    #[error("declaration for {0:?} not found")]
-    NameNotFound(SourceRange),
-    #[error("can't call: {0}")]
+    NameNotFound(SourceRange, String),
     CantCall(SourceRange),
-    #[error("wrong args count: {0}")]
     WrongArgsCount(SourceRange),
-    #[error("missing field: {0}")]
     MissingField(SourceRange),
-    #[error("insufficient type info: null variables must have a type annotation {0}")]
     NoNullDeclarations(SourceRange),
-    #[error("expected nullable left-hand-side to ?? operator: {0}")]
     ExpectedNullableLHS(SourceRange),
-    #[error("cannot yield outside of a generator: {0}")]
     CannotYield(SourceRange),
-    #[error("illegal left hand side of assignment: {0}")]
     IllegalAssignmentLHS(SourceRange),
-    #[error("illegal lhs of dot operator: {0}")]
     IllegalDotLHS(SourceRange),
-    #[error("must return a generator: {0}")]
     MustReturnGenerator(SourceRange),
-    #[error("argument to case statement must be a union: {0}")]
     CaseStatementRequiresUnion(SourceRange),
-    #[error("right side of dot operator must be a name: {0}")]
     IllegalDotRHS(SourceRange),
-    #[error("variant doesn't match previous count of bindings: {0}")]
     BindingCountDoesntMatch(SourceRange),
-    #[error("variant doesn't match binding name: {0}")]
     BindingNameDoesntMatch(SourceRange),
-    #[error("attempted to dereference a non-ptr value: {0}")]
     DereferenceNonPointer(SourceRange),
-    #[error("non-exhaustive case statement: {0}")]
     NonExhaustiveCase(SourceRange),
-    #[error("references may not be assigned to variables, use 'borrow' instead of 'let': {0}")]
     IllegalFirstClassReference(SourceRange),
-    #[error("right hand side of 'borrow' statement must be a reference: {0}")]
     IllegalNonRefBorrow(SourceRange),
-    #[error("right hand side of 'borrow' statement must be a valid lvalue: {0}")]
     IllegalNonLvalueBorrow(SourceRange),
-    #[error("illegal reference inside data type: {0}")]
     IllegalReferenceInsideDataType(SourceRange),
-    #[error("unknown property {0}: {1}")]
     UnknownProperty(String, SourceRange),
-    #[error("unknown property {0}: {1}")]
     FieldNotPresent(String, SourceRange),
-    #[error("non-struct declaration in struct literal: {0}")]
     NonStructDeclStructLiteral(SourceRange),
-    #[error("can't assign new value to reference: {0}")]
     CantAssignToReference(SourceRange),
-    #[error("illegal assignment to a shared reference: {0}")]
     IllegalSharedRefMutation(SourceRange),
-    #[error("illegal import: {0}")]
     IllegalImport(SourceRange),
-    #[error("import path items must be modules: {0}")]
     ImportPathMustBeModule(SourceRange),
-    #[error("file \"{1}\" not found: {0}")]
     FileNotFound(SourceRange, String),
-    #[error("non-constant value in const: {0}")]
     NonConstantInConst(SourceRange),
-    #[error("self parameter in non-associated function: {0}")]
     SelfParameterInNonAssociatedFunc(SourceRange),
+}
+
+impl Error for TypecheckError {}
+
+impl Display for TypecheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.contents().fmt(f)
+    }
 }
 
 impl Diagnostic for TypecheckError {
@@ -403,97 +380,96 @@ impl Diagnostic for TypecheckError {
                 DiagnosticMarker::error(provenance.clone(), "type mismatch")
             }
             ArithmeticMismatch(range) => DiagnosticMarker::error(range.clone(), "arithmetic"),
-            NameNotFound(range) => {
-                DiagnosticMarker::error(range.clone(), "declaration for {0:?} not found")
+            NameNotFound(range, name) => {
+                DiagnosticMarker::error_context(range.clone(), "name not found", name.clone())
             }
-            CantCall(range) => DiagnosticMarker::error(range.clone(), "can't call: {0}"),
-            WrongArgsCount(range) => {
-                DiagnosticMarker::error(range.clone(), "wrong args count: {0}")
-            }
-            MissingField(range) => DiagnosticMarker::error(range.clone(), "missing field: {0}"),
+            CantCall(range) => DiagnosticMarker::error(range.clone(), "can't call"),
+            WrongArgsCount(range) => DiagnosticMarker::error(range.clone(), "wrong args count"),
+            MissingField(range) => DiagnosticMarker::error(range.clone(), "missing field"),
             NoNullDeclarations(range) => DiagnosticMarker::error(
                 range.clone(),
-                "insufficient type info: null variables must have a type annotation {0}",
+                "insufficient type info: null variables must have a type annotation",
             ),
             ExpectedNullableLHS(range) => DiagnosticMarker::error(
                 range.clone(),
-                "expected nullable left-hand-side to ?? operator: {0}",
+                "expected nullable left-hand-side to ?? operator",
             ),
             CannotYield(range) => {
-                DiagnosticMarker::error(range.clone(), "cannot yield outside of a generator: {0}")
+                DiagnosticMarker::error(range.clone(), "cannot yield outside of a generator")
             }
             IllegalAssignmentLHS(range) => {
-                DiagnosticMarker::error(range.clone(), "illegal left hand side of assignment: {0}")
+                DiagnosticMarker::error(range.clone(), "illegal left hand side of assignment")
             }
             IllegalDotLHS(range) => {
-                DiagnosticMarker::error(range.clone(), "illegal lhs of dot operator: {0}")
+                DiagnosticMarker::error(range.clone(), "illegal lhs of dot operator")
             }
             MustReturnGenerator(range) => {
-                DiagnosticMarker::error(range.clone(), "must return a generator: {0}")
+                DiagnosticMarker::error(range.clone(), "must return a generator")
             }
-            CaseStatementRequiresUnion(range) => DiagnosticMarker::error(
-                range.clone(),
-                "argument to case statement must be a union: {0}",
-            ),
-            IllegalDotRHS(range) => DiagnosticMarker::error(
-                range.clone(),
-                "right side of dot operator must be a name: {0}",
-            ),
+            CaseStatementRequiresUnion(range) => {
+                DiagnosticMarker::error(range.clone(), "argument to case statement must be a union")
+            }
+            IllegalDotRHS(range) => {
+                DiagnosticMarker::error(range.clone(), "right side of dot operator must be a name")
+            }
             BindingCountDoesntMatch(range) => DiagnosticMarker::error(
                 range.clone(),
-                "variant doesn't match previous count of bindings: {0}",
+                "variant doesn't match previous count of bindings",
             ),
             BindingNameDoesntMatch(range) => {
-                DiagnosticMarker::error(range.clone(), "variant doesn't match binding name: {0}")
+                DiagnosticMarker::error(range.clone(), "variant doesn't match binding name")
             }
-            DereferenceNonPointer(range) => DiagnosticMarker::error(
-                range.clone(),
-                "attempted to dereference a non-ptr value: {0}",
-            ),
+            DereferenceNonPointer(range) => {
+                DiagnosticMarker::error(range.clone(), "attempted to dereference a non-ptr value")
+            }
             NonExhaustiveCase(range) => {
-                DiagnosticMarker::error(range.clone(), "non-exhaustive case statement: {0}")
+                DiagnosticMarker::error(range.clone(), "non-exhaustive case statement")
             }
             IllegalFirstClassReference(range) => DiagnosticMarker::error(
                 range.clone(),
-                "references may not be assigned to variables, use 'borrow' instead of 'let': {0}",
+                "references may not be assigned to variables, use 'borrow' instead of 'let'",
             ),
             IllegalNonRefBorrow(range) => DiagnosticMarker::error(
                 range.clone(),
-                "right hand side of 'borrow' statement must be a reference: {0}",
+                "right hand side of 'borrow' statement must be a reference",
             ),
             IllegalNonLvalueBorrow(range) => DiagnosticMarker::error(
                 range.clone(),
-                "right hand side of 'borrow' statement must be a valid lvalue: {0}",
+                "right hand side of 'borrow' statement must be a valid lvalue",
             ),
             IllegalReferenceInsideDataType(range) => {
-                DiagnosticMarker::error(range.clone(), "illegal reference inside data type: {0}")
+                DiagnosticMarker::error(range.clone(), "illegal reference inside data type")
             }
-            UnknownProperty(_, range) => {
-                DiagnosticMarker::error(range.clone(), "unknown property {0}: {1}")
-            }
-            FieldNotPresent(_, range) => {
-                DiagnosticMarker::error(range.clone(), "unknown property {0}: {1}")
-            }
-            NonStructDeclStructLiteral(range) => DiagnosticMarker::error(
+            UnknownProperty(property_name, range) => DiagnosticMarker::error_context(
                 range.clone(),
-                "non-struct declaration in struct literal: {0}",
+                "unknown property",
+                property_name.to_string(),
             ),
+            FieldNotPresent(property_name, range) => DiagnosticMarker::error_context(
+                range.clone(),
+                "accessing unknown field",
+                property_name.to_string(),
+            ),
+            NonStructDeclStructLiteral(range) => {
+                DiagnosticMarker::error(range.clone(), "non-struct declaration in struct literal")
+            }
             CantAssignToReference(range) => {
-                DiagnosticMarker::error(range.clone(), "can't assign new value to reference: {0}")
+                DiagnosticMarker::error(range.clone(), "can't assign new value to reference")
             }
-            IllegalSharedRefMutation(range) => DiagnosticMarker::error(
-                range.clone(),
-                "illegal assignment to a shared reference: {0}",
-            ),
-            IllegalImport(range) => DiagnosticMarker::error(range.clone(), "illegal import: {0}"),
+            IllegalSharedRefMutation(range) => {
+                DiagnosticMarker::error(range.clone(), "illegal assignment to a shared reference")
+            }
+            IllegalImport(range) => DiagnosticMarker::error(range.clone(), "illegal import"),
             ImportPathMustBeModule(range) => {
-                DiagnosticMarker::error(range.clone(), "import path items must be modules: {0}")
+                DiagnosticMarker::error(range.clone(), "import path items must be modules")
             }
-            FileNotFound(range, _) => {
-                DiagnosticMarker::error(range.clone(), "file \"{1}\" not found: {0}")
-            }
+            FileNotFound(range, file_name) => DiagnosticMarker::error_context(
+                range.clone(),
+                "file not found",
+                file_name.to_string(),
+            ),
             NonConstantInConst(range) => {
-                DiagnosticMarker::error(range.clone(), "non-constant value in const: {0}")
+                DiagnosticMarker::error(range.clone(), "non-constant value in const")
             }
             SelfParameterInNonAssociatedFunc(range) => {
                 DiagnosticMarker::error(range.clone(), "self parameter in non-associated function")
@@ -986,8 +962,10 @@ fn typecheck_expression<'a>(
             value: name,
             referenced_id,
         } => {
-            let (ref_id, expr) = resolve_name(name, current_scope, outer_scopes)
-                .ok_or_else(|| TypecheckError::NameNotFound(node.provenance.clone()))?;
+            let (ref_id, expr) =
+                resolve_name(name, current_scope, outer_scopes).ok_or_else(|| {
+                    TypecheckError::NameNotFound(node.provenance.clone(), name.clone())
+                })?;
             referenced_id
                 .set(ref_id)
                 .expect("each node should be visited once");

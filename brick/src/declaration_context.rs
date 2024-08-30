@@ -696,11 +696,9 @@ pub fn resolve_type_expr(
             "char" => ExpressionType::Primitive(PrimitiveType::Char),
             "string" => ExpressionType::Collection(CollectionType::String),
             "size" => ExpressionType::Primitive(PrimitiveType::PointerSize),
-            other => ExpressionType::InstanceOf(
-                *name_to_type_id
-                    .get(other)
-                    .ok_or(TypecheckError::NameNotFound(node.provenance.clone()))?,
-            ),
+            other => ExpressionType::InstanceOf(*name_to_type_id.get(other).ok_or(
+                TypecheckError::NameNotFound(node.provenance.clone(), other.to_string()),
+            )?),
         },
         AstNodeValue::VoidType => ExpressionType::Void,
         AstNodeValue::UniqueType(inner) => ExpressionType::Pointer(

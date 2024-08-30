@@ -143,6 +143,12 @@ impl SourceMarker {
 
         index + (self.offset as usize)
     }
+
+    pub fn to_range(&self) -> SourceRange {
+        let line = self.line;
+        let offset = self.offset;
+        SourceRange::new_offset(self.clone(), line, offset)
+    }
 }
 
 impl fmt::Debug for SourceMarker {

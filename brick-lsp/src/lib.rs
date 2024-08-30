@@ -363,6 +363,7 @@ fn error_diagnostic(
         range,
         message,
         severity,
+        context,
     }: DiagnosticMarker,
 ) -> Diagnostic {
     Diagnostic {
@@ -377,7 +378,11 @@ fn error_diagnostic(
         code: None,
         code_description: None,
         source: Some("brick".to_string()),
-        message: message.to_string(),
+        message: if let Some(context) = context {
+            format!("{message}: {context}")
+        } else {
+            message.to_string()
+        },
         related_information: None,
         tags: None,
         data: None,

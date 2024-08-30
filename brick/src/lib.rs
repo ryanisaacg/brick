@@ -3,7 +3,7 @@
 use declaration_context::FileDeclarations;
 pub use declaration_context::{DeclarationContext, TypeID};
 use diagnostic::DiagnosticContents;
-use std::{collections::HashMap, fmt::Display, io};
+use std::{collections::HashMap, error::Error, fmt::Display, io};
 
 use hir::HirModule;
 use interpreter::{Function, VM};
@@ -71,6 +71,17 @@ pub enum CompileError {
     LifetimeError(LifetimeError),
 }
 
+impl Error for CompileError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(match self {
+            CompileError::ParseError(err) => err,
+            CompileError::TypeValidationError(err) => err,
+            CompileError::TypecheckError(err) => err,
+            CompileError::LifetimeError(err) => err,
+        })
+    }
+}
+
 impl Display for CompileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let diagnostics = match self {
@@ -90,8 +101,6 @@ impl Display for CompileError {
         }
     }
 }
-
-impl std::error::Error for CompileError {}
 
 #[derive(Clone, Debug)]
 pub struct SourceFile {
