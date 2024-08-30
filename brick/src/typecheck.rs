@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::{
     declaration_context::{resolve_type_expr, DeclarationContext, FileDeclarations, TypeID},
     diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
-    id::{AnyID, FunctionID},
+    id::{AnyID, FunctionID, VariableID},
     multi_error::{merge_results, merge_results_or_value, print_multi_errors, MultiError},
     parser::{
         AstArena, AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
@@ -381,6 +381,8 @@ pub enum TypecheckError {
     FileNotFound(SourceRange, String),
     #[error("non-constant value in const: {0}")]
     NonConstantInConst(SourceRange),
+    #[error("self parameter in non-associated function: {0}")]
+    SelfParameterInNonAssociatedFunc(SourceRange),
 }
 
 impl Diagnostic for TypecheckError {
@@ -492,6 +494,9 @@ impl Diagnostic for TypecheckError {
             }
             NonConstantInConst(range) => {
                 DiagnosticMarker::error(range.clone(), "non-constant value in const: {0}")
+            }
+            SelfParameterInNonAssociatedFunc(range) => {
+                DiagnosticMarker::error(range.clone(), "self parameter in non-associated function")
             }
         })
     }
@@ -630,6 +635,7 @@ pub struct TypecheckedFunction<'ast> {
     pub id: FunctionID,
     pub name: String,
     pub func: &'ast FunctionDeclarationValue,
+    pub self_var_id: Option<VariableID>,
 }
 
 pub fn typecheck<'ast, 'decl>(
@@ -677,12 +683,7 @@ pub fn typecheck_node<'a>(
         AstNodeValue::FunctionDeclaration(func) => {
             let func_id = &context.top_level_function_names[func.name.as_str()];
             let func_type = &context.declarations.id_to_func[func_id];
-            typecheck_function(context, func, func_type)?;
-            functions.push(TypecheckedFunction {
-                id: *func_id,
-                name: func.name.clone(),
-                func,
-            });
+            functions.push(typecheck_function(context, func, func_type)?);
         }
         AstNodeValue::StructDeclaration(StructDeclarationValue {
             name,
@@ -715,15 +716,7 @@ pub fn typecheck_node<'a>(
                     };
                     let func_id = &associated_functions_ty[func.name.as_str()];
                     let func_ty = &context.declarations.id_to_func[func_id];
-                    if let Err(err) = typecheck_function(context, func, func_ty) {
-                        Some(Err(err))
-                    } else {
-                        Some(Ok(TypecheckedFunction {
-                            id: func_ty.id,
-                            name: func.name.clone(),
-                            func,
-                        }))
-                    }
+                    Some(typecheck_function(context, func, func_ty))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             functions.extend(associated_functions.iter().cloned());
@@ -752,17 +745,37 @@ pub fn typecheck_node<'a>(
     Ok(())
 }
 
-fn typecheck_function(
+fn typecheck_function<'a>(
     context: &TypecheckContext,
-    function: &FunctionDeclarationValue,
+    function: &'a FunctionDeclarationValue,
     function_type: &FuncType,
-) -> Result<(), TypecheckError> {
-    let parameters = function
-        .params
-        .iter()
-        .zip(function_type.params.iter())
-        .map(|((id, name), param)| (name.name.clone(), ((*id).into(), param.clone())))
-        .collect();
+) -> Result<TypecheckedFunction<'a>, TypecheckError> {
+    let mut self_var_id = None;
+
+    let parameters = if function.self_param.is_some() {
+        let mut parameter_context_entries = HashMap::new();
+        let self_var = VariableID::new();
+        self_var_id = Some(self_var);
+        let self_ty = function_type.params[0].clone();
+        parameter_context_entries.insert("self".to_string(), (self_var.into(), self_ty));
+
+        parameter_context_entries.extend(
+            function
+                .params
+                .iter()
+                .zip(function_type.params.iter().skip(1))
+                .map(|((id, name), param)| (name.name.clone(), ((*id).into(), param.clone()))),
+        );
+
+        parameter_context_entries
+    } else {
+        function
+            .params
+            .iter()
+            .zip(function_type.params.iter())
+            .map(|((id, name), param)| (name.name.clone(), ((*id).into(), param.clone())))
+            .collect()
+    };
 
     let body = context.ast.get(function.body);
     if function.is_coroutine {
@@ -804,7 +817,12 @@ fn typecheck_function(
         typecheck_returns(context, &function_type.returns, body)?;
     }
 
-    Ok(())
+    Ok(TypecheckedFunction {
+        id: function_type.id,
+        name: function.name.clone(),
+        func: function,
+        self_var_id,
+    })
 }
 
 fn typecheck_expression<'a>(

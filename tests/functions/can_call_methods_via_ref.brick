@@ -1,7 +1,4 @@
-// Compile
-interface HasArea {
-    fn area(ref self): i32,
-}
+// Int | 4
 
 struct Square {
     size: i32,
@@ -11,9 +8,9 @@ struct Square {
     }
 }
 
-fn area_2(shape: HasArea): i32 {
-    shape.area()
+fn area_2(square: ref Square): i32 {
+    square.area()
 }
 
 let x = Square { size: 2 };
-area_2(x);
+area_2(ref x)

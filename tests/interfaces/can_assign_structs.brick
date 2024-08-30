@@ -1,12 +1,12 @@
 // Int | 5
 interface HasValue {
-    fn value(val: ref HasValue): i32,
+    fn value(ref self): i32,
 }
 
 struct Square {
     size: i32,
 
-    fn value(self: ref Square): i32 {
+    fn value(ref self): i32 {
         self.size
     }
 }

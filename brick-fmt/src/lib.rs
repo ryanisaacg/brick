@@ -3,7 +3,8 @@ use std::cmp::Ordering;
 use brick::{
     parse_file,
     parser::{
-        AstArena, AstNode, AstNodeValue, BinOp, ParsedFile, UnaryOp, UnionDeclarationVariant,
+        AstArena, AstNode, AstNodeValue, BinOp, ParsedFile, SelfParameter, UnaryOp,
+        UnionDeclarationVariant,
     },
     CompileError,
 };
@@ -42,6 +43,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 ast,
                 result,
                 &func.name,
+                func.self_param,
                 func.params
                     .iter()
                     .map(|(_, param)| (param.name.as_str(), ast.get(param.ty))),
@@ -58,6 +60,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 ast,
                 result,
                 func.name.as_str(),
+                func.self_param,
                 func.params
                     .iter()
                     .map(|param| (param.name.as_str(), ast.get(param.ty))),
@@ -142,6 +145,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 ast,
                 result,
                 func.name.as_str(),
+                func.self_param,
                 func.params
                     .iter()
                     .map(|param| (param.name.as_str(), ast.get(param.ty))),
@@ -485,10 +489,12 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_function_header<'iter, 'node: 'iter>(
     ast: &AstArena,
     result: &mut String,
     name: &str,
+    self_param: Option<SelfParameter>,
     params: impl Iterator<Item = (&'iter str, &'iter AstNode)>,
     returns: Option<&AstNode>,
     is_extern: bool,
@@ -504,6 +510,16 @@ fn write_function_header<'iter, 'node: 'iter>(
     result.push_str(name);
     result.push('(');
     let mut params = params.peekable();
+    if let Some(self_param) = self_param {
+        match self_param {
+            SelfParameter::Unique => result.push_str("unique self"),
+            SelfParameter::Shared => result.push_str("ref self"),
+            SelfParameter::Owned => result.push_str("self"),
+        }
+        if params.peek().is_some() {
+            result.push_str(", ");
+        }
+    }
     while let Some((name, ty)) = params.next() {
         result.push_str(name);
         result.push_str(": ");

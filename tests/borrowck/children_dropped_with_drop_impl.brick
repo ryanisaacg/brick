@@ -7,7 +7,7 @@ struct Outer: Resource {
     b: Inner,
     c: Inner,
 
-    fn drop(self: unique Outer) {
+    fn drop(unique self) {
         incr_test_counter();
     }
 }
@@ -15,8 +15,8 @@ struct Outer: Resource {
 struct Inner: Resource {
     x: i32,
 
-    fn drop(self: unique Inner) {
-        incr_test_counter(); 
+    fn drop(unique self) {
+        incr_test_counter();
     }
 }
 

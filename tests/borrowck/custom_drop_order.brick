@@ -3,7 +3,7 @@
 struct Data: Resource {
     value: i32,
 
-    fn drop(self: unique Data) {
+    fn drop(unique self) {
         self.value = 5678;
     }
 }

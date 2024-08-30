@@ -27,9 +27,7 @@ collections:
     - can get a ref from within an RC
     - atomic decrement?
 - cells:
-    - mark as !Sync or equivalent (or maybe just cut and replace with rwlock?)
-    - (requires monomorphization) don't take a mutable parameter to get(), return an actual value
-- rwlock
+    - replace cells with a concurrency-safe lock
 - slices
 - automatically convert types when assigning collections?
 

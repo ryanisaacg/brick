@@ -3,7 +3,7 @@
 struct Number {
     value: i32,
 
-    fn add(self: ref Number, x: i32, y: i32): Number {
+    fn add(ref self, x: i32, y: i32): Number {
         Number {
             value: self.value + x + y,
         }

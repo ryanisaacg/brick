@@ -1,0 +1,3 @@
+// NoCompile
+
+fn fn_with_self(ref self) {}

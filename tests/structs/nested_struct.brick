@@ -8,15 +8,15 @@ struct Rectangle {
     tl: Point2,
     br: Point2,
 
-    fn width(self: Rectangle): i32 {
+    fn width(ref self): i32 {
         self.br.x - self.tl.x
     }
 
-    fn height(self: Rectangle): i32 {
+    fn height(ref self): i32 {
         self.br.y - self.tl.y
     }
 
-    fn area(self: Rectangle): i32 {
+    fn area(ref self): i32 {
         self.width() * self.height()
     }
 }

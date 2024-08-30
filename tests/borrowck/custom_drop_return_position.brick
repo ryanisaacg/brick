@@ -5,7 +5,7 @@ extern fn incr_test_counter();
 struct Data: Resource {
     value: i32,
 
-    fn drop(self: unique Data) {
+    fn drop(unique self) {
         incr_test_counter();
     }
 }

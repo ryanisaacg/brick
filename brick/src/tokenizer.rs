@@ -97,6 +97,7 @@ pub enum TokenValue {
     Case,
     Borrow,
     Const,
+    SelfKeyword,
 
     // Comments
     LineComment(String),
@@ -128,7 +129,8 @@ impl TokenValue {
             | TokenValue::Null
             | TokenValue::Yield
             | TokenValue::Case
-            | TokenValue::StringLiteral(_) => false,
+            | TokenValue::StringLiteral(_)
+            | TokenValue::SelfKeyword => false,
             TokenValue::Plus
             | TokenValue::Minus
             | TokenValue::Asterisk
@@ -245,6 +247,7 @@ impl fmt::Display for TokenValue {
             Yield => write!(f, "keyword yield"),
             Void => write!(f, "keyword void"),
             Case => write!(f, "keyword case"),
+            SelfKeyword => write!(f, "keyword self"),
             LineComment(comment) => write!(f, "// {}", comment),
         }
     }
@@ -392,6 +395,7 @@ impl Iterator for TokenIterator {
                         "yield" => TokenValue::Yield,
                         "void" => TokenValue::Void,
                         "case" => TokenValue::Case,
+                        "self" => TokenValue::SelfKeyword,
                         _ => TokenValue::Word(word),
                     }
                 }

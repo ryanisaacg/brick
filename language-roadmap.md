@@ -20,14 +20,6 @@ syntax niceties:
 - ambiguity between dereference / multiplication in if { body } * a += 1;
 - revisit variable shadowing
 
-self functions:
-    - struct associated functions support "self"
-        - self can be declared as a typeless parameter syntactically
-        - allow calls to associated functions through references (checking correct reference type)
-        - self typechecks correctly
-        - IR transforms code properly to pass self into the function
-    - union associated functions support "self"
-
 static functions:
 - static functions can be defined on structs or unions
 

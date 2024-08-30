@@ -11,8 +11,8 @@ struct Outer: Resource {
 struct Inner: Resource {
     x: i32,
 
-    fn drop(self: unique Inner) {
-        incr_test_counter(); 
+    fn drop(unique self) {
+        incr_test_counter();
     }
 }
 

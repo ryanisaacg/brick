@@ -4,7 +4,7 @@ use crate::{
     multi_error::{merge_result_list, merge_results, merge_results_or_value},
     parser::{
         AstArena, AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
-        InterfaceDeclarationValue, NameAndType, ParsedFile, StructDeclarationValue,
+        InterfaceDeclarationValue, NameAndType, ParsedFile, SelfParameter, StructDeclarationValue,
         UnionDeclarationValue, UnionDeclarationVariant,
     },
     typecheck::{
@@ -204,6 +204,7 @@ impl DeclarationContext {
                             func,
                             false,
                             &statement.provenance,
+                            None,
                         ),
                     )
                 }
@@ -221,6 +222,7 @@ impl DeclarationContext {
                             func,
                             false,
                             &statement.provenance,
+                            None,
                         ),
                     )
                 }
@@ -390,6 +392,8 @@ fn fill_in_struct_info(
     decl: &StructDeclarationValue,
     provenance: &SourceRange,
 ) -> Result<TypeDeclaration, TypecheckError> {
+    let id = names_to_type_id[decl.name.as_str()];
+
     let fields: HashMap<_, _> = merge_result_list(decl.fields.iter().map(
         |NameAndType {
              name,
@@ -417,7 +421,15 @@ fn fill_in_struct_info(
                 associated_functions.insert(func.name.clone(), func_id);
                 if let Some(func_type) = merge_results_or_value(
                     &mut result,
-                    fill_in_fn_decl(ast, names_to_type_id, func_id, func, true, &node.provenance),
+                    fill_in_fn_decl(
+                        ast,
+                        names_to_type_id,
+                        func_id,
+                        func,
+                        true,
+                        &node.provenance,
+                        Some(&ExpressionType::InstanceOf(id)),
+                    ),
                 ) {
                     id_to_func.insert(func_id, func_type);
                 }
@@ -445,7 +457,7 @@ fn fill_in_struct_info(
     result?;
 
     Ok(TypeDeclaration::Struct(StructType {
-        id: names_to_type_id[decl.name.as_str()],
+        id,
         fields,
         associated_functions,
         is_affine,
@@ -461,6 +473,8 @@ fn fill_in_interface_decl(
     interface: &InterfaceDeclarationValue,
     provenance: &SourceRange,
 ) -> Result<TypeDeclaration, TypecheckError> {
+    let id = names_to_type_id[interface.name.as_str()];
+
     let mut associated_functions = HashMap::new();
 
     let mut results = Ok(());
@@ -471,11 +485,27 @@ fn fill_in_interface_decl(
         let func_type = match &node.value {
             AstNodeValue::RequiredFunction(func) => {
                 associated_functions.insert(func.name.clone(), func_id);
-                fill_in_fn_header(ast, names_to_type_id, func_id, func, true, &node.provenance)
+                fill_in_fn_header(
+                    ast,
+                    names_to_type_id,
+                    func_id,
+                    func,
+                    true,
+                    &node.provenance,
+                    Some(&ExpressionType::InstanceOf(id)),
+                )
             }
             AstNodeValue::FunctionDeclaration(func) => {
                 associated_functions.insert(func.name.clone(), func_id);
-                fill_in_fn_decl(ast, names_to_type_id, func_id, func, true, &node.provenance)
+                fill_in_fn_decl(
+                    ast,
+                    names_to_type_id,
+                    func_id,
+                    func,
+                    true,
+                    &node.provenance,
+                    Some(&ExpressionType::InstanceOf(id)),
+                )
             }
             _ => panic!("Associated function should not be anything but function declaration"),
         };
@@ -486,7 +516,7 @@ fn fill_in_interface_decl(
 
     results?;
     Ok(TypeDeclaration::Interface(InterfaceType {
-        id: names_to_type_id[interface.name.as_str()],
+        id,
         associated_functions,
         provenance: Some(provenance.clone()),
     }))
@@ -554,23 +584,30 @@ fn fill_in_fn_decl(
     names_to_type_id: &HashMap<&str, TypeID>,
     id: FunctionID,
     FunctionDeclarationValue {
-        params,
+        self_param,
+        params: ast_params,
         returns,
         is_coroutine,
         ..
     }: &FunctionDeclarationValue,
     is_associated: bool,
     provenance: &SourceRange,
+    self_context: Option<&ExpressionType>,
 ) -> Result<FuncType, TypecheckError> {
+    let self_param_ty = include_self_param(self_param.as_ref(), self_context, provenance)?;
+    let mut params =
+        Vec::with_capacity(if self_param.is_some() { 1 } else { 0 } + ast_params.len());
+    if let Some(self_param_ty) = self_param_ty {
+        params.push(self_param_ty);
+    }
+    for (_, NameAndType { ty, .. }) in ast_params {
+        params.push(resolve_type_expr(ast, names_to_type_id, ast.get(*ty))?);
+    }
+
     Ok(FuncType {
         id,
         type_param_count: 0,
-        params: params
-            .iter()
-            .map(|(_, NameAndType { ty, .. })| {
-                resolve_type_expr(ast, names_to_type_id, ast.get(*ty))
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+        params,
         returns: returns
             .as_ref()
             .map(|returns| resolve_type_expr(ast, names_to_type_id, ast.get(*returns)))
@@ -586,18 +623,29 @@ fn fill_in_fn_header(
     names_to_type_id: &HashMap<&str, TypeID>,
     id: FunctionID,
     FunctionHeaderValue {
-        params, returns, ..
+        self_param,
+        params: ast_params,
+        returns,
+        ..
     }: &FunctionHeaderValue,
     is_associated: bool,
     provenance: &SourceRange,
+    self_context: Option<&ExpressionType>,
 ) -> Result<FuncType, TypecheckError> {
+    let self_param_ty = include_self_param(self_param.as_ref(), self_context, provenance)?;
+    let mut params =
+        Vec::with_capacity(if self_param.is_some() { 1 } else { 0 } + ast_params.len());
+    if let Some(self_param_ty) = self_param_ty {
+        params.push(self_param_ty);
+    }
+    for NameAndType { ty, .. } in ast_params {
+        params.push(resolve_type_expr(ast, names_to_type_id, ast.get(*ty))?);
+    }
+
     Ok(FuncType {
         id,
         type_param_count: 0,
-        params: params
-            .iter()
-            .map(|NameAndType { ty, .. }| resolve_type_expr(ast, names_to_type_id, ast.get(*ty)))
-            .collect::<Result<Vec<_>, _>>()?,
+        params,
         returns: returns
             .as_ref()
             .map(|returns| resolve_type_expr(ast, names_to_type_id, ast.get(*returns)))
@@ -605,6 +653,31 @@ fn fill_in_fn_header(
         is_associated,
         is_coroutine: false,
         provenance: Some(provenance.clone()),
+    })
+}
+
+fn include_self_param(
+    self_param: Option<&SelfParameter>,
+    self_context: Option<&ExpressionType>,
+    provenance: &SourceRange,
+) -> Result<Option<ExpressionType>, TypecheckError> {
+    Ok(if let Some(self_param) = self_param {
+        let Some(self_context) = self_context else {
+            return Err(TypecheckError::SelfParameterInNonAssociatedFunc(
+                provenance.clone(),
+            ));
+        };
+        Some(match self_param {
+            crate::parser::SelfParameter::Unique => {
+                ExpressionType::Pointer(PointerKind::Unique, Box::new(self_context.clone()))
+            }
+            crate::parser::SelfParameter::Shared => {
+                ExpressionType::Pointer(PointerKind::Shared, Box::new(self_context.clone()))
+            }
+            crate::parser::SelfParameter::Owned => self_context.clone(),
+        })
+    } else {
+        None
     })
 }
 

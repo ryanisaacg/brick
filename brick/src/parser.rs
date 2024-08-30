@@ -223,6 +223,7 @@ impl AstNode {
 #[derive(Debug, PartialEq)]
 pub struct FunctionDeclarationValue {
     pub name: String,
+    pub self_param: Option<SelfParameter>,
     pub params: Vec<(VariableID, NameAndType)>,
     pub returns: Option<AstNodeId>,
     pub body: AstNodeId,
@@ -237,6 +238,7 @@ pub struct FunctionDeclarationValue {
 #[derive(Debug, PartialEq)]
 pub struct FunctionHeaderValue {
     pub name: String,
+    pub self_param: Option<SelfParameter>,
     pub params: Vec<NameAndType>,
     pub returns: Option<AstNodeId>,
 }
@@ -748,6 +750,7 @@ fn interface_or_struct_body(
             cursor = token.range.end();
             let FunctionHeader {
                 name,
+                self_param,
                 params,
                 returns,
                 end,
@@ -764,6 +767,7 @@ fn interface_or_struct_body(
                 associated_functions.push(context.add(AstNode::new(
                     AstNodeValue::RequiredFunction(FunctionHeaderValue {
                         name,
+                        self_param,
                         params,
                         returns,
                     }),
@@ -783,6 +787,7 @@ fn interface_or_struct_body(
                 associated_functions.push(context.add(AstNode::new(
                     AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
                         name,
+                        self_param,
                         params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
                         returns,
                         body,
@@ -911,6 +916,7 @@ fn extern_function_declaration(
     .range;
     let FunctionHeader {
         name,
+        self_param,
         params,
         returns,
         end,
@@ -922,6 +928,7 @@ fn extern_function_declaration(
         TokenValue::Semicolon => (
             AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
                 name,
+                self_param,
                 params,
                 returns,
             }),
@@ -933,6 +940,7 @@ fn extern_function_declaration(
             (
                 AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
                     name,
+                    self_param,
                     params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
                     returns,
                     body: add_node(context, body),
@@ -962,6 +970,7 @@ fn function_declaration(
 ) -> Result<AstNode, ParseError> {
     let FunctionHeader {
         name,
+        self_param,
         params,
         returns,
         end,
@@ -979,6 +988,7 @@ fn function_declaration(
     Ok(AstNode::new(
         AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
             name,
+            self_param,
             params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
             returns,
             body: add_node(context, body),
@@ -991,9 +1001,17 @@ fn function_declaration(
 
 struct FunctionHeader {
     name: String,
+    self_param: Option<SelfParameter>,
     params: Vec<NameAndType>,
     returns: Option<AstNodeId>,
     end: SourceMarker,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum SelfParameter {
+    Unique,
+    Shared,
+    Owned,
 }
 
 fn function_header(
@@ -1003,13 +1021,54 @@ fn function_header(
 ) -> Result<FunctionHeader, ParseError> {
     let (name, provenance) = word(source, cursor, "expected name after 'fn'")?;
 
-    let next_token = assert_next_lexeme_eq(
+    let open_paren = assert_next_lexeme_eq(
         source,
         TokenValue::OpenParen,
         &provenance.end(),
         "expected open parenthesis to start parameters",
     )?;
-    let mut cursor = next_token.range.end();
+    let mut cursor = open_paren.range.end();
+
+    let self_param =
+        match peek_token(source, &cursor, "expected either parameters or close paren")?.value {
+            TokenValue::Unique => {
+                cursor = already_peeked_token(source)?.range.end();
+                cursor = assert_next_lexeme_eq(
+                    source,
+                    TokenValue::SelfKeyword,
+                    &cursor,
+                    "expected self after unique",
+                )?
+                .range
+                .end();
+                Some(SelfParameter::Unique)
+            }
+            TokenValue::Ref => {
+                cursor = already_peeked_token(source)?.range.end();
+                cursor = assert_next_lexeme_eq(
+                    source,
+                    TokenValue::SelfKeyword,
+                    &cursor,
+                    "expected self after ref",
+                )?
+                .range
+                .end();
+                Some(SelfParameter::Shared)
+            }
+            TokenValue::SelfKeyword => {
+                cursor = already_peeked_token(source)?.range.end();
+                Some(SelfParameter::Owned)
+            }
+            _ => None,
+        };
+
+    if self_param.is_some() {
+        let next = peek_token(source, &cursor, "expected comma or close paren")?;
+        if next.value == TokenValue::Comma {
+            cursor = already_peeked_token(source)?.range.end();
+        }
+    }
+
     let mut params = Vec::new();
     loop {
         let token = peek_token(source, &cursor, "expected either parameters or close paren")?;
@@ -1060,6 +1119,7 @@ fn function_header(
 
     Ok(FunctionHeader {
         name,
+        self_param,
         params,
         returns,
         end: cursor,
@@ -1067,7 +1127,12 @@ fn function_header(
 }
 
 fn import_declaration(source: &mut TokenIter, start: &SourceMarker) -> Result<AstNode, ParseError> {
-    let (name, provenance) = word(source, start, "expected word after 'import'")?;
+    let (name, provenance) =
+        if peek_token(source, start, "expected import path")?.value == TokenValue::SelfKeyword {
+            ("self".to_string(), already_peeked_token(source)?.range)
+        } else {
+            word(source, start, "expected word after 'import'")?
+        };
     let mut cursor = provenance.end();
     let mut components = vec![name];
 
@@ -1472,6 +1537,7 @@ fn expression_pratt(
         TokenValue::True => AstNode::new(AstNodeValue::Bool(true), range),
         TokenValue::False => AstNode::new(AstNodeValue::Bool(false), range),
         TokenValue::Word(word) => AstNode::new(AstNodeValue::name(word), range),
+        TokenValue::SelfKeyword => AstNode::new(AstNodeValue::name("self".to_string()), range),
         TokenValue::Null => AstNode::new(AstNodeValue::Null, range),
         TokenValue::CharacterLiteral(c) => AstNode::new(AstNodeValue::CharLiteral(c), range),
         TokenValue::StringLiteral(s) => AstNode::new(AstNodeValue::StringLiteral(s), range),

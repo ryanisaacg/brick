@@ -1,12 +1,12 @@
 // Int | 17
 interface HasArea {
-    fn area(area: ref HasArea): i32,
+    fn area(ref self): i32,
 }
 
 struct Square {
     size: i32,
 
-    fn area(self: ref Square): i32 {
+    fn area(ref self): i32 {
         self.size * self.size
     }
 }
