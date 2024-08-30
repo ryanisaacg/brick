@@ -1,6 +1,6 @@
-// Compile
+// NoCompile
 interface HasArea {
-    fn area(ref self): f32,
+    fn area(area: unique i32): f32,
 }
 
 fn area_2(shape: HasArea): f32 {

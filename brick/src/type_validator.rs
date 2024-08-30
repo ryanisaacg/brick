@@ -21,6 +21,7 @@ pub enum TypeValidationError {
     RecursiveType(SourceRange),
     IllegalAffineInNonAffine(SourceRange),
     UnionsMustHaveVariant(SourceRange),
+    InterfaceMethodMustBeBehindReference(SourceRange),
 }
 
 impl Error for TypeValidationError {}
@@ -74,7 +75,13 @@ impl Diagnostic for TypeValidationError {
                 "non-resource type may not have resource fields",
             ),
             TypeValidationError::UnionsMustHaveVariant(range) => {
-                DiagnosticMarker::error(range.clone(), "unions must have at least one varaint")
+                DiagnosticMarker::error(range.clone(), "unions must have at least one variant")
+            }
+            TypeValidationError::InterfaceMethodMustBeBehindReference(range) => {
+                DiagnosticMarker::error(
+                    range.clone(),
+                    "interface methods must take a self reference",
+                )
             }
         })
     }
@@ -152,6 +159,7 @@ fn validate_decl(
 
     merge_results(&mut results, validate_union_has_variants(ty));
     merge_results(&mut results, validate_drop(decls, ty));
+    merge_results(&mut results, validate_interface_fns(decls, ty));
 
     results
 }
@@ -257,6 +265,39 @@ fn validate_drop(
                         .expect("all non-intrinsic functions have a provenance"),
                 ));
             }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_interface_fns(
+    decls: &DeclarationContext,
+    ty: &TypeDeclaration,
+) -> Result<(), TypeValidationError> {
+    let TypeDeclaration::Interface(interface_ty) = ty else {
+        return Ok(());
+    };
+
+    for fn_id in interface_ty.associated_functions.values() {
+        let fn_ty = &decls.id_to_func[fn_id];
+        let is_behind_reference = match fn_ty.params.first() {
+            Some(ExpressionType::Pointer(_, ref_ty)) => {
+                if let ExpressionType::InstanceOf(ref_ty_id) = ref_ty.as_ref() {
+                    *ref_ty_id == interface_ty.id
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+        if !is_behind_reference {
+            return Err(TypeValidationError::InterfaceMethodMustBeBehindReference(
+                fn_ty
+                    .provenance
+                    .clone()
+                    .expect("all non-intrinsic functions have a provenance"),
+            ));
         }
     }
 

@@ -54,7 +54,6 @@ interfaces:
 - fundamental rethink (*must* be behind a pointer of some kind)
 - self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
     - when making the method -> function conversion, automatically take a reference if it's required
-    - mandate by-reference parameters for interfaces
 - modules can be converted to interfaces:
     - produce and consume a nullpointer for the vtable call? (might mean we need to generate shim functions)
 - interfaces can be structurally converted between each other:
