@@ -40,7 +40,10 @@ impl<'ast, 'decl> TypecheckContext<'ast, 'decl> {
         let top_level = declarations.id_to_decl[&module.module_id]
             .as_module()
             .unwrap();
-        for (name, ty) in top_level.exports.iter() {
+        for (name, (const_id, ty)) in top_level.exports.iter() {
+            if const_id.is_some() {
+                continue;
+            }
             match ty {
                 ExpressionType::Void
                 | ExpressionType::Unreachable
@@ -558,7 +561,7 @@ fn typecheck_expression<'a>(
                     TypeDeclaration::Module(module) => module
                         .exports
                         .get(name)
-                        .or_else(|| module.constants.get(name).map(|(ty, _)| ty))
+                        .map(|(_, ty)| ty)
                         .ok_or_else(|| {
                             TypecheckError::ExportNotFound(
                                 node.provenance.clone(),

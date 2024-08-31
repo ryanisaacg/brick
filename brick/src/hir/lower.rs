@@ -284,18 +284,15 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
             if let Some(TypeDeclaration::Module(module)) =
                 expr_ty.type_id().and_then(|id| decls.id_to_decl.get(id))
             {
-                if let Some((_, constant_id)) = module.constants.get(name) {
-                    HirNodeValue::VariableReference((*constant_id).into())
-                } else {
-                    let export = &module.exports[name];
-                    HirNodeValue::VariableReference(match export {
-                        ExpressionType::InstanceOf(id) | ExpressionType::ReferenceToType(id) => {
-                            (*id).into()
-                        }
-                        ExpressionType::ReferenceToFunction(id) => (*id).into(),
-                        _ => todo!("non-type, non-function module exports"),
-                    })
-                }
+                let export = &module.exports[name];
+                HirNodeValue::VariableReference(match export {
+                    (Some(const_id), _) => (*const_id).into(),
+                    (_, ExpressionType::InstanceOf(id) | ExpressionType::ReferenceToType(id)) => {
+                        (*id).into()
+                    }
+                    (_, ExpressionType::ReferenceToFunction(id)) => (*id).into(),
+                    _ => todo!("non-type, non-function module exports"),
+                })
             } else {
                 let left = lower_node_alloc(decls, ast, left);
                 HirNodeValue::Access(left, name.clone())

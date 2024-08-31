@@ -230,11 +230,14 @@ impl TypeDeclaration {
                     .clone()
                     .unwrap_or(ExpressionType::Void),
             ))),
-            TypeDeclaration::Module(lhs_type) => {
-                lhs_type.exports.get(field).cloned().ok_or_else(|| {
+            TypeDeclaration::Module(lhs_type) => lhs_type
+                .exports
+                .get(field)
+                .map(|(_, expr)| expr)
+                .cloned()
+                .ok_or_else(|| {
                     TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
-                })
-            }
+                }),
         }
     }
 
@@ -251,8 +254,7 @@ impl TypeDeclaration {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ModuleType {
     pub id: TypeID,
-    pub exports: HashMap<String, ExpressionType>,
-    pub constants: HashMap<String, (ExpressionType, ConstantID)>,
+    pub exports: HashMap<String, (Option<ConstantID>, ExpressionType)>,
     pub provenance: Option<SourceRange>,
 }
 

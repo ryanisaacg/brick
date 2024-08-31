@@ -78,7 +78,6 @@ impl DeclarationContext {
                     TypeDeclaration::Module(ModuleType {
                         id: file.module_id,
                         exports: HashMap::new(),
-                        constants: HashMap::new(),
                         provenance: None,
                     }),
                 );
@@ -99,14 +98,17 @@ impl DeclarationContext {
                 | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue { name, .. }) => {
                     module_decl.exports.insert(
                         name.clone(),
-                        ExpressionType::ReferenceToType(module.new_type_id()),
+                        (None, ExpressionType::ReferenceToType(module.new_type_id())),
                     );
                 }
                 AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
                 | AstNodeValue::ExternFunctionBinding(FunctionHeaderValue { name, .. }) => {
                     module_decl.exports.insert(
                         name.clone(),
-                        ExpressionType::ReferenceToFunction(module.new_func_id()),
+                        (
+                            None,
+                            ExpressionType::ReferenceToFunction(module.new_func_id()),
+                        ),
                     );
                 }
                 _ => {}
@@ -144,7 +146,7 @@ impl DeclarationContext {
         let TypeDeclaration::Module(module) = &self.id_to_decl[&module_id] else {
             unreachable!()
         };
-        for (name, expr) in module.exports.iter() {
+        for (name, (_, expr)) in module.exports.iter() {
             if let ExpressionType::ReferenceToType(ty_id) = expr {
                 names_to_type_id.insert(name.as_str(), *ty_id);
             }
@@ -266,7 +268,7 @@ impl DeclarationContext {
             ) else {
                 continue;
             };
-            constant_ids.push((name.to_string(), (const_ty, *variable_id)));
+            constant_ids.push((name.to_string(), (Some(*variable_id), const_ty)));
         }
 
         for decl in declarations {
@@ -276,7 +278,7 @@ impl DeclarationContext {
         let TypeDeclaration::Module(module) = self.id_to_decl.get_mut(&module_id).unwrap() else {
             unreachable!()
         };
-        module.constants.extend(constant_ids);
+        module.exports.extend(constant_ids);
 
         result
     }
@@ -347,7 +349,7 @@ fn get_id_for_func_name(
     let TypeDeclaration::Module(module) = &id_to_decl[&module.module_id] else {
         unreachable!()
     };
-    let ExpressionType::ReferenceToFunction(func_id) = &module.exports[name] else {
+    let (_, ExpressionType::ReferenceToFunction(func_id)) = &module.exports[name] else {
         unreachable!()
     };
     *func_id
@@ -378,11 +380,11 @@ fn resolve_import(
         let current_module = imported_value
             .as_module()
             .ok_or_else(|| TypecheckError::ImportPathMustBeModule(provenance.clone()))?;
-        if let Some((expr, const_id)) = current_module.constants.get(current_path) {
-            return Ok((current_path.clone(), Some(*const_id), expr.clone()));
-        }
         match &current_module.exports[current_path.as_str()] {
-            ExpressionType::ReferenceToType(ty_id) => {
+            (Some(const_id), expr) => {
+                return Ok((current_path.clone(), Some(*const_id), expr.clone()));
+            }
+            (None, ExpressionType::ReferenceToType(ty_id)) => {
                 match declarations.id_to_decl.get(ty_id) {
                     Some(decl) => {
                         imported_value = decl;
@@ -404,7 +406,7 @@ fn resolve_import(
                     }
                 }
             }
-            ExpressionType::ReferenceToFunction(fn_id) => {
+            (None, ExpressionType::ReferenceToFunction(fn_id)) => {
                 // If there are further components in the import path, that's illegal
                 if path_iter.peek().is_some() {
                     return Err(TypecheckError::ImportPathMustBeModule(provenance.clone()));
