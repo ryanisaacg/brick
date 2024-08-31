@@ -77,6 +77,7 @@ impl DeclarationContext {
                     TypeDeclaration::Module(ModuleType {
                         id: file.module_id,
                         exports: HashMap::new(),
+                        constants: HashMap::new(),
                         provenance: None,
                     }),
                 );
@@ -136,9 +137,10 @@ impl DeclarationContext {
         for (name, expr) in imports {
             file.imports.insert(name, expr);
         }
+        let module_id = file.module_id;
 
         let mut names_to_type_id = HashMap::new();
-        let TypeDeclaration::Module(module) = &self.id_to_decl[&file.module_id] else {
+        let TypeDeclaration::Module(module) = &self.id_to_decl[&module_id] else {
             unreachable!()
         };
         for (name, expr) in module.exports.iter() {
@@ -233,9 +235,47 @@ impl DeclarationContext {
             }
         }
 
+        let mut constant_ids = Vec::new();
+        for statement in source.top_level.iter() {
+            let AstNodeValue::ConstDeclaration {
+                name,
+                type_hint,
+                value: _,
+                variable_id,
+            } = &statement.value
+            else {
+                continue;
+            };
+            let Some(type_hint) = type_hint else {
+                merge_results(
+                    &mut result,
+                    Err(TypecheckError::TopLevelConstantMustHaveType(
+                        statement.provenance.clone(),
+                    )),
+                );
+                continue;
+            };
+            let Some(const_ty) = merge_results_or_value(
+                &mut result,
+                resolve_type_expr(
+                    &source.arena,
+                    &names_to_type_id,
+                    source.arena.get(*type_hint),
+                ),
+            ) else {
+                continue;
+            };
+            constant_ids.push((name.to_string(), (const_ty, *variable_id)));
+        }
+
         for decl in declarations {
             self.id_to_decl.insert(decl.id(), decl);
         }
+
+        let TypeDeclaration::Module(module) = self.id_to_decl.get_mut(&module_id).unwrap() else {
+            unreachable!()
+        };
+        module.constants.extend(constant_ids);
 
         result
     }

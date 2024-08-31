@@ -13,16 +13,14 @@ pub fn extract_constant_values(
     ast: &AstArena,
     types: &TypecheckedFile,
     declarations: &DeclarationContext,
-) -> HashMap<ConstantID, HirNode> {
-    let mut map = HashMap::new();
+    map: &mut HashMap<ConstantID, HirNode>,
+) {
     for statement in types.top_level_statements.iter() {
-        extract_constant_value(ast, statement, declarations, &mut map);
+        extract_constant_value(ast, statement, declarations, map);
     }
     for func in types.functions.iter() {
-        extract_constant_value(ast, ast.get(func.func.body), declarations, &mut map);
+        extract_constant_value(ast, ast.get(func.func.body), declarations, map);
     }
-
-    map
 }
 
 fn extract_constant_value(
@@ -43,7 +41,7 @@ fn extract_constant_value(
     });
 }
 
-pub fn inline_constants(module: &mut HirModule, constant_values: HashMap<ConstantID, HirNode>) {
+pub fn inline_constants(module: &mut HirModule, constant_values: &HashMap<ConstantID, HirNode>) {
     module.par_visit_mut(|node| {
         let HirNodeValue::VariableReference(id) = &node.value else {
             return;

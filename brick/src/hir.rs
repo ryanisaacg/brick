@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     declaration_context::{IntrinsicFunction, TypeID},
-    id::{AnyID, FunctionID, NodeID, VariableID},
+    id::{AnyID, ConstantID, FunctionID, NodeID, VariableID},
     parser::{AstArena, AstNode},
     provenance::SourceRange,
     typecheck::{
@@ -14,7 +14,7 @@ use crate::{
 
 mod auto_deref_dot;
 mod auto_numeric_cast;
-mod constant_inlining;
+pub mod constant_inlining;
 mod coroutines;
 mod create_temp_vars_for_lvalues;
 mod discard_unused_values;
@@ -29,9 +29,8 @@ pub fn desugar_module<'dest>(
     declarations: &'dest DeclarationContext,
     ast: &AstArena,
     module: TypecheckedFile<'_, 'dest>,
+    constant_values: &HashMap<ConstantID, HirNode>,
 ) -> HirModule {
-    let constant_values = constant_inlining::extract_constant_values(ast, &module, declarations);
-
     let mut module = lower::lower_module(declarations, ast, module);
 
     // Important that this comes before ANY pass that uses the declarations

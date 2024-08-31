@@ -33,8 +33,11 @@ mod typecheck;
 use parser::ParseError;
 
 use crate::{
-    diagnostic::Diagnostic, generate_destructors::generate_destructors, hir::desugar_module,
+    diagnostic::Diagnostic,
+    generate_destructors::generate_destructors,
+    hir::{constant_inlining, desugar_module},
     type_validator::validate_types,
+    typecheck::TypecheckedFile,
 };
 
 pub mod id;
@@ -291,30 +294,55 @@ pub fn typecheck_module(
         DeclarationContext::new(contents).map_err(CompileError::TypecheckError)?;
     validate_types(&declarations).map_err(CompileError::TypeValidationError)?;
 
-    let module_results = contents
+    let module_types = contents
         .par_iter()
         .map(
-            |(name, contents)| -> Result<(&'static str, HirModule), TypecheckError> {
+            |(name, contents)| -> Result<TypecheckedFile<'_, '_>, TypecheckError> {
                 let types = typecheck(contents, name, &declarations)?;
-                let ir = desugar_module(&declarations, &contents.arena, types);
-                Ok((name, ir))
+                Ok(types)
             },
         )
         .collect::<Vec<_>>();
-    let mut modules = Vec::new();
+
+    let mut constant_values = HashMap::new();
     let mut typecheck_errors = Ok(());
-    let mut main = None;
-    for module_result in module_results {
-        if let Ok((name, module)) = module_result {
-            if name == "main" {
-                main = Some(modules.len());
-            }
-            modules.push(module);
-        } else {
-            multi_error::merge_results(&mut typecheck_errors, module_result.map(|_| {}));
-        }
+    for (module_ty, (_, ast)) in module_types.iter().zip(contents.iter()) {
+        let Some(module_ty) = multi_error::merge_results_or_value(
+            &mut typecheck_errors,
+            module_ty.as_ref().map_err(|e| e.clone()),
+        ) else {
+            continue;
+        };
+        constant_inlining::extract_constant_values(
+            &ast.arena,
+            module_ty,
+            &declarations,
+            &mut constant_values,
+        );
     }
     typecheck_errors.map_err(CompileError::TypecheckError)?;
+
+    let module_results = contents
+        .par_iter()
+        .zip(module_types.into_par_iter())
+        .map(|((name, contents), types)| {
+            let ir = desugar_module(
+                &declarations,
+                &contents.arena,
+                types.expect("errors should bail earlier"),
+                &constant_values,
+            );
+            (name, ir)
+        })
+        .collect::<Vec<_>>();
+    let mut modules = Vec::new();
+    let mut main = None;
+    for (name, module) in module_results {
+        if *name == "main" {
+            main = Some(modules.len());
+        }
+        modules.push(module);
+    }
     generate_destructors(&mut modules, &mut declarations);
 
     let mut lifetime_errors = Ok(());

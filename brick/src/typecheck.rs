@@ -552,6 +552,7 @@ fn typecheck_expression<'a>(
                     TypeDeclaration::Module(module) => module
                         .exports
                         .get(name)
+                        .or_else(|| module.constants.get(name).map(|(ty, _)| ty))
                         .ok_or_else(|| {
                             TypecheckError::ExportNotFound(
                                 node.provenance.clone(),

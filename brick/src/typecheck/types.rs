@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    id::{AnyID, FunctionID},
+    id::{AnyID, ConstantID, FunctionID},
     SourceRange, TypeID, TypecheckError,
 };
 
@@ -252,6 +252,7 @@ impl TypeDeclaration {
 pub struct ModuleType {
     pub id: TypeID,
     pub exports: HashMap<String, ExpressionType>,
+    pub constants: HashMap<String, (ExpressionType, ConstantID)>,
     pub provenance: Option<SourceRange>,
 }
 

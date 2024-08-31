@@ -1,0 +1,5 @@
+// Int | 1234
+
+import self.definition;
+
+definition.CONSTANT

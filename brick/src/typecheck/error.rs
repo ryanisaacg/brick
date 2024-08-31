@@ -6,7 +6,7 @@ use crate::{
     ExpressionType, SourceRange,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TypecheckError {
     MultiError(Vec<TypecheckError>),
     ArithmeticMismatch(SourceRange),
@@ -46,6 +46,7 @@ pub enum TypecheckError {
     NonConstantInConst(SourceRange),
     SelfParameterInNonAssociatedFunc(SourceRange),
     ExportNotFound(SourceRange, String),
+    TopLevelConstantMustHaveType(SourceRange),
 }
 
 impl Error for TypecheckError {}
@@ -172,6 +173,10 @@ impl Diagnostic for TypecheckError {
                 range.clone(),
                 "module export not found",
                 name.to_string(),
+            ),
+            TopLevelConstantMustHaveType(range) => DiagnosticMarker::error(
+                range.clone(),
+                "top-level constants must have their types specified",
             ),
         })
     }
