@@ -153,6 +153,5 @@ strings:
 - multiline literals
 
 import support:
-- constants may be imported
 - alias imports
 - allow imports to include a list of things, with an optional catch-all

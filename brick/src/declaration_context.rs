@@ -1,6 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use crate::{
+    id::ConstantID,
     multi_error::{merge_result_list, merge_results, merge_results_or_value},
     parser::{
         AstArena, AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
@@ -125,11 +126,11 @@ impl DeclarationContext {
             let AstNodeValue::Import(path) = &statement.value else {
                 continue;
             };
-            if let Some((name, expr)) = merge_results_or_value(
+            if let Some((name, constant_id, expr)) = merge_results_or_value(
                 &mut result,
                 resolve_import(self, path, &statement.provenance),
             ) {
-                imports.push((name, expr));
+                imports.push((name, (constant_id, expr)));
             }
         }
 
@@ -149,7 +150,7 @@ impl DeclarationContext {
             }
         }
         for (name, expr) in file.imports.iter() {
-            if let ExpressionType::ReferenceToType(ty_id) = expr {
+            if let (_, ExpressionType::ReferenceToType(ty_id)) = expr {
                 names_to_type_id.insert(name.as_str(), *ty_id);
             }
         }
@@ -286,7 +287,7 @@ pub struct FileDeclarations {
     pub module_id: TypeID,
     type_id_counter: AtomicU32,
     func_id_counter: AtomicU32,
-    imports: HashMap<String, ExpressionType>,
+    imports: HashMap<String, (Option<ConstantID>, ExpressionType)>,
 }
 
 impl FileDeclarations {
@@ -312,7 +313,7 @@ impl FileDeclarations {
         FunctionID(self.id, func_id)
     }
 
-    pub fn imports(&self) -> &HashMap<String, ExpressionType> {
+    pub fn imports(&self) -> &HashMap<String, (Option<ConstantID>, ExpressionType)> {
         &self.imports
     }
 }
@@ -356,7 +357,7 @@ fn resolve_import(
     declarations: &DeclarationContext,
     path: &[String],
     provenance: &SourceRange,
-) -> Result<(String, ExpressionType), TypecheckError> {
+) -> Result<(String, Option<ConstantID>, ExpressionType), TypecheckError> {
     let mut path_iter = path.iter().peekable();
     let (mut imported_name, module_id) = if path_iter.next().unwrap() == "self" {
         let filename = path_iter
@@ -377,6 +378,9 @@ fn resolve_import(
         let current_module = imported_value
             .as_module()
             .ok_or_else(|| TypecheckError::ImportPathMustBeModule(provenance.clone()))?;
+        if let Some((expr, const_id)) = current_module.constants.get(current_path) {
+            return Ok((current_path.clone(), Some(*const_id), expr.clone()));
+        }
         match &current_module.exports[current_path.as_str()] {
             ExpressionType::ReferenceToType(ty_id) => {
                 match declarations.id_to_decl.get(ty_id) {
@@ -393,6 +397,7 @@ fn resolve_import(
 
                             return Ok((
                                 current_path.clone(),
+                                None,
                                 ExpressionType::ReferenceToType(ty_id),
                             ));
                         }
@@ -408,6 +413,7 @@ fn resolve_import(
 
                     return Ok((
                         current_path.clone(),
+                        None,
                         ExpressionType::ReferenceToFunction(fn_id),
                     ));
                 }
@@ -420,6 +426,7 @@ fn resolve_import(
     let ty_id = imported_value.id();
     Ok((
         imported_name.to_string(),
+        None,
         ExpressionType::ReferenceToType(ty_id),
     ))
 }

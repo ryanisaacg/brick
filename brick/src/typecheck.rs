@@ -74,25 +74,31 @@ impl<'ast, 'decl> TypecheckContext<'ast, 'decl> {
         }
 
         // Insert all the imports
-        for (name, expr) in module.imports() {
-            match expr {
-                ExpressionType::ReferenceToFunction(fn_id) => {
-                    let fn_id = *fn_id;
-                    top_level_function_names.insert(name, fn_id);
-                    top_level_name_to_expr_type.insert(
-                        name.to_string(),
-                        (fn_id.into(), ExpressionType::ReferenceToFunction(fn_id)),
-                    );
+        for (name, (const_id, expr)) in module.imports() {
+            if let Some(const_id) = const_id {
+                let const_id = *const_id;
+                top_level_name_to_expr_type
+                    .insert(name.to_string(), (const_id.into(), expr.clone()));
+            } else {
+                match expr {
+                    ExpressionType::ReferenceToFunction(fn_id) => {
+                        let fn_id = *fn_id;
+                        top_level_function_names.insert(name, fn_id);
+                        top_level_name_to_expr_type.insert(
+                            name.to_string(),
+                            (fn_id.into(), ExpressionType::ReferenceToFunction(fn_id)),
+                        );
+                    }
+                    ExpressionType::ReferenceToType(ty_id) => {
+                        let ty_id = *ty_id;
+                        top_level_type_names.insert(name, ty_id);
+                        top_level_name_to_expr_type.insert(
+                            name.to_string(),
+                            (ty_id.into(), ExpressionType::ReferenceToType(ty_id)),
+                        );
+                    }
+                    _ => unreachable!(),
                 }
-                ExpressionType::ReferenceToType(ty_id) => {
-                    let ty_id = *ty_id;
-                    top_level_type_names.insert(name, ty_id);
-                    top_level_name_to_expr_type.insert(
-                        name.to_string(),
-                        (ty_id.into(), ExpressionType::ReferenceToType(ty_id)),
-                    );
-                }
-                _ => unreachable!(),
             }
         }
 

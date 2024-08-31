@@ -1,5 +1,6 @@
-// Int | 1234
+// Int | 2468
 
 import self.definition;
+import self.definition.CONSTANT;
 
-definition.CONSTANT
+definition.CONSTANT + CONSTANT
