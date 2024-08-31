@@ -10,9 +10,6 @@ borrow checker and lifetimes:
     - allow disjoint borrows of collection indices
     - allow reassignment of affine fields (currently they can't generate drops)
 
-refactors:
-- do all HirNodes need a ty? I think prrrrrobably not?
-
 collections:
 - tuples
 - arrays:
@@ -44,8 +41,6 @@ packages:
 - packages can include a WASM blob
 
 modules:
-- `self` module is always available, contains all contents of package
-- struct literals can contain module traversal
 - modules can be indexed in a type expression context
 - modules can be indexed in a struct / variant literal context
 - modules can be declared explicitly
@@ -76,9 +71,6 @@ interfaces:
 type validation:
 - prevent references being stored in collections
 
-interface adapters:
-- allow an interface to define an impl for itself on foreign types, limited version of Rust's traits
-
 build system:
 - cargo-like "build" command that automatically passes source files to the compiler
 - packages have a defined compiled format
@@ -103,25 +95,6 @@ compilation resume and reload:
 - differentiate modules and compilation units, or give up on first class modules
 - make IDs relative to compilation units
 - allow a compilation pass to have some existing compilation units to start off (for partial compilation)
-- REPL
-    - read
-    - evaluate
-    - print
-    - loop
-
-tooling:
-- LSP
-    - go-to-definition
-        - variable
-        - type
-        - field access
-    - find references
-    - hover
-    - rename (probably going to be very hard)
-    - syntax highlighting
-    - autocomplete
-- provenance range is incorrect on function declarations
-- pretty-printer
 
 unions:
 - optional non-exhaustive cases?
@@ -130,19 +103,10 @@ unions:
 - unions have associated functions (and by extension, destructors)
 - unions can be converted to interfaces
 
-metaprogramming:
-- proc macros? comptime? compile-time reflection (what is that even)? no metaprogramming?
-- use whatever mechanism above for ser/des
-
 boolean operators:
 - short-circuiting boolean evaluation
 - equality / inequality:
     - applicable to nullable values
-
-extern:
-- opaque extern pointers
-- extern functions are unsafe
-- externs can only do C FFI stuff, for ease of wasm backend
 
 returns:
 - ensure returns get expected type checked against their function in HIR
@@ -154,4 +118,4 @@ strings:
 
 import support:
 - alias imports
-- allow imports to include a list of things, with an optional catch-all
+- allow imports to include a list of things

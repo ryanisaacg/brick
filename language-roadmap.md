@@ -12,6 +12,11 @@ unsafe:
 - you can have unsafe blocks (or statements?)
 - you can only call unsafe functions from within unsafe blocks
 
+extern:
+- opaque extern pointers
+- extern functions are unsafe
+- externs can only do C FFI stuff, for ease of wasm backend
+
 syntax niceties:
 - keyword arguments
 - remove ; requirement?
@@ -74,3 +79,30 @@ partial compilation / error recovery:
 - allow partial typechecking with error recovery
 
 operator overloading?
+
+case ergonomics:
+- let / else equivalent?
+- case statement support for nullables
+
+metaprogramming:
+- proc macros? comptime? compile-time reflection (what is that even)? no metaprogramming?
+- use whatever mechanism above for ser/des
+
+tooling:
+- LSP
+    - go-to-definition
+        - variable
+        - type
+        - field access
+    - find references
+    - hover
+    - rename (probably going to be very hard)
+    - syntax highlighting
+    - autocomplete
+    - provenance range is incorrect on function declarations
+- pretty-printer
+- REPL
+    - read
+    - evaluate
+    - print
+    - loop
