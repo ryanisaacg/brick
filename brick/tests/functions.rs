@@ -10,7 +10,7 @@ pub fn eval_with_bindings(
     bindings: Vec<(&str, ExternBinding)>,
 ) -> Result<Vec<Value>, IntepreterError> {
     let (val, _) = interpret_code(
-        vec![SourceFile {
+        &[SourceFile {
             module_name: "main",
             filename: "main.brick",
             contents: source.to_string(),

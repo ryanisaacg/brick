@@ -12,7 +12,7 @@ fn main() {
         .collect();
 
     match compile(
-        sources,
+        &sources,
         BackendOptions {
             include_start_marker: true,
             top_level_name: "main",

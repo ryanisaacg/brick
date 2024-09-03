@@ -13,10 +13,10 @@ fn data() {
         working_dir,
         |contents| -> anyhow::Result<()> {
             check_types(
-                contents
+                &contents
                     .iter()
                     .map(|path| SourceFile::from_filename(path).unwrap())
-                    .collect(),
+                    .collect::<Vec<_>>(),
             )?;
             Ok(())
         },
@@ -25,10 +25,10 @@ fn data() {
 
             let func_counter = counter.clone();
             let (mut results, memory) = interpret_code(
-                contents
+                &contents
                     .iter()
                     .map(|path| SourceFile::from_filename(path).unwrap())
-                    .collect(),
+                    .collect::<Vec<_>>(),
                 vec![(
                     "incr_test_counter",
                     Box::new(move |_, _| {

@@ -16,10 +16,10 @@ fn data() {
         working_dir,
         |contents| -> anyhow::Result<()> {
             compile(
-                contents
+                &contents
                     .iter()
                     .map(|path| SourceFile::from_filename(path).unwrap())
-                    .collect(),
+                    .collect::<Vec<_>>(),
                 BackendOptions::default(),
             )?;
             Ok(())
@@ -28,10 +28,10 @@ fn data() {
             let counter = Arc::new(Mutex::new(0));
 
             let binary = compile(
-                contents
+                &contents
                     .iter()
                     .map(|path| SourceFile::from_filename(path).unwrap())
-                    .collect(),
+                    .collect::<Vec<_>>(),
                 BackendOptions {
                     include_start_marker: false,
                     top_level_name: "main",

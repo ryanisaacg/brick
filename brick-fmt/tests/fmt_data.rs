@@ -30,7 +30,7 @@ fn data() {
                 content.contents = second_pass_contents;
             }
 
-            check_types(contents)?;
+            check_types(&contents)?;
 
             Ok(())
         },
@@ -48,7 +48,7 @@ fn data() {
 
             let func_counter = counter.clone();
             let (mut results, memory) = interpret_code(
-                contents,
+                &contents,
                 vec![(
                     "incr_test_counter",
                     Box::new(move |_, _| {

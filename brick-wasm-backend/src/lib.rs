@@ -44,7 +44,7 @@ impl Default for BackendOptions<'_> {
 }
 
 pub fn compile(
-    sources: Vec<SourceFile>,
+    sources: &[SourceFile],
     BackendOptions {
         include_start_marker,
         top_level_name,

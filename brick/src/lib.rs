@@ -134,7 +134,7 @@ impl SourceFile {
 }
 
 pub fn interpret_code(
-    sources: Vec<SourceFile>,
+    sources: &[SourceFile],
     bindings: Vec<(&str, ExternBinding)>,
 ) -> Result<(Vec<Value>, Vec<u8>), IntepreterError> {
     let LowerResults {
@@ -179,7 +179,7 @@ pub struct LowerResults {
 }
 
 pub fn lower_code(
-    sources: Vec<SourceFile>,
+    sources: &[SourceFile],
     byte_size: usize,
     pointer_size: usize,
 ) -> Result<LowerResults, CompileError> {
@@ -266,10 +266,10 @@ pub struct CompilationResults {
     pub declarations: DeclarationContext,
 }
 
-pub fn check_types(sources: Vec<SourceFile>) -> Result<CompilationResults, CompileError> {
+pub fn check_types(sources: &[SourceFile]) -> Result<CompilationResults, CompileError> {
     // TODO: return more than one parse error
     let modules: Vec<_> = sources
-        .into_iter()
+        .iter()
         .map(
             |SourceFile {
                  filename,
@@ -280,7 +280,7 @@ pub fn check_types(sources: Vec<SourceFile>) -> Result<CompilationResults, Compi
             },
         )
         .collect::<Result<_, _>>()?;
-    let module_refs: Vec<_> = modules.iter().map(|(name, ast)| (*name, ast)).collect();
+    let module_refs: Vec<_> = modules.iter().map(|(name, ast)| (**name, ast)).collect();
 
     typecheck_module(&module_refs[..])
 }

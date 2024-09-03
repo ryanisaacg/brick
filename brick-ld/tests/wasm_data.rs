@@ -35,11 +35,11 @@ fn data() {
                 .iter()
                 .map(|contents| -> anyhow::Result<Vec<u8>> {
                     Ok(compile(
-                        contents
+                        &contents
                             .sources
                             .iter()
                             .map(|path| SourceFile::from_filename(path).unwrap())
-                            .collect(),
+                            .collect::<Vec<_>>(),
                         BackendOptions {
                             include_start_marker: false,
                             top_level_name: contents.name.as_str(),
