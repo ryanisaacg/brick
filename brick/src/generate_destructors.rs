@@ -15,7 +15,7 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
     for (decl_id, decl) in declarations
         .id_to_decl
         .iter()
-        .filter(|(_, decl)| decl.is_affine())
+        .filter(|(_, decl)| decl.move_semantics().can_drop())
     {
         match decl {
             TypeDeclaration::Struct(StructType {
@@ -146,7 +146,7 @@ fn drop_struct_children(
     body: &mut Vec<HirNode>,
 ) {
     for (name, field_ty) in ty.fields.iter() {
-        if field_ty.is_affine(&decls.id_to_decl) {
+        if field_ty.move_semantics(&decls.id_to_decl).can_drop() {
             drop_variable(
                 decls,
                 body,

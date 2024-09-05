@@ -1,0 +1,17 @@
+// Counter | 1
+
+extern fn incr_test_counter();
+
+struct Data: Resource {
+    fn drop(unique self) {
+        incr_test_counter();
+    }
+}
+
+fn use_data(data: rc[Data]) {
+}
+
+let value = rc { Data {} };
+use_data(value);
+let x = value;
+use_data(x);

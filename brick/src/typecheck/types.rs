@@ -46,22 +46,23 @@ impl ExpressionType {
         }
     }
 
-    pub fn is_affine(&self, declarations: &HashMap<TypeID, TypeDeclaration>) -> bool {
+    pub fn move_semantics(&self, declarations: &HashMap<TypeID, TypeDeclaration>) -> MoveSemantics {
         match self {
-            ExpressionType::Nullable(inner) => inner.is_affine(declarations),
+            ExpressionType::Nullable(inner) => inner.move_semantics(declarations),
             ExpressionType::Void
                 | ExpressionType::Unreachable
                 | ExpressionType::Null
                 // Only if references truly aren't allowed in re-assignments
                 | ExpressionType::Pointer(_, _)
-                | ExpressionType::Primitive(_) => false,
-            ExpressionType::InstanceOf(id) => declarations[id].is_affine(),
+                | ExpressionType::Primitive(_) => MoveSemantics::Copy,
+            ExpressionType::InstanceOf(id) => declarations[id].move_semantics(),
+            ExpressionType::Collection(CollectionType::ReferenceCounter(_)) => MoveSemantics::Autoclone,
             ExpressionType::ReferenceToType(_)
             | ExpressionType::TypeParameterReference(_)
             | ExpressionType::Collection(_)
             | ExpressionType::Generator { .. }
             | ExpressionType::ReferenceToFunction(_)
-            | ExpressionType::FunctionReference { .. } => true,
+            | ExpressionType::FunctionReference { .. } => MoveSemantics::Resource,
         }
     }
 
@@ -177,12 +178,17 @@ impl TypeDeclaration {
         }
     }
 
-    pub fn is_affine(&self) -> bool {
-        match self {
+    pub fn move_semantics(&self) -> MoveSemantics {
+        let is_affine = match self {
             TypeDeclaration::Struct(decl) => decl.is_affine,
             TypeDeclaration::Interface(_) => false,
             TypeDeclaration::Union(decl) => decl.is_affine,
             TypeDeclaration::Module(_) => false,
+        };
+        if is_affine {
+            MoveSemantics::Resource
+        } else {
+            MoveSemantics::Copy
         }
     }
 
@@ -303,4 +309,21 @@ pub enum PrimitiveType {
     Float64,
     Bool,
     PointerSize,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum MoveSemantics {
+    Copy,
+    Autoclone,
+    Resource,
+}
+
+impl MoveSemantics {
+    pub fn can_drop(&self) -> bool {
+        match self {
+            MoveSemantics::Copy => false,
+            MoveSemantics::Autoclone => true,
+            MoveSemantics::Resource => true,
+        }
+    }
 }

@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use crate::{
     diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
     multi_error::{merge_results, MultiError},
-    typecheck::{InterfaceType, PointerKind, StructType, UnionType},
+    typecheck::{InterfaceType, MoveSemantics, PointerKind, StructType, UnionType},
     DeclarationContext, ExpressionType, FuncType, SourceRange, TypeDeclaration, TypeID,
 };
 
@@ -173,7 +173,7 @@ fn validate_drop(
 
                 let mut results = Ok(());
 
-                if !ty.is_affine() {
+                if !ty.move_semantics().can_drop() {
                     merge_results(
                         &mut results,
                         Err(TypeValidationError::DropOnNormalType(provenance.clone())),
@@ -304,7 +304,7 @@ fn validate_affine_fields(
             let non_affine_with_affine_children = !is_affine
                 && fields
                     .values()
-                    .any(|expr| expr.is_affine(&decls.id_to_decl));
+                    .any(|expr| expr.move_semantics(&decls.id_to_decl) != MoveSemantics::Copy);
             if non_affine_with_affine_children {
                 Err(TypeValidationError::IllegalAffineInNonAffine(
                     provenance
@@ -326,7 +326,7 @@ fn validate_affine_fields(
                 && variants
                     .values()
                     .filter_map(|v| v.as_ref())
-                    .any(|expr| expr.is_affine(&decls.id_to_decl));
+                    .any(|expr| expr.move_semantics(&decls.id_to_decl) != MoveSemantics::Copy);
             if non_affine_with_affine_children {
                 Err(TypeValidationError::IllegalAffineInNonAffine(
                     provenance

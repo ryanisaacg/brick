@@ -17,12 +17,16 @@ use crate::{
     hir::{HirModule, HirNode},
     id::{AnyID, NodeID, VariableID},
     multi_error::{merge_results, MultiError},
-    typecheck::{ExpressionType, PointerKind},
+    typecheck::{ExpressionType, MoveSemantics, PointerKind},
     DeclarationContext, HirNodeValue, SourceRange, TypeDeclaration,
 };
 
-use self::control_flow_graph::{CfgEdge, CfgNode, ControlFlowGraph, FunctionCFG};
+use self::{
+    autoclone::insert_autoclones,
+    control_flow_graph::{CfgEdge, CfgNode, ControlFlowGraph, FunctionCFG},
+};
 
+mod autoclone;
 mod control_flow_graph;
 mod drop_points;
 
@@ -221,15 +225,19 @@ fn borrow_check_body(
     };
 
     let mut result = Ok(());
+    let mut autoclones = HashSet::new();
 
     while let Some(block_idx) = context.block_queue.pop_front() {
         merge_results(
             &mut result,
-            borrow_check_block(&mut context, &mut cfg, block_idx),
+            borrow_check_block(&mut context, &mut cfg, &mut autoclones, block_idx),
         );
     }
 
+    // TODO: will autoclone after drop points cause problems? I don't think so but I'm not 100%
+    // sure
     let drop_points = drop_points::calculate_drop_points(declarations, &cfg, node, end);
+    insert_autoclones(node, &autoclones);
     drop_points::insert_drops(declarations, node, drop_points);
 
     result
@@ -294,6 +302,7 @@ struct Context<'a> {
 fn borrow_check_block<'a>(
     ctx: &mut Context<'a>,
     cfg: &mut ControlFlowGraph<'a>,
+    autoclones: &mut HashSet<NodeID>,
     block_idx: NodeIndex,
 ) -> Result<(), LifetimeError> {
     // Merge parent states into a new state
@@ -337,6 +346,7 @@ fn borrow_check_block<'a>(
                         ctx,
                         &mut life_state.var_state,
                         &mut life_state.borrow_state,
+                        autoclones,
                         node,
                     ),
                 );
@@ -407,6 +417,7 @@ fn borrow_check_node(
     ctx: &mut Context<'_>,
     variable_state: &mut HashMap<VariableID, VariableState>,
     borrow_state: &mut HashMap<VariableID, BorrowState>,
+    autoclones: &mut HashSet<NodeID>,
     node: &HirNode,
 ) -> Result<(), LifetimeError> {
     let mut results = Ok(());
@@ -440,7 +451,18 @@ fn borrow_check_node(
                     );
                 }
 
-                existing_state.state = VariableLifeState::Moved(node.id, node.provenance.clone());
+                match existing_state.ty.move_semantics(ctx.declarations) {
+                    MoveSemantics::Copy => unreachable!("ICE: copy types are ignored by borrowck"),
+                    MoveSemantics::Autoclone => {
+                        existing_state.state =
+                            VariableLifeState::Used(node.id, node.provenance.clone());
+                        autoclones.insert(node.id);
+                    }
+                    MoveSemantics::Resource => {
+                        existing_state.state =
+                            VariableLifeState::Moved(node.id, node.provenance.clone());
+                    }
+                }
                 invalidate_borrowers(
                     *var_id,
                     variable_state,
@@ -486,7 +508,7 @@ fn borrow_check_node(
         HirNodeValue::Assignment(lhs, rhs) => {
             merge_results(
                 &mut results,
-                borrow_check_node(ctx, variable_state, borrow_state, rhs),
+                borrow_check_node(ctx, variable_state, borrow_state, autoclones, rhs),
             );
             let id = find_variable_for_lvalue(lhs);
             if let AnyID::Variable(var_id) = id {
@@ -546,12 +568,12 @@ fn borrow_check_node(
         HirNodeValue::ArrayIndex(lhs, rhs) | HirNodeValue::DictIndex(lhs, rhs) => {
             merge_results(
                 &mut results,
-                borrow_check_node(ctx, variable_state, borrow_state, rhs),
+                borrow_check_node(ctx, variable_state, borrow_state, autoclones, rhs),
             );
-            if node.ty.is_affine(ctx.declarations) {
+            if node.ty.move_semantics(ctx.declarations) != MoveSemantics::Copy {
                 merge_results(
                     &mut results,
-                    borrow_check_node(ctx, variable_state, borrow_state, lhs),
+                    borrow_check_node(ctx, variable_state, borrow_state, autoclones, lhs),
                 );
             } else {
                 merge_results(
@@ -563,10 +585,10 @@ fn borrow_check_node(
         HirNodeValue::UnionVariant(lhs, _)
         | HirNodeValue::Access(lhs, _)
         | HirNodeValue::NullableTraverse(lhs, _) => {
-            if node.ty.is_affine(ctx.declarations) {
+            if node.ty.move_semantics(ctx.declarations) != MoveSemantics::Copy {
                 merge_results(
                     &mut results,
-                    borrow_check_node(ctx, variable_state, borrow_state, lhs),
+                    borrow_check_node(ctx, variable_state, borrow_state, autoclones, lhs),
                 );
             } else {
                 merge_results(
@@ -584,7 +606,7 @@ fn borrow_check_node(
             for param in params.iter() {
                 merge_results(
                     &mut results,
-                    borrow_check_node(ctx, variable_state, borrow_state, param),
+                    borrow_check_node(ctx, variable_state, borrow_state, autoclones, param),
                 );
                 match &param.value {
                     HirNodeValue::TakeUnique(inner) => {
@@ -709,7 +731,7 @@ fn borrow_check_node(
             node.children(|child| {
                 merge_results(
                     &mut results,
-                    borrow_check_node(ctx, variable_state, borrow_state, child),
+                    borrow_check_node(ctx, variable_state, borrow_state, autoclones, child),
                 );
             });
         }
@@ -891,7 +913,7 @@ fn are_paths_disjoint(a: &[PathSegment], b: &[PathSegment]) -> bool {
 }
 
 fn is_copy(declarations: &HashMap<TypeID, TypeDeclaration>, ty: &ExpressionType) -> bool {
-    !ty.is_affine(declarations)
+    ty.move_semantics(declarations) == MoveSemantics::Copy
 }
 
 fn find_variable_for_lvalue(lvalue: &HirNode) -> &AnyID {

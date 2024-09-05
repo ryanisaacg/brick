@@ -1461,7 +1461,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                     }),
                 ),
                 LinearNode::ptr_comparison(
-                    ComparisonOp::EqualTo,
+                    ComparisonOp::LessEqualThan,
                     LinearNode::read_register(reference_count),
                     LinearNode::new(LinearNodeValue::Size(0)),
                 ),

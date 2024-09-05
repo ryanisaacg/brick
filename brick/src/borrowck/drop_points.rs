@@ -113,7 +113,7 @@ fn calculate_reassignment_drop_points(
         let HirNodeValue::Assignment(lhs, _) = &child.value else {
             return;
         };
-        if !lhs.ty.is_affine(&decls.id_to_decl) {
+        if !lhs.ty.move_semantics(&decls.id_to_decl).can_drop() {
             return;
         }
         let HirNodeValue::VariableReference(var_id) = &lhs.value else {
