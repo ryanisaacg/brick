@@ -1,0 +1,89 @@
+==================
+Simple function
+==================
+
+fn hello(): i32 {
+  1
+}
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (type
+        (primitive_type))
+    (block
+      (number))))
+
+==================
+Simple function, no return type
+==================
+
+fn hello() {
+}
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (block)))
+
+==================
+Simple extern function
+==================
+
+extern fn hello(): i32 {
+  1
+}
+
+---
+
+(source_file
+  (extern_function_definition
+    (function_definition
+      (identifier)
+      (type
+        (primitive_type))
+      (block
+        (number)))))
+
+==================
+Simple extern binding
+==================
+
+extern fn hello(): i32;
+
+---
+
+(source_file
+  (extern_function_binding
+      (identifier)
+      (type
+        (primitive_type))))
+
+==================
+Simple function with parameters
+==================
+
+fn hello(a: i32, b: f32): i32 {
+  1
+}
+
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (name_and_type
+      (identifier)
+      (type (primitive_type)))
+    (name_and_type
+      (identifier)
+      (type (primitive_type)))
+    (type
+        (primitive_type))
+    (block
+      (number))))
+

@@ -1,0 +1,103 @@
+===
+Top level: no non-statement expressions
+===
+// Counter | 3
+
+extern fn incr_test_counter();
+
+struct Outer: Resource {
+    a: Inner,
+    b: Inner,
+    c: Inner,
+}
+
+struct Inner: Resource {
+    x: i32,
+
+    fn drop(unique self) {
+        incr_test_counter();
+    }
+}
+
+let x = Outer { a: Inner { x: 1 }, b: Inner { x: 2 }, c: Inner { x: 3 } };
+---
+(source_file
+  (line_comment)
+  (extern_function_binding
+    name: (identifier))
+  (struct_declaration
+    name: (identifier)
+    properties: (type_properties
+      (identifier))
+    fields: (name_and_type
+      name: (identifier)
+      type: (type
+        (identifier)))
+    fields: (name_and_type
+      name: (identifier)
+      type: (type
+        (identifier)))
+    fields: (name_and_type
+      name: (identifier)
+      type: (type
+        (identifier))))
+  (struct_declaration
+    name: (identifier)
+    properties: (type_properties
+      (identifier))
+    fields: (name_and_type
+      name: (identifier)
+      type: (type
+        (primitive_type)))
+    associated_functions: (function_definition
+      name: (identifier)
+      (block
+        (call_expr
+          function: (identifier)))))
+  (variable_declaration
+    (identifier)
+    (literal
+      type: (identifier)
+      (record_key)
+      (literal
+        type: (identifier)
+        (record_key)
+        (number))
+      (record_key)
+      (literal
+        type: (identifier)
+        (record_key)
+        (number))
+      (record_key)
+      (literal
+        type: (identifier)
+        (record_key)
+        (number)))))
+
+===
+Top level const
+===
+// Int | 5678
+const value: i32 = 5678;
+fn get(): i32 {
+    value
+}
+get()
+---
+(source_file
+  (line_comment)
+  (const_declaration
+    (identifier)
+    (type_hint
+      (type
+        (primitive_type)))
+    (number))
+  (function_definition
+    name: (identifier)
+    return: (type
+      (primitive_type))
+    (block
+      (identifier)))
+  (call_expr
+    function: (identifier)))
+

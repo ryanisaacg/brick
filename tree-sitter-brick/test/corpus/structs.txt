@@ -1,0 +1,113 @@
+==================
+Declare primitive struct
+==================
+
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (name_and_type
+      (identifier)
+      (type
+        (primitive_type)))
+    (name_and_type
+      (identifier)
+      (type
+        (primitive_type)))))
+
+==================
+Declare primitive struct (no trailing comma)
+==================
+
+struct Point {
+    x: i32,
+    y: i32
+}
+
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (name_and_type
+      (identifier)
+      (type
+        (primitive_type)))
+    (name_and_type
+      (identifier)
+      (type
+        (primitive_type)))))
+
+==================
+Declare multiple struct
+==================
+
+struct Container {
+    padding: Point,
+    inner: Point,
+}
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (name_and_type
+      (identifier)
+      (type
+        (identifier)))
+    (name_and_type
+      (identifier)
+      (type
+        (identifier))))
+  (struct_declaration
+    (identifier)
+    (name_and_type
+      (identifier)
+      (type
+        (primitive_type)))
+    (name_and_type
+      (identifier)
+      (type
+        (primitive_type)))))
+
+===
+Struct with associated functions
+===
+
+struct Point2 {
+    x: i32,
+    y: i32,
+
+    fn length2(self): i32 {
+    }
+}
+
+---
+
+(source_file
+  (struct_declaration
+    (identifier)
+    (name_and_type
+      (identifier)
+      (type
+        (primitive_type)))
+    (name_and_type
+      (identifier)
+      (type
+        (primitive_type)))
+    (function_definition
+      (identifier)
+      (type
+          (primitive_type))
+      (block))))

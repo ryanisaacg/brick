@@ -1,0 +1,20 @@
+===
+Variable assignment
+===
+// Int | 3
+let x = 1;
+x = x + 2;
+x
+---
+(source_file
+  (line_comment)
+  (variable_declaration
+    (identifier)
+    (number))
+  (assignment
+    (identifier)
+    (add_expr
+      (identifier)
+      (number)))
+  (identifier))
+

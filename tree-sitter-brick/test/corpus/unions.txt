@@ -1,0 +1,21 @@
+==================
+Declare union
+==================
+
+union Option {
+  some(i32),
+  none,
+}
+
+---
+
+(source_file
+  (union_declaration
+    (identifier)
+    (union_variant
+      (identifier)
+      (type
+        (primitive_type)))
+    (union_variant
+      (identifier))))
+

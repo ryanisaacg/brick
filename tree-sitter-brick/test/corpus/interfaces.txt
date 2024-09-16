@@ -1,0 +1,17 @@
+===
+Basic interface
+===
+
+interface Shape {
+    fn area(self): i32
+}
+
+---
+
+(source_file
+  (interface_declaration
+    (identifier)
+    (required_function
+      (identifier)
+      (type
+          (primitive_type)))))

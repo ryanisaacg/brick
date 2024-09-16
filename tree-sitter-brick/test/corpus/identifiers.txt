@@ -1,0 +1,21 @@
+==================
+Identifier with letters
+==================
+
+abc
+
+---
+
+(source_file
+  (identifier))
+
+==================
+Identifier with letter and number
+==================
+
+a1
+
+---
+
+(source_file
+  (identifier))

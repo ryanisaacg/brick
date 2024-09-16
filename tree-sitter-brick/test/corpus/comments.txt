@@ -1,0 +1,40 @@
+==================
+Simple comment
+==================
+
+// Hello world!
+
+---
+
+(source_file
+    (line_comment))
+
+==================
+Comment with keywords
+==================
+
+// fn return
+
+---
+
+(source_file
+    (line_comment))
+
+==================
+Comment in expression
+==================
+
+fn hello(): i32 {
+    1 // fn return
+}
+
+---
+
+(source_file
+    (function_definition
+        (identifier)
+        (type
+            (primitive_type))
+        (block
+            (number)
+            (line_comment))))

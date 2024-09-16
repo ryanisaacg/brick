@@ -155,6 +155,7 @@ pub fn load_test_contents(TestCase { root, sources }: &TestCase) -> TestContents
         name: path_display(root),
         expectation,
         sources,
+        contents,
     }
 }
 
@@ -204,6 +205,7 @@ pub struct TestContents {
     pub name: String,
     pub expectation: TestExpectation,
     pub sources: Vec<&'static str>,
+    pub contents: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -10,4 +10,5 @@ members = [
     "brick-wasmtime",
     "data-test-driver",
     "runtime-binary", "rust-wasm-exporter",
+    "tree-sitter-brick",
 ]
