@@ -2,6 +2,6 @@
 let value = 1234;
 
 borrow val_ref = unique value;
-*val_ref = 5678
+*val_ref = 5678;
 
 value

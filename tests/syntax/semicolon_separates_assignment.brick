@@ -1,0 +1,5 @@
+// NoCompile
+let x = 1;
+// Note the lack of semicolon
+x = 2
+x

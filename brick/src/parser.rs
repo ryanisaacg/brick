@@ -379,6 +379,17 @@ impl AstNodeValue {
             referenced_id: OnceLock::new(),
         }
     }
+
+    fn is_block_expression(&self) -> bool {
+        matches!(
+            self,
+            AstNodeValue::Block(_)
+                | AstNodeValue::If(_)
+                | AstNodeValue::While(_, _)
+                | AstNodeValue::Loop(_)
+                | AstNodeValue::Match(_)
+        )
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -449,6 +460,7 @@ pub enum ParseError {
     UnexpectedToken(Box<Token>, &'static str),
     UnexpectedEndOfInput(SourceMarker, &'static str),
     MissingTypeForParam(SourceMarker),
+    ExpectedSemicolonAfterExpression(SourceRange),
     TokenError(LexError),
 }
 
@@ -482,11 +494,14 @@ impl Diagnostic for ParseError {
             ParseError::UnexpectedEndOfInput(range, message) => {
                 DiagnosticMarker::error(SourceRange::new(range.clone(), range), message)
             }
-            ParseError::MissingTypeForParam(range) => DiagnosticMarker::error(
-                SourceRange::new(range.clone(), range),
+            ParseError::MissingTypeForParam(marker) => DiagnosticMarker::error(
+                SourceRange::new(marker.clone(), marker),
                 "expected type for parameter",
             ),
             ParseError::TokenError(token) => return token.contents(),
+            ParseError::ExpectedSemicolonAfterExpression(range) => {
+                DiagnosticMarker::error(range.clone(), "expected semicolon after expression")
+            }
         })
     }
 }
@@ -608,6 +623,20 @@ fn statement(
                     let provenance = SourceRange::new(expr.provenance.start(), &token.range.end());
                     let expr = add_node(context, expr);
                     AstNode::new(AstNodeValue::Statement(expr), provenance)
+                } else if !expr.value.is_block_expression() {
+                    // Ensure next token is a valid bounadry - otherwise the expression requires a
+                    // closing semicolon. an EOF is a valid boundary
+                    if let Some(token) = peek_token_optional(source)? {
+                        if !matches!(
+                            token.value,
+                            TokenValue::Semicolon | TokenValue::Comma | TokenValue::CloseBracket,
+                        ) {
+                            return Err(ParseError::ExpectedSemicolonAfterExpression(
+                                token.range.clone(),
+                            ));
+                        }
+                    }
+                    expr
                 } else {
                     expr
                 }
