@@ -97,7 +97,6 @@ tooling:
     - find references
     - hover
     - rename (probably going to be very hard)
-    - syntax highlighting
     - autocomplete
     - provenance range is incorrect on function declarations
 - pretty-printer
