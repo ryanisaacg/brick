@@ -1,0 +1,4 @@
+// Compile
+fn a() {}
+const b: i32 = 1;
+struct C {}

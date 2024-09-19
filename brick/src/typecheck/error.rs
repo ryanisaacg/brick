@@ -47,6 +47,11 @@ pub enum TypecheckError {
     SelfParameterInNonAssociatedFunc(SourceRange),
     ExportNotFound(SourceRange, String),
     TopLevelConstantMustHaveType(SourceRange),
+    DeclarationNameConflict {
+        first: SourceRange,
+        second: SourceRange,
+        name: String,
+    },
 }
 
 impl Error for TypecheckError {}
@@ -178,6 +183,24 @@ impl Diagnostic for TypecheckError {
                 range.clone(),
                 "top-level constants must have their types specified",
             ),
+            DeclarationNameConflict {
+                first,
+                second,
+                name,
+            } => {
+                return DiagnosticContents::Vector(vec![
+                    DiagnosticMarker::error_context(
+                        first.clone(),
+                        "declaration name conflict",
+                        name.clone(),
+                    ),
+                    DiagnosticMarker::error_context(
+                        second.clone(),
+                        "declaration name conflict",
+                        name.clone(),
+                    ),
+                ])
+            }
         })
     }
 }

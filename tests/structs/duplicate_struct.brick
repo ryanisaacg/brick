@@ -1,0 +1,3 @@
+// NoCompile
+struct A {}
+struct A {}

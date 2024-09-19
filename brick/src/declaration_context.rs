@@ -54,7 +54,7 @@ impl DeclarationContext {
         };
 
         for (name, source) in files {
-            ctx.assign_ids_to_names(name, source);
+            ctx.assign_ids_to_names(name, source)?;
         }
 
         let mut results = Ok(());
@@ -68,7 +68,13 @@ impl DeclarationContext {
         Ok(ctx)
     }
 
-    fn assign_ids_to_names(&mut self, module_name: &'static str, source: &ParsedFile) {
+    fn assign_ids_to_names(
+        &mut self,
+        module_name: &'static str,
+        source: &ParsedFile,
+    ) -> Result<(), TypecheckError> {
+        let mut result = Ok(());
+
         let module = match self.files.get_mut(module_name) {
             Some(module) => module,
             None => {
@@ -90,9 +96,10 @@ impl DeclarationContext {
         else {
             unreachable!()
         };
+        let mut name_origin = HashMap::new();
 
         for statement in source.top_level.iter() {
-            match &statement.value {
+            let name = match &statement.value {
                 AstNodeValue::StructDeclaration(StructDeclarationValue { name, .. })
                 | AstNodeValue::UnionDeclaration(UnionDeclarationValue { name, .. })
                 | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue { name, .. }) => {
@@ -100,6 +107,7 @@ impl DeclarationContext {
                         name.clone(),
                         (None, ExpressionType::ReferenceToType(module.new_type_id())),
                     );
+                    Some(name)
                 }
                 AstNodeValue::FunctionDeclaration(FunctionDeclarationValue { name, .. })
                 | AstNodeValue::ExternFunctionBinding(FunctionHeaderValue { name, .. }) => {
@@ -110,10 +118,27 @@ impl DeclarationContext {
                             ExpressionType::ReferenceToFunction(module.new_func_id()),
                         ),
                     );
+                    Some(name)
                 }
-                _ => {}
+                _ => None,
+            };
+            if let Some(name) = name {
+                // Check for name conflicts - if an existing declaration has the same
+                // name, we'll need to generate an error
+                if let Some(existing_provenance) = name_origin.insert(name, &statement.provenance) {
+                    merge_results(
+                        &mut result,
+                        Err(TypecheckError::DeclarationNameConflict {
+                            first: existing_provenance.clone(),
+                            second: statement.provenance.clone(),
+                            name: name.clone(),
+                        }),
+                    );
+                }
             }
         }
+
+        result
     }
 
     fn fill_in_file_type_info(
