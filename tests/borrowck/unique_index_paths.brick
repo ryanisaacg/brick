@@ -1,0 +1,5 @@
+// NoCompile
+let x = list[1, 2];
+borrow x0 = unique x[0];
+borrow x1 = ref x[1];
+*x0 + *x1

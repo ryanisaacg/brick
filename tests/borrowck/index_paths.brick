@@ -1,0 +1,5 @@
+// Int | 3
+let x = list[1, 2];
+borrow x0 = ref x[0];
+borrow x1 = ref x[1];
+*x0 + *x1

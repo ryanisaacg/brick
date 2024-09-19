@@ -1,0 +1,7 @@
+// Compile
+struct Data {
+    a: i32,
+}
+let x = list[Data { a: 10 }];
+borrow y = ref x[0].a;
+*y
