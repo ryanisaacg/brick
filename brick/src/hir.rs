@@ -61,6 +61,7 @@ pub fn desugar_module<'dest>(
     module
 }
 
+#[derive(Debug)]
 pub struct HirModule {
     pub top_level_statements: HirNode,
     // TODO: include imports, structs, and extern function declaration
@@ -287,7 +288,11 @@ impl HirNode {
                     callback(variant_ty, child);
                 }
             }
-            HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
+            HirNodeValue::Arithmetic(_, lhs, rhs) => {
+                callback(Some(&self.ty), lhs);
+                callback(Some(&self.ty), rhs);
+            }
+            HirNodeValue::Comparison(_, lhs, rhs) => {
                 if let Some(declarations) = declarations {
                     if is_assignable_to(declarations, None, &lhs.ty, &rhs.ty) {
                         callback(Some(&lhs.ty), rhs);
@@ -504,7 +509,11 @@ impl HirNode {
                     callback(variant_ty, child);
                 }
             }
-            HirNodeValue::Arithmetic(_, lhs, rhs) | HirNodeValue::Comparison(_, lhs, rhs) => {
+            HirNodeValue::Arithmetic(_, lhs, rhs) => {
+                callback(Some(&self.ty), lhs);
+                callback(Some(&self.ty), rhs);
+            }
+            HirNodeValue::Comparison(_, lhs, rhs) => {
                 if let Some(declarations) = declarations {
                     if is_assignable_to(declarations, None, &lhs.ty, &rhs.ty) {
                         callback(Some(&lhs.ty), rhs);
