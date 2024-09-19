@@ -341,34 +341,50 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
             let right = lower_node_alloc(decls, ast, ast.get(*right));
 
             match op {
-                BinOp::AddAssign => HirNodeValue::Assignment(
-                    left.clone(),
-                    Box::new(HirNode::from_ast_void(
-                        node,
-                        HirNodeValue::Arithmetic(ArithmeticOp::Add, left, right),
-                    )),
-                ),
-                BinOp::SubtractAssign => HirNodeValue::Assignment(
-                    left.clone(),
-                    Box::new(HirNode::from_ast_void(
-                        node,
-                        HirNodeValue::Arithmetic(ArithmeticOp::Subtract, left, right),
-                    )),
-                ),
-                BinOp::MultiplyAssign => HirNodeValue::Assignment(
-                    left.clone(),
-                    Box::new(HirNode::from_ast_void(
-                        node,
-                        HirNodeValue::Arithmetic(ArithmeticOp::Multiply, left, right),
-                    )),
-                ),
-                BinOp::DivideAssign => HirNodeValue::Assignment(
-                    left.clone(),
-                    Box::new(HirNode::from_ast_void(
-                        node,
-                        HirNodeValue::Arithmetic(ArithmeticOp::Divide, left, right),
-                    )),
-                ),
+                BinOp::AddAssign => {
+                    let ty = left.ty.clone();
+                    HirNodeValue::Assignment(
+                        left.clone(),
+                        Box::new(HirNode::from_ast(
+                            node,
+                            HirNodeValue::Arithmetic(ArithmeticOp::Add, left, right),
+                            ty,
+                        )),
+                    )
+                }
+                BinOp::SubtractAssign => {
+                    let ty = left.ty.clone();
+                    HirNodeValue::Assignment(
+                        left.clone(),
+                        Box::new(HirNode::from_ast(
+                            node,
+                            HirNodeValue::Arithmetic(ArithmeticOp::Subtract, left, right),
+                            ty,
+                        )),
+                    )
+                }
+                BinOp::MultiplyAssign => {
+                    let ty = left.ty.clone();
+                    HirNodeValue::Assignment(
+                        left.clone(),
+                        Box::new(HirNode::from_ast(
+                            node,
+                            HirNodeValue::Arithmetic(ArithmeticOp::Multiply, left, right),
+                            ty,
+                        )),
+                    )
+                }
+                BinOp::DivideAssign => {
+                    let ty = left.ty.clone();
+                    HirNodeValue::Assignment(
+                        left.clone(),
+                        Box::new(HirNode::from_ast(
+                            node,
+                            HirNodeValue::Arithmetic(ArithmeticOp::Divide, left, right),
+                            ty,
+                        )),
+                    )
+                }
                 BinOp::Assignment => HirNodeValue::Assignment(left, right),
 
                 BinOp::Add => HirNodeValue::Arithmetic(ArithmeticOp::Add, left, right),

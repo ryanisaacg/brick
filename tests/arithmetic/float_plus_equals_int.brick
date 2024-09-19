@@ -1,0 +1,7 @@
+// Float | 4.0
+
+
+let x = 3.0;
+let y = 1;
+x += y;
+x
