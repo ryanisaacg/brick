@@ -1,0 +1,4 @@
+// NoCompile
+fn a() {}
+const a: i32 = 1;
+struct A {}

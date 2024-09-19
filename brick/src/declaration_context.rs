@@ -120,6 +120,8 @@ impl DeclarationContext {
                     );
                     Some(name)
                 }
+                AstNodeValue::Import(paths) => paths.last(),
+                AstNodeValue::ConstDeclaration { name, .. } => Some(name),
                 _ => None,
             };
             if let Some(name) = name {

@@ -1,0 +1,3 @@
+// NoCompile
+const a: i32 = 1;
+const a: i32 = 1;

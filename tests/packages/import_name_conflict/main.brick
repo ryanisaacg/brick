@@ -1,0 +1,4 @@
+// NoCompile
+import self.file.a;
+
+fn a() {}
