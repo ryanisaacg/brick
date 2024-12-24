@@ -127,12 +127,14 @@ module.exports = grammar({
         $.identifier,
         $.nullable_type,
         $._reference_type,
-        $._generic_type
+        $._generic_type,
+        $.dot_type_expr
       ),
     primitive_type: (_) => choice("bool", "i32", "i64", "f32", "f64"),
     nullable_type: ($) => prec(2, seq($.type, "?")),
     _reference_type: ($) => prec(0, seq(choice("unique", "ref"), $.type)),
     _generic_type: ($) => prec(1, seq($.type, "[", commaSep1($.type), "]")),
+    dot_type_expr: ($) => prec(3, seq($.type, ".", $.identifier)),
 
     // EXPRESSIONS
     _statement: ($) => choice($._non_const_statement, $.const_declaration),

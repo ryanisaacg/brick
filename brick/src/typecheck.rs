@@ -393,8 +393,12 @@ fn typecheck_expression<'a>(
 
             if let Some(type_hint) = type_hint {
                 let type_hint = context.ast.get(*type_hint);
-                let hint_ty =
-                    resolve_type_expr(context.ast, &context.top_level_type_names, type_hint)?;
+                let hint_ty = resolve_type_expr(
+                    context.ast,
+                    &context.top_level_type_names,
+                    context.id_to_decl(),
+                    type_hint,
+                )?;
                 if matches!(hint_ty, ExpressionType::Pointer(_, _)) {
                     merge_results(
                         &mut result,
@@ -1789,7 +1793,12 @@ fn typecheck_const<'a>(
     }
     if let Some(type_hint) = type_hint {
         let type_hint = context.ast.get(*type_hint);
-        let hint_ty = resolve_type_expr(context.ast, &context.top_level_type_names, type_hint)?;
+        let hint_ty = resolve_type_expr(
+            context.ast,
+            &context.top_level_type_names,
+            context.id_to_decl(),
+            type_hint,
+        )?;
         merge_results(
             &mut result,
             assert_assignable_to(context.declarations, &value.provenance, &hint_ty, value_ty),

@@ -741,6 +741,10 @@
         {
           "type": "SYMBOL",
           "name": "_generic_type"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "dot_type_expr"
         }
       ]
     },
@@ -866,6 +870,27 @@
           {
             "type": "STRING",
             "value": "]"
+          }
+        ]
+      }
+    },
+    "dot_type_expr": {
+      "type": "PREC",
+      "value": 3,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "type"
+          },
+          {
+            "type": "STRING",
+            "value": "."
+          },
+          {
+            "type": "SYMBOL",
+            "name": "identifier"
           }
         ]
       }

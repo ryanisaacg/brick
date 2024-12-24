@@ -1811,6 +1811,25 @@
     }
   },
   {
+    "type": "dot_type_expr",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "extern_function_binding",
     "named": true,
     "fields": {
@@ -3543,6 +3562,10 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "dot_type_expr",
+          "named": true
+        },
         {
           "type": "identifier",
           "named": true

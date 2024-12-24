@@ -4,7 +4,7 @@ use crate::{
     id::ConstantID,
     multi_error::{merge_result_list, merge_results, merge_results_or_value},
     parser::{
-        AstArena, AstNode, AstNodeValue, FunctionDeclarationValue, FunctionHeaderValue,
+        AstArena, AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, FunctionHeaderValue,
         InterfaceDeclarationValue, NameAndType, ParsedFile, SelfParameter, StructDeclarationValue,
         UnionDeclarationValue, UnionDeclarationVariant,
     },
@@ -194,6 +194,7 @@ impl DeclarationContext {
                         &names_to_type_id,
                         file,
                         &mut self.id_to_func,
+                        &self.id_to_decl,
                         decl,
                         &statement.provenance,
                     ),
@@ -203,6 +204,7 @@ impl DeclarationContext {
                     fill_in_union_decl(
                         &source.arena,
                         &names_to_type_id,
+                        &self.id_to_decl,
                         decl,
                         &statement.provenance,
                     ),
@@ -214,6 +216,7 @@ impl DeclarationContext {
                         &names_to_type_id,
                         file,
                         &mut self.id_to_func,
+                        &self.id_to_decl,
                         decl,
                         &statement.provenance,
                     ),
@@ -232,6 +235,7 @@ impl DeclarationContext {
                         fill_in_fn_header(
                             &source.arena,
                             &names_to_type_id,
+                            &self.id_to_decl,
                             id,
                             func,
                             false,
@@ -250,6 +254,7 @@ impl DeclarationContext {
                         fill_in_fn_decl(
                             &source.arena,
                             &names_to_type_id,
+                            &self.id_to_decl,
                             id,
                             func,
                             false,
@@ -290,6 +295,7 @@ impl DeclarationContext {
                 resolve_type_expr(
                     &source.arena,
                     &names_to_type_id,
+                    &self.id_to_decl,
                     source.arena.get(*type_hint),
                 ),
             ) else {
@@ -465,6 +471,7 @@ fn fill_in_struct_info(
     names_to_type_id: &HashMap<&str, TypeID>,
     module: &FileDeclarations,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
     decl: &StructDeclarationValue,
     provenance: &SourceRange,
 ) -> Result<TypeDeclaration, TypecheckError> {
@@ -476,7 +483,7 @@ fn fill_in_struct_info(
              ty,
              provenance,
          }| {
-            let ty = resolve_type_expr(ast, names_to_type_id, ast.get(*ty))?;
+            let ty = resolve_type_expr(ast, names_to_type_id, id_to_decl, ast.get(*ty))?;
             if matches!(ty, ExpressionType::Pointer(_, _)) {
                 return Err(TypecheckError::IllegalReferenceInsideDataType(
                     provenance.clone(),
@@ -500,6 +507,7 @@ fn fill_in_struct_info(
                     fill_in_fn_decl(
                         ast,
                         names_to_type_id,
+                        id_to_decl,
                         func_id,
                         func,
                         true,
@@ -546,6 +554,7 @@ fn fill_in_interface_decl(
     names_to_type_id: &HashMap<&str, TypeID>,
     module: &FileDeclarations,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
     interface: &InterfaceDeclarationValue,
     provenance: &SourceRange,
 ) -> Result<TypeDeclaration, TypecheckError> {
@@ -564,6 +573,7 @@ fn fill_in_interface_decl(
                 fill_in_fn_header(
                     ast,
                     names_to_type_id,
+                    id_to_decl,
                     func_id,
                     func,
                     true,
@@ -576,6 +586,7 @@ fn fill_in_interface_decl(
                 fill_in_fn_decl(
                     ast,
                     names_to_type_id,
+                    id_to_decl,
                     func_id,
                     func,
                     true,
@@ -601,6 +612,7 @@ fn fill_in_interface_decl(
 fn fill_in_union_decl(
     ast: &AstArena,
     names_to_type_id: &HashMap<&str, TypeID>,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
     UnionDeclarationValue {
         variants: variant_ast,
         name,
@@ -615,7 +627,7 @@ fn fill_in_union_decl(
                 ty,
                 provenance,
             }) => {
-                let ty = resolve_type_expr(ast, names_to_type_id, ast.get(*ty))?;
+                let ty = resolve_type_expr(ast, names_to_type_id, id_to_decl, ast.get(*ty))?;
                 if matches!(ty, ExpressionType::Pointer(_, _)) {
                     return Err(TypecheckError::IllegalReferenceInsideDataType(
                         provenance.clone(),
@@ -655,9 +667,11 @@ fn fill_in_union_decl(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_in_fn_decl(
     ast: &AstArena,
     names_to_type_id: &HashMap<&str, TypeID>,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
     id: FunctionID,
     FunctionDeclarationValue {
         self_param,
@@ -677,7 +691,12 @@ fn fill_in_fn_decl(
         params.push(self_param_ty);
     }
     for (_, NameAndType { ty, .. }) in ast_params {
-        params.push(resolve_type_expr(ast, names_to_type_id, ast.get(*ty))?);
+        params.push(resolve_type_expr(
+            ast,
+            names_to_type_id,
+            id_to_decl,
+            ast.get(*ty),
+        )?);
     }
 
     Ok(FuncType {
@@ -686,7 +705,7 @@ fn fill_in_fn_decl(
         params,
         returns: returns
             .as_ref()
-            .map(|returns| resolve_type_expr(ast, names_to_type_id, ast.get(*returns)))
+            .map(|returns| resolve_type_expr(ast, names_to_type_id, id_to_decl, ast.get(*returns)))
             .unwrap_or(Ok(ExpressionType::Void))?,
         is_associated,
         is_coroutine: *is_coroutine,
@@ -694,9 +713,11 @@ fn fill_in_fn_decl(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_in_fn_header(
     ast: &AstArena,
     names_to_type_id: &HashMap<&str, TypeID>,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
     id: FunctionID,
     FunctionHeaderValue {
         self_param,
@@ -715,7 +736,12 @@ fn fill_in_fn_header(
         params.push(self_param_ty);
     }
     for NameAndType { ty, .. } in ast_params {
-        params.push(resolve_type_expr(ast, names_to_type_id, ast.get(*ty))?);
+        params.push(resolve_type_expr(
+            ast,
+            names_to_type_id,
+            id_to_decl,
+            ast.get(*ty),
+        )?);
     }
 
     Ok(FuncType {
@@ -724,7 +750,7 @@ fn fill_in_fn_header(
         params,
         returns: returns
             .as_ref()
-            .map(|returns| resolve_type_expr(ast, names_to_type_id, ast.get(*returns)))
+            .map(|returns| resolve_type_expr(ast, names_to_type_id, id_to_decl, ast.get(*returns)))
             .unwrap_or(Ok(ExpressionType::Void))?,
         is_associated,
         is_coroutine: false,
@@ -760,6 +786,7 @@ fn include_self_param(
 pub fn resolve_type_expr(
     ast: &AstArena,
     name_to_type_id: &HashMap<&str, TypeID>,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
     node: &AstNode,
 ) -> Result<ExpressionType, TypecheckError> {
     Ok(match &node.value {
@@ -779,36 +806,105 @@ pub fn resolve_type_expr(
         AstNodeValue::VoidType => ExpressionType::Void,
         AstNodeValue::UniqueType(inner) => ExpressionType::Pointer(
             PointerKind::Unique,
-            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*inner))?),
+            Box::new(resolve_type_expr(
+                ast,
+                name_to_type_id,
+                id_to_decl,
+                ast.get(*inner),
+            )?),
         ),
         AstNodeValue::SharedType(inner) => ExpressionType::Pointer(
             PointerKind::Shared,
-            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*inner))?),
+            Box::new(resolve_type_expr(
+                ast,
+                name_to_type_id,
+                id_to_decl,
+                ast.get(*inner),
+            )?),
         ),
-        AstNodeValue::ArrayType(inner) => ExpressionType::Collection(CollectionType::Array(
-            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*inner))?),
-        )),
+        AstNodeValue::ArrayType(inner) => {
+            ExpressionType::Collection(CollectionType::Array(Box::new(resolve_type_expr(
+                ast,
+                name_to_type_id,
+                id_to_decl,
+                ast.get(*inner),
+            )?)))
+        }
         AstNodeValue::RcType(inner) => {
             ExpressionType::Collection(CollectionType::ReferenceCounter(Box::new(
-                resolve_type_expr(ast, name_to_type_id, ast.get(*inner))?,
+                resolve_type_expr(ast, name_to_type_id, id_to_decl, ast.get(*inner))?,
             )))
         }
         AstNodeValue::DictType(key, value) => ExpressionType::Collection(CollectionType::Dict(
-            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*key))?),
-            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*value))?),
+            Box::new(resolve_type_expr(
+                ast,
+                name_to_type_id,
+                id_to_decl,
+                ast.get(*key),
+            )?),
+            Box::new(resolve_type_expr(
+                ast,
+                name_to_type_id,
+                id_to_decl,
+                ast.get(*value),
+            )?),
         )),
         AstNodeValue::NullableType(inner) => ExpressionType::Nullable(Box::new(resolve_type_expr(
             ast,
             name_to_type_id,
+            id_to_decl,
             ast.get(*inner),
         )?)),
         AstNodeValue::GeneratorType { yield_ty, param_ty } => ExpressionType::Generator {
-            yield_ty: Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*yield_ty))?),
-            param_ty: Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*param_ty))?),
+            yield_ty: Box::new(resolve_type_expr(
+                ast,
+                name_to_type_id,
+                id_to_decl,
+                ast.get(*yield_ty),
+            )?),
+            param_ty: Box::new(resolve_type_expr(
+                ast,
+                name_to_type_id,
+                id_to_decl,
+                ast.get(*param_ty),
+            )?),
         },
-        AstNodeValue::CellType(inner_ty) => ExpressionType::Collection(CollectionType::Cell(
-            Box::new(resolve_type_expr(ast, name_to_type_id, ast.get(*inner_ty))?),
-        )),
+        AstNodeValue::CellType(inner_ty) => {
+            ExpressionType::Collection(CollectionType::Cell(Box::new(resolve_type_expr(
+                ast,
+                name_to_type_id,
+                id_to_decl,
+                ast.get(*inner_ty),
+            )?)))
+        }
+        AstNodeValue::BinExpr(BinOp::Dot, lhs, rhs) => {
+            let lhs_node = ast.get(*lhs);
+            let ExpressionType::InstanceOf(lhs_id) =
+                resolve_type_expr(ast, name_to_type_id, id_to_decl, lhs_node)?
+            else {
+                return Err(TypecheckError::TypeDotOperatorLhsMustBeModule(
+                    lhs_node.provenance.clone(),
+                ));
+            };
+            let Some(TypeDeclaration::Module(module)) = id_to_decl.get(&lhs_id) else {
+                return Err(TypecheckError::TypeDotOperatorLhsMustBeModule(
+                    lhs_node.provenance.clone(),
+                ));
+            };
+            let AstNodeValue::Name { value: rhs, .. } = &ast.get(*rhs).value else {
+                unreachable!("ICE: RHS of dot operator in type expression must be a word");
+            };
+            let (_, indexed_ty) = module.exports.get(rhs).ok_or_else(|| {
+                TypecheckError::ExportNotFound(node.provenance.clone(), rhs.clone())
+            })?;
+
+            // This is sort of a weird and gross hack around the fact that the modules "reference"
+            // their inner types but we need resolved types to be instanceof
+            match indexed_ty.clone() {
+                ExpressionType::ReferenceToType(id) => ExpressionType::InstanceOf(id),
+                other => other,
+            }
+        }
         AstNodeValue::FunctionDeclaration(_)
         | AstNodeValue::RequiredFunction(_)
         | AstNodeValue::ExternFunctionBinding(_)

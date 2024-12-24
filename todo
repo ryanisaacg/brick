@@ -41,9 +41,9 @@ packages:
 - packages can include a WASM blob
 
 modules:
-- modules can be indexed in a type expression context
 - modules can be indexed in a struct / variant literal context
 - modules can be declared explicitly
+- can you index the self module outside import statements?
 
 top-level statements:
 - disallow top-level return

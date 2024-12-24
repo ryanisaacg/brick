@@ -52,6 +52,7 @@ pub enum TypecheckError {
         second: SourceRange,
         name: String,
     },
+    TypeDotOperatorLhsMustBeModule(SourceRange),
 }
 
 impl Error for TypecheckError {}
@@ -201,6 +202,10 @@ impl Diagnostic for TypecheckError {
                     ),
                 ])
             }
+            TypeDotOperatorLhsMustBeModule(range) => DiagnosticMarker::error(
+                range.clone(),
+                "left hand side of dot operator in type context must be a module",
+            ),
         })
     }
 }

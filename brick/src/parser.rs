@@ -1056,38 +1056,29 @@ fn function_header(
     )?;
     let mut cursor = open_paren.range.end();
 
-    let self_param =
-        match peek_token(source, &cursor, "expected either parameters or close paren")?.value {
-            TokenValue::Unique => {
-                cursor = already_peeked_token(source)?.range.end();
-                cursor = assert_next_lexeme_eq(
-                    source,
-                    TokenValue::SelfKeyword,
-                    &cursor,
-                    "expected self after unique",
-                )?
+    let self_param = match peek_token(source, &cursor, "expected either parameters or close paren")?
+        .value
+    {
+        TokenValue::Unique => {
+            cursor = already_peeked_token(source)?.range.end();
+            cursor = assert_next_word_eq(source, "self", &cursor, "expected self after unique")?
                 .range
                 .end();
-                Some(SelfParameter::Unique)
-            }
-            TokenValue::Ref => {
-                cursor = already_peeked_token(source)?.range.end();
-                cursor = assert_next_lexeme_eq(
-                    source,
-                    TokenValue::SelfKeyword,
-                    &cursor,
-                    "expected self after ref",
-                )?
+            Some(SelfParameter::Unique)
+        }
+        TokenValue::Ref => {
+            cursor = already_peeked_token(source)?.range.end();
+            cursor = assert_next_word_eq(source, "self", &cursor, "expected self after ref")?
                 .range
                 .end();
-                Some(SelfParameter::Shared)
-            }
-            TokenValue::SelfKeyword => {
-                cursor = already_peeked_token(source)?.range.end();
-                Some(SelfParameter::Owned)
-            }
-            _ => None,
-        };
+            Some(SelfParameter::Shared)
+        }
+        TokenValue::Word(ref word) if word == "self" => {
+            cursor = already_peeked_token(source)?.range.end();
+            Some(SelfParameter::Owned)
+        }
+        _ => None,
+    };
 
     if self_param.is_some() {
         let next = peek_token(source, &cursor, "expected comma or close paren")?;
@@ -1154,12 +1145,13 @@ fn function_header(
 }
 
 fn import_declaration(source: &mut TokenIter, start: &SourceMarker) -> Result<AstNode, ParseError> {
-    let (name, provenance) =
-        if peek_token(source, start, "expected import path")?.value == TokenValue::SelfKeyword {
-            ("self".to_string(), already_peeked_token(source)?.range)
-        } else {
-            word(source, start, "expected word after 'import'")?
-        };
+    let (name, provenance) = match peek_token(source, start, "expected import path")? {
+        Token {
+            value: TokenValue::Word(word),
+            ..
+        } if word == "self" => ("self".to_string(), already_peeked_token(source)?.range),
+        _ => word(source, start, "expected word after 'import'")?,
+    };
     let mut cursor = provenance.end();
     let mut components = vec![name];
 
@@ -1485,7 +1477,35 @@ fn type_expression(
                     SourceRange::new(next.range.start(), &token.range.end()),
                 )
             }
-            _ => AstNode::new(AstNodeValue::name(name), next.range),
+            _ => {
+                let start = next.range.start();
+                let mut cursor;
+                let mut expr = AstNode::new(AstNodeValue::name(name), next.range);
+
+                while let Some(Token {
+                    value: TokenValue::Period,
+                    ..
+                }) = peek_token_optional(source)?
+                {
+                    let token = already_peeked_token(source)?;
+                    cursor = token.range.end();
+                    let (rhs, range) = word(
+                        source,
+                        &cursor,
+                        "expected identifier after . in type expression",
+                    )?;
+                    cursor = range.end();
+
+                    let lhs = context.add(expr);
+                    let rhs = context.add(AstNode::new(AstNodeValue::name(rhs), range));
+                    expr = AstNode::new(
+                        AstNodeValue::BinExpr(BinOp::Dot, lhs, rhs),
+                        SourceRange::new(start.clone(), &cursor),
+                    );
+                }
+
+                expr
+            }
         },
         _ => {
             return Err(ParseError::UnexpectedToken(
@@ -1531,7 +1551,7 @@ fn expression_pratt(
     can_be_struct: bool,
 ) -> Result<AstNode, ParseError> {
     let Token { value, range } = next_token(source, start, "expected expression")?;
-    let start = range.start();
+    let start = start.clone();
     let cursor = range.end();
     let mut left = match value {
         // TODO: should this be treated as a unary operator instead?
@@ -1564,7 +1584,6 @@ fn expression_pratt(
         TokenValue::True => AstNode::new(AstNodeValue::Bool(true), range),
         TokenValue::False => AstNode::new(AstNodeValue::Bool(false), range),
         TokenValue::Word(word) => AstNode::new(AstNodeValue::name(word), range),
-        TokenValue::SelfKeyword => AstNode::new(AstNodeValue::name("self".to_string()), range),
         TokenValue::Null => AstNode::new(AstNodeValue::Null, range),
         TokenValue::CharacterLiteral(c) => AstNode::new(AstNodeValue::CharLiteral(c), range),
         TokenValue::StringLiteral(s) => AstNode::new(AstNodeValue::StringLiteral(s), range),
@@ -2425,6 +2444,30 @@ fn assert_next_lexeme_eq(
     assert_lexeme_eq(&lexeme, target, reason)?;
 
     Ok(lexeme)
+}
+
+fn assert_next_word_eq(
+    source: &mut TokenIter,
+    target: &str,
+    provenance: &SourceMarker,
+    reason: &'static str,
+) -> Result<Token, ParseError> {
+    skim_off_comments(source);
+    let lexeme = source
+        .next()
+        .ok_or_else(|| ParseError::UnexpectedEndOfInput(provenance.clone(), reason))??;
+    let is_eq = match lexeme.value {
+        TokenValue::Word(ref word) => word == target,
+        _ => false,
+    };
+    if is_eq {
+        Ok(lexeme)
+    } else {
+        Err(ParseError::UnexpectedToken(
+            Box::new(lexeme.clone()),
+            reason,
+        ))
+    }
 }
 
 fn assert_lexeme_eq(

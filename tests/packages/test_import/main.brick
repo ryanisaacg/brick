@@ -1,0 +1,10 @@
+// Compile
+
+import self.definition;
+import self.definition.Type;
+
+struct Result {
+    val1: Type,
+    val2: definition.Type,
+}
+
