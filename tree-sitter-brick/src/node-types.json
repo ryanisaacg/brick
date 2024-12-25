@@ -3842,6 +3842,16 @@
     "type": "union_declaration",
     "named": true,
     "fields": {
+      "associated_functions": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "function_definition",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -3861,17 +3871,21 @@
             "named": true
           }
         ]
+      },
+      "variants": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": ",",
+            "named": false
+          },
+          {
+            "type": "union_variant",
+            "named": true
+          }
+        ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "union_variant",
-          "named": true
-        }
-      ]
     }
   },
   {

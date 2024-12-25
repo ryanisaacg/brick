@@ -94,7 +94,8 @@ module.exports = grammar({
         field("name", $.identifier),
         field("properties", optional($.type_properties)),
         "{",
-        seq(commaSep1($.union_variant)),
+        field("variants", seq(commaSep1($.union_variant))),
+        field("associated_functions", repeat($.function_definition)),
         "}"
       ),
     union_variant: ($) =>

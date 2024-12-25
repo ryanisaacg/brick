@@ -97,11 +97,10 @@ compilation resume and reload:
 - allow a compilation pass to have some existing compilation units to start off (for partial compilation)
 
 unions:
-- optional non-exhaustive cases?
 - faulthrough / default branch in case statement
+- destructor generation for unions
+- case statements of references
 - ?. operator on union lvalues
-- unions have associated functions (and by extension, destructors)
-- unions can be converted to interfaces
 
 boolean operators:
 - short-circuiting boolean evaluation

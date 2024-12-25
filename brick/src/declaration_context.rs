@@ -4,9 +4,9 @@ use crate::{
     id::ConstantID,
     multi_error::{merge_result_list, merge_results, merge_results_or_value},
     parser::{
-        AstArena, AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, FunctionHeaderValue,
-        InterfaceDeclarationValue, NameAndType, ParsedFile, SelfParameter, StructDeclarationValue,
-        UnionDeclarationValue, UnionDeclarationVariant,
+        AstArena, AstNode, AstNodeId, AstNodeValue, BinOp, FunctionDeclarationValue,
+        FunctionHeaderValue, InterfaceDeclarationValue, NameAndType, ParsedFile, SelfParameter,
+        StructDeclarationValue, UnionDeclarationValue, UnionDeclarationVariant,
     },
     typecheck::{
         CollectionType, FuncType, InterfaceType, ModuleType, PointerKind, PrimitiveType,
@@ -204,6 +204,8 @@ impl DeclarationContext {
                     fill_in_union_decl(
                         &source.arena,
                         &names_to_type_id,
+                        file,
+                        &mut self.id_to_func,
                         &self.id_to_decl,
                         decl,
                         &statement.provenance,
@@ -477,50 +479,41 @@ fn fill_in_struct_info(
 ) -> Result<TypeDeclaration, TypecheckError> {
     let id = names_to_type_id[decl.name.as_str()];
 
-    let fields: HashMap<_, _> = merge_result_list(decl.fields.iter().map(
-        |NameAndType {
-             name,
-             ty,
-             provenance,
-         }| {
-            let ty = resolve_type_expr(ast, names_to_type_id, id_to_decl, ast.get(*ty))?;
-            if matches!(ty, ExpressionType::Pointer(_, _)) {
-                return Err(TypecheckError::IllegalReferenceInsideDataType(
-                    provenance.clone(),
-                ));
-            }
-            Ok((name.clone(), ty))
-        },
-    ))?;
-
     let mut result = Ok(());
 
-    let mut associated_functions = HashMap::new();
-    for node in decl.associated_functions.iter() {
-        let node = ast.get(*node);
-        match &node.value {
-            AstNodeValue::FunctionDeclaration(func) => {
-                let func_id = module.new_func_id();
-                associated_functions.insert(func.name.clone(), func_id);
-                if let Some(func_type) = merge_results_or_value(
-                    &mut result,
-                    fill_in_fn_decl(
-                        ast,
-                        names_to_type_id,
-                        id_to_decl,
-                        func_id,
-                        func,
-                        true,
-                        &node.provenance,
-                        Some(&ExpressionType::InstanceOf(id)),
-                    ),
-                ) {
-                    id_to_func.insert(func_id, func_type);
+    let fields: HashMap<_, _> = merge_results_or_value(
+        &mut result,
+        merge_result_list(decl.fields.iter().map(
+            |NameAndType {
+                 name,
+                 ty,
+                 provenance,
+             }| {
+                let ty = resolve_type_expr(ast, names_to_type_id, id_to_decl, ast.get(*ty))?;
+                if matches!(ty, ExpressionType::Pointer(_, _)) {
+                    return Err(TypecheckError::IllegalReferenceInsideDataType(
+                        provenance.clone(),
+                    ));
                 }
-            }
-            _ => panic!("Associated function should not be anything but function declaration"),
-        }
-    }
+                Ok((name.clone(), ty))
+            },
+        )),
+    )
+    .unwrap_or_default();
+
+    let associated_functions = merge_results_or_value(
+        &mut result,
+        fill_in_associated_functions(
+            ast,
+            module,
+            names_to_type_id,
+            id_to_func,
+            id_to_decl,
+            id,
+            &decl.associated_functions,
+        ),
+    )
+    .unwrap_or_default();
 
     let mut is_affine = false;
     for property in decl.properties.iter() {
@@ -612,32 +605,57 @@ fn fill_in_interface_decl(
 fn fill_in_union_decl(
     ast: &AstArena,
     names_to_type_id: &HashMap<&str, TypeID>,
+    module: &FileDeclarations,
+    id_to_func: &mut HashMap<FunctionID, FuncType>,
     id_to_decl: &HashMap<TypeID, TypeDeclaration>,
     UnionDeclarationValue {
         variants: variant_ast,
         name,
         properties,
+        associated_functions,
     }: &UnionDeclarationValue,
     provenance: &SourceRange,
 ) -> Result<TypeDeclaration, TypecheckError> {
-    let variants = merge_result_list(variant_ast.iter().map(|variant| {
-        Ok(match variant {
-            UnionDeclarationVariant::WithValue(NameAndType {
-                name,
-                ty,
-                provenance,
-            }) => {
-                let ty = resolve_type_expr(ast, names_to_type_id, id_to_decl, ast.get(*ty))?;
-                if matches!(ty, ExpressionType::Pointer(_, _)) {
-                    return Err(TypecheckError::IllegalReferenceInsideDataType(
-                        provenance.clone(),
-                    ));
+    let id = names_to_type_id[name.as_str()];
+
+    let mut result = Ok(());
+
+    let variants = merge_results_or_value(
+        &mut result,
+        merge_result_list(variant_ast.iter().map(|variant| {
+            Ok(match variant {
+                UnionDeclarationVariant::WithValue(NameAndType {
+                    name,
+                    ty,
+                    provenance,
+                }) => {
+                    let ty = resolve_type_expr(ast, names_to_type_id, id_to_decl, ast.get(*ty))?;
+                    if matches!(ty, ExpressionType::Pointer(_, _)) {
+                        return Err(TypecheckError::IllegalReferenceInsideDataType(
+                            provenance.clone(),
+                        ));
+                    }
+                    (name.clone(), Some(ty))
                 }
-                (name.clone(), Some(ty))
-            }
-            UnionDeclarationVariant::WithoutValue(name) => (name.clone(), None),
-        })
-    }))?;
+                UnionDeclarationVariant::WithoutValue(name) => (name.clone(), None),
+            })
+        })),
+    )
+    .unwrap_or_default();
+
+    let associated_functions = merge_results_or_value(
+        &mut result,
+        fill_in_associated_functions(
+            ast,
+            module,
+            names_to_type_id,
+            id_to_func,
+            id_to_decl,
+            id,
+            associated_functions,
+        ),
+    )
+    .unwrap_or_default();
 
     let mut is_affine = false;
     for property in properties.iter() {
@@ -652,8 +670,10 @@ fn fill_in_union_decl(
         }
     }
 
+    result?;
+
     Ok(TypeDeclaration::Union(UnionType {
-        id: names_to_type_id[name.as_str()],
+        id,
         variant_order: variant_ast
             .iter()
             .map(|variant| match variant {
@@ -662,9 +682,51 @@ fn fill_in_union_decl(
             })
             .collect(),
         variants,
+        associated_functions,
         is_affine,
         provenance: Some(provenance.clone()),
     }))
+}
+
+fn fill_in_associated_functions(
+    ast: &AstArena,
+    module: &FileDeclarations,
+    names_to_type_id: &HashMap<&str, TypeID>,
+    id_to_func: &mut HashMap<FunctionID, FuncType>,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
+    id: TypeID,
+    decl_associated_functions: &[AstNodeId],
+) -> Result<HashMap<String, FunctionID>, TypecheckError> {
+    let mut result = Ok(());
+    let mut associated_functions = HashMap::new();
+
+    for node in decl_associated_functions.iter() {
+        let node = ast.get(*node);
+        match &node.value {
+            AstNodeValue::FunctionDeclaration(func) => {
+                let func_id = module.new_func_id();
+                associated_functions.insert(func.name.clone(), func_id);
+                if let Some(func_type) = merge_results_or_value(
+                    &mut result,
+                    fill_in_fn_decl(
+                        ast,
+                        names_to_type_id,
+                        id_to_decl,
+                        func_id,
+                        func,
+                        true,
+                        &node.provenance,
+                        Some(&ExpressionType::InstanceOf(id)),
+                    ),
+                ) {
+                    id_to_func.insert(func_id, func_type);
+                }
+            }
+            _ => panic!("Associated function should not be anything but function declaration"),
+        }
+    }
+
+    Ok(associated_functions)
 }
 
 #[allow(clippy::too_many_arguments)]

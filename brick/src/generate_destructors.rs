@@ -4,7 +4,7 @@ use crate::{
     declaration_context::IntrinsicFunction,
     hir::{HirFunction, HirModule, HirNode},
     id::VariableID,
-    typecheck::{CollectionType, PointerKind, PrimitiveType, StructType},
+    typecheck::{CollectionType, PointerKind, PrimitiveType, StructType, UnionType},
     DeclarationContext, ExpressionType, FuncType, HirNodeValue, TypeDeclaration,
 };
 
@@ -21,16 +21,16 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
             TypeDeclaration::Struct(StructType {
                 associated_functions,
                 ..
+            })
+            | TypeDeclaration::Union(UnionType {
+                associated_functions,
+                ..
             }) => {
                 if associated_functions.contains_key("drop") {
                     destructor_exists.push(*decl_id);
                 } else {
                     need_generated_destructor.push(*decl_id);
                 }
-            }
-            TypeDeclaration::Union(_) => {
-                // In the future unions will have custom destructors
-                need_generated_destructor.push(*decl_id);
             }
             TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => unreachable!(),
         }
@@ -64,10 +64,13 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
             TypeDeclaration::Struct(StructType {
                 associated_functions,
                 ..
+            })
+            | TypeDeclaration::Union(UnionType {
+                associated_functions,
+                ..
             }) => {
                 associated_functions.insert("drop".to_string(), destructor_id);
             }
-            TypeDeclaration::Union(_) => todo!(),
             TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => unreachable!(),
         }
     }
@@ -93,7 +96,7 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
                 destructor_id = associated_functions["drop"];
                 drop_struct_children(declarations, ty, param, &mut destructor_body);
             }
-            TypeDeclaration::Union(_) => todo!(),
+            TypeDeclaration::Union(_) => todo!("DONTMERGE"),
             TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => unreachable!(),
         };
 
@@ -131,7 +134,7 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
                 let param = *param;
                 drop_struct_children(declarations, ty, param, destructor_body);
             }
-            TypeDeclaration::Union(_) => todo!(),
+            TypeDeclaration::Union(_) => todo!("DONTMERGE"),
             TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => unreachable!(),
         };
     }
@@ -241,6 +244,10 @@ pub fn drop_variable(
             // TODO: drop unions
             // TODO: should interfaces drop? I think no?
             if let TypeDeclaration::Struct(StructType {
+                associated_functions,
+                ..
+            })
+            | TypeDeclaration::Union(UnionType {
                 associated_functions,
                 ..
             }) = &decls.id_to_decl[ty_id]

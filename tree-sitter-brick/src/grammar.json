@@ -431,46 +431,61 @@
           "value": "{"
         },
         {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "SEQ",
-              "members": [
-                {
-                  "type": "SYMBOL",
-                  "name": "union_variant"
-                },
-                {
-                  "type": "REPEAT",
-                  "content": {
-                    "type": "SEQ",
+          "type": "FIELD",
+          "name": "variants",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "union_variant"
+                  },
+                  {
+                    "type": "REPEAT",
+                    "content": {
+                      "type": "SEQ",
+                      "members": [
+                        {
+                          "type": "STRING",
+                          "value": ","
+                        },
+                        {
+                          "type": "SYMBOL",
+                          "name": "union_variant"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "CHOICE",
                     "members": [
                       {
                         "type": "STRING",
                         "value": ","
                       },
                       {
-                        "type": "SYMBOL",
-                        "name": "union_variant"
+                        "type": "BLANK"
                       }
                     ]
                   }
-                },
-                {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "STRING",
-                      "value": ","
-                    },
-                    {
-                      "type": "BLANK"
-                    }
-                  ]
-                }
-              ]
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "associated_functions",
+          "content": {
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "function_definition"
             }
-          ]
+          }
         },
         {
           "type": "STRING",

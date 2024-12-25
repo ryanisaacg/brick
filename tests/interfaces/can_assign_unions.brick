@@ -1,0 +1,21 @@
+// Int | 11
+
+interface HasValue {
+    fn value(ref self): i32,
+}
+
+union Shape {
+    left(i32),
+    right(i32),
+
+    fn value(ref self): i32 {
+        case *self {
+            left(size) => size,
+            right(size) => size,
+        }
+    }
+}
+
+let x: HasValue = Shape.left(4);
+let y: HasValue = Shape.right(7);
+x.value() + y.value()

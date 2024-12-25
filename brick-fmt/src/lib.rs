@@ -128,6 +128,13 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 }
                 result.push_str(",\n");
             }
+
+            if !decl.associated_functions.is_empty() {
+                result.push('\n');
+                for func in decl.associated_functions.iter() {
+                    write_node(ast, ast.get(*func), result, indent + 1);
+                }
+            }
             result.push_str("}\n");
         }
         AstNodeValue::InterfaceDeclaration(decl) => {

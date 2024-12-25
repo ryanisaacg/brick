@@ -253,6 +253,7 @@ pub struct StructDeclarationValue {
 pub struct UnionDeclarationValue {
     pub name: String,
     pub variants: Vec<UnionDeclarationVariant>,
+    pub associated_functions: Vec<AstNodeId>,
     pub properties: Vec<String>,
 }
 
@@ -880,43 +881,65 @@ fn union_declaration(
     .end();
 
     let mut variants = Vec::new();
+    let mut associated_functions = Vec::new();
 
-    let mut closed = false;
-    while !closed {
-        let (name, name_range) = word(source, &cursor, "expected variant name")?;
-        cursor = name_range.end();
-        if peek_token(source, &cursor, "unexpected EOF in union declaration")?.value
-            == TokenValue::OpenParen
-        {
-            let paren = already_peeked_token(source)?;
-            let ty = type_expression(source, context, &paren.range.end())?;
-            let end = ty.provenance.end();
-            let ty = add_node(context, ty);
-            let paren = assert_next_lexeme_eq(
-                source,
-                TokenValue::CloseParen,
-                &end,
-                "expected ) after variant type",
-            )?;
-            cursor = paren.range.end();
-
-            variants.push(UnionDeclarationVariant::WithValue(NameAndType {
-                name,
-                ty,
-                provenance: SourceRange::new(name_range.start(), &end),
-            }));
-        } else {
-            variants.push(UnionDeclarationVariant::WithoutValue(name));
-        }
-
-        let (should_end, range) = comma_or_end_list(
+    loop {
+        if peek_for_closed(
             source,
             TokenValue::CloseBracket,
             &cursor,
-            "expected either more variants or close bracket",
-        )?;
-        closed = should_end;
-        cursor = range.end();
+            "expected either fields or close bracket",
+        )? {
+            break;
+        }
+
+        if peek_token(source, &cursor, "expected associated function, field, or }")?.value
+            == TokenValue::Function
+        {
+            let token = already_peeked_token(source)?;
+            cursor = token.range.end();
+
+            let function = function_declaration(source, context, &cursor, false)?;
+            associated_functions.push(context.add(function));
+        } else {
+            let (name, name_range) = word(source, &cursor, "expected variant name")?;
+            cursor = name_range.end();
+            if peek_token(source, &cursor, "unexpected EOF in union declaration")?.value
+                == TokenValue::OpenParen
+            {
+                let paren = already_peeked_token(source)?;
+                let ty = type_expression(source, context, &paren.range.end())?;
+                let end = ty.provenance.end();
+                let ty = add_node(context, ty);
+                let paren = assert_next_lexeme_eq(
+                    source,
+                    TokenValue::CloseParen,
+                    &end,
+                    "expected ) after variant type",
+                )?;
+                cursor = paren.range.end();
+
+                variants.push(UnionDeclarationVariant::WithValue(NameAndType {
+                    name,
+                    ty,
+                    provenance: SourceRange::new(name_range.start(), &end),
+                }));
+            } else {
+                variants.push(UnionDeclarationVariant::WithoutValue(name));
+            }
+
+            let (should_end, range) = comma_or_end_list(
+                source,
+                TokenValue::CloseBracket,
+                &cursor,
+                "expected more variants, associated functions or close bracket",
+            )?;
+            cursor = range.end();
+
+            if should_end {
+                break;
+            }
+        }
     }
     provenance.set_end(cursor);
 
@@ -925,6 +948,7 @@ fn union_declaration(
             name,
             variants,
             properties,
+            associated_functions,
         }),
         provenance,
     ))

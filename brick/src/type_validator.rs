@@ -20,6 +20,7 @@ pub enum TypeValidationError {
     IllegalDropParam(SourceRange),
     RecursiveType(SourceRange),
     IllegalAffineInNonAffine(SourceRange),
+    UnionsMustHaveVariant(SourceRange),
 }
 
 impl Error for TypeValidationError {}
@@ -72,6 +73,9 @@ impl Diagnostic for TypeValidationError {
                 range.clone(),
                 "non-resource type may not have resource fields",
             ),
+            TypeValidationError::UnionsMustHaveVariant(range) => {
+                DiagnosticMarker::error(range.clone(), "unions must have at least one varaint")
+            }
         })
     }
 }
@@ -146,6 +150,7 @@ fn validate_decl(
 ) -> Result<(), TypeValidationError> {
     let mut results = Ok(());
 
+    // DONTMERGE: validate that unions have at least one variant
     merge_results(&mut results, validate_drop(decls, ty));
 
     results
@@ -156,8 +161,12 @@ fn validate_drop(
     ty: &TypeDeclaration,
 ) -> Result<(), TypeValidationError> {
     match ty {
-        TypeDeclaration::Module(_) | TypeDeclaration::Union(_) => {}
+        TypeDeclaration::Module(_) => {}
         TypeDeclaration::Struct(StructType {
+            associated_functions,
+            ..
+        })
+        | TypeDeclaration::Union(UnionType {
             associated_functions,
             ..
         }) => {

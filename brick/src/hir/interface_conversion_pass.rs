@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    typecheck::{ExpressionType, TypeDeclaration},
+    typecheck::{ExpressionType, StructType, TypeDeclaration, UnionType},
     DeclarationContext,
 };
 
@@ -22,14 +22,23 @@ pub fn rewrite(module: &mut HirModule, declarations: &DeclarationContext) {
             let ExpressionType::InstanceOf(child_ty_id) = &child.ty else {
                 return;
             };
-            let Some(TypeDeclaration::Struct(child_ty)) = declarations.id_to_decl.get(child_ty_id)
+            let Some(
+                TypeDeclaration::Struct(StructType {
+                    associated_functions,
+                    ..
+                })
+                | TypeDeclaration::Union(UnionType {
+                    associated_functions,
+                    ..
+                }),
+            ) = declarations.id_to_decl.get(child_ty_id)
             else {
                 return;
             };
 
             let mut vtable = HashMap::new();
             for (name, func) in expected_ty.associated_functions.iter() {
-                vtable.insert(*func, child_ty.associated_functions[name]);
+                vtable.insert(*func, associated_functions[name]);
             }
             let ty = ExpressionType::InstanceOf(expected_ty.id);
 

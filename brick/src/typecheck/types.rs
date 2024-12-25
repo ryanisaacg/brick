@@ -226,16 +226,23 @@ impl TypeDeclaration {
                 .ok_or_else(|| {
                     TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
                 }),
-            TypeDeclaration::Union(lhs_type) => Ok(ExpressionType::Nullable(Box::new(
-                lhs_type
-                    .variants
-                    .get(field)
-                    .ok_or_else(|| {
-                        TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
-                    })?
-                    .clone()
-                    .unwrap_or(ExpressionType::Void),
-            ))),
+            TypeDeclaration::Union(UnionType {
+                variants,
+                associated_functions,
+                ..
+            }) => associated_functions
+                .get(field)
+                .map(|func| ExpressionType::ReferenceToFunction(*func))
+                .or_else(|| {
+                    variants.get(field).and_then(|field| {
+                        field
+                            .clone()
+                            .map(|field| ExpressionType::Nullable(Box::new(field.clone())))
+                    })
+                })
+                .ok_or_else(|| {
+                    TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
+                }),
             TypeDeclaration::Module(lhs_type) => lhs_type
                 .exports
                 .get(field)
@@ -289,6 +296,7 @@ pub struct UnionType {
     pub id: TypeID,
     pub variant_order: Vec<String>,
     pub variants: HashMap<String, Option<ExpressionType>>,
+    pub associated_functions: HashMap<String, FunctionID>,
     pub is_affine: bool,
     pub provenance: Option<SourceRange>,
 }

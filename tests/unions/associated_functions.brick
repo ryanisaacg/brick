@@ -1,0 +1,15 @@
+// Int | 10
+
+union Option {
+    some(i32),
+    none,
+
+    fn value_or_zero(self): i32 {
+       case self {
+           some(val) => val,
+           none => 0,
+        }
+    }
+}
+
+Option.some(10).value_or_zero() + Option.none.value_or_zero()

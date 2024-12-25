@@ -7,6 +7,7 @@ use crate::{
     parser::{
         AstArena, AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
         InterfaceDeclarationValue, MatchDeclaration, ParsedFile, StructDeclarationValue, UnaryOp,
+        UnionDeclarationValue,
     },
     provenance::SourceRange,
 };
@@ -200,6 +201,11 @@ pub fn typecheck_node<'a>(
             associated_functions,
             ..
         })
+        | AstNodeValue::UnionDeclaration(UnionDeclarationValue {
+            name,
+            associated_functions,
+            ..
+        })
         | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
             name,
             associated_functions,
@@ -211,6 +217,10 @@ pub fn typecheck_node<'a>(
                 ..
             })
             | TypeDeclaration::Interface(InterfaceType {
+                associated_functions: associated_functions_ty,
+                ..
+            })
+            | TypeDeclaration::Union(UnionType {
                 associated_functions: associated_functions_ty,
                 ..
             })) = &context.declarations.id_to_decl[ty_id]
@@ -232,9 +242,7 @@ pub fn typecheck_node<'a>(
             functions.extend(associated_functions.iter().cloned());
         }
         // These nodes don't execute anything and therefore don't need to be typechecked
-        AstNodeValue::Import(_)
-        | AstNodeValue::UnionDeclaration(_)
-        | AstNodeValue::ExternFunctionBinding(_) => {}
+        AstNodeValue::Import(_) | AstNodeValue::ExternFunctionBinding(_) => {}
         // Constants are extracted and type-checked earlier in the process, but still need
         // to be present so we can locate them in the HIR
         AstNodeValue::ConstDeclaration { .. } => {
@@ -2175,6 +2183,10 @@ pub fn is_assignable_to(
                     Struct(StructType {
                         associated_functions: rhs_assoc,
                         ..
+                    })
+                    | Union(UnionType {
+                        associated_functions: rhs_assoc,
+                        ..
                     }),
                 ) => lhs_assoc.iter().all(|(name, lhs_ty)| {
                     let Some(rhs_ty) = rhs_assoc.get(name) else {
@@ -2191,7 +2203,6 @@ pub fn is_assignable_to(
                         && lhs.returns == rhs.returns
                 }),
                 (Interface(_), Interface(_)) => left == right,
-                (Interface(_), Union(_)) => todo!(),
 
                 (_, Module(_)) => false,
                 // You can never assign to a module
