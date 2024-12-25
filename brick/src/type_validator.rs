@@ -150,10 +150,27 @@ fn validate_decl(
 ) -> Result<(), TypeValidationError> {
     let mut results = Ok(());
 
-    // DONTMERGE: validate that unions have at least one variant
+    merge_results(&mut results, validate_union_has_variants(ty));
     merge_results(&mut results, validate_drop(decls, ty));
 
     results
+}
+
+fn validate_union_has_variants(ty: &TypeDeclaration) -> Result<(), TypeValidationError> {
+    if let TypeDeclaration::Union(union_ty) = ty {
+        if union_ty.variants.is_empty() {
+            Err(TypeValidationError::UnionsMustHaveVariant(
+                union_ty
+                    .provenance
+                    .clone()
+                    .expect("ICE: auto-generated unions must not have 0 variants"),
+            ))
+        } else {
+            Ok(())
+        }
+    } else {
+        Ok(())
+    }
 }
 
 fn validate_drop(
