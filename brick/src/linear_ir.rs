@@ -6,7 +6,7 @@ use crate::{
     declaration_context::{FileDeclarations, IntrinsicFunction, TypeID},
     hir::{
         ArithmeticOp, BinaryLogicalOp, ComparisonOp, GeneratorProperties, HirFunction, HirNode,
-        HirNodeValue, UnaryLogicalOp,
+        HirNodeValue, UnaryArithmeticOp, UnaryLogicalOp,
     },
     id::{AnyID, FunctionID, RegisterID, VariableID},
     provenance::SourceRange,
@@ -253,14 +253,14 @@ impl LinearNode {
             LinearNodeValue::Return(child) => {
                 child.as_ref().and_then(|child| child.ty(function_returns))
             }
-            LinearNodeValue::Cast { to: prim, .. } | LinearNodeValue::Arithmetic(_, prim, _, _) => {
-                Some(PhysicalType::Primitive(*prim))
-            }
+            LinearNodeValue::Cast { to: prim, .. }
+            | LinearNodeValue::Arithmetic(_, prim, _, _)
+            | LinearNodeValue::UnaryArithmetic(_, prim, _) => Some(PhysicalType::Primitive(*prim)),
             LinearNodeValue::Comparison(_, _, _, _)
             | LinearNodeValue::BinaryLogical(_, _, _)
             | LinearNodeValue::Byte(_)
             | LinearNodeValue::CharLiteral(_)
-            | LinearNodeValue::UnaryLogical(_, _) => {
+            | LinearNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, _) => {
                 Some(PhysicalType::Primitive(PhysicalPrimitive::Byte))
             }
             LinearNodeValue::Int(_) => Some(PhysicalType::Primitive(PhysicalPrimitive::Int32)),
@@ -332,6 +332,7 @@ pub enum LinearNodeValue {
         Box<LinearNode>,
         Box<LinearNode>,
     ),
+    UnaryArithmetic(UnaryArithmeticOp, PhysicalPrimitive, Box<LinearNode>),
     Comparison(
         ComparisonOp,
         PhysicalPrimitive,
@@ -393,7 +394,8 @@ impl LinearNode {
             | LinearNodeValue::Goto(child)
             | LinearNodeValue::UnaryLogical(_, child)
             | LinearNodeValue::Cast { value: child, .. }
-            | LinearNodeValue::Return(Some(child)) => callback(child),
+            | LinearNodeValue::Return(Some(child))
+            | LinearNodeValue::UnaryArithmetic(_, _, child) => callback(child),
             LinearNodeValue::WriteMemory {
                 location: a,
                 value: b,
@@ -471,7 +473,8 @@ impl LinearNode {
             | LinearNodeValue::Goto(child)
             | LinearNodeValue::UnaryLogical(_, child)
             | LinearNodeValue::Cast { value: child, .. }
-            | LinearNodeValue::Return(Some(child)) => callback(child),
+            | LinearNodeValue::Return(Some(child))
+            | LinearNodeValue::UnaryArithmetic(_, _, child) => callback(child),
             LinearNodeValue::WriteMemory {
                 location: a,
                 value: b,
@@ -624,6 +627,13 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 Box::new(lower_expression(ctx, *lhs)),
                 Box::new(lower_expression(ctx, *rhs)),
             )
+        }
+        HirNodeValue::UnaryArithmetic(op, child) => {
+            let ExpressionType::Primitive(ty) = ty else {
+                unreachable!("unary arithmetic must be primitive not {:?}", ty)
+            };
+            let ty = primitive_to_physical(ty);
+            LinearNodeValue::UnaryArithmetic(op, ty, Box::new(lower_expression(ctx, *child)))
         }
         HirNodeValue::Comparison(op, lhs, rhs) => {
             let ExpressionType::Primitive(ty) = rhs.ty else {
@@ -1689,6 +1699,7 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
         HirNodeValue::ReferenceCountLiteral(_) => todo!(),
         HirNodeValue::Discard(_) => todo!(),
         HirNodeValue::CellLiteral(_) => todo!(),
+        HirNodeValue::UnaryArithmetic(_, _) => todo!(),
     }
 }
 

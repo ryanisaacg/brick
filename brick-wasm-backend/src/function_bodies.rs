@@ -4,7 +4,7 @@ use brick::{
     id::{FunctionID, RegisterID, VariableID},
     ArithmeticOp, BinaryLogicalOp, ComparisonOp, DeclaredTypeLayout, LinearFunction, LinearNode,
     LinearNodeValue, PhysicalCollection, PhysicalPrimitive, PhysicalType, RuntimeFunction, TypeID,
-    TypeLayoutValue, UnaryLogicalOp,
+    TypeLayoutValue, UnaryArithmeticOp, UnaryLogicalOp,
 };
 use wasm_encoder::{BlockType, Function, Instruction, MemArg, ValType};
 
@@ -607,15 +607,34 @@ fn encode_node(
                 }
             }
         }
-        LinearNodeValue::UnaryLogical(op, value) => {
+        LinearNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, value) => {
             encode_node(ctx, value, None);
-            match op {
-                UnaryLogicalOp::BooleanNot => {
-                    ctx.instructions.push(Instruction::I32Const(1));
-                    ctx.instructions.push(Instruction::I32Xor);
-                }
-            }
+            ctx.instructions.push(Instruction::I32Const(1));
+            ctx.instructions.push(Instruction::I32Xor);
         }
+        LinearNodeValue::UnaryArithmetic(UnaryArithmeticOp::Negate, prim, value) => match prim {
+            PhysicalPrimitive::Int32 => {
+                ctx.instructions.push(Instruction::I32Const(0));
+                encode_node(ctx, value, None);
+                ctx.instructions.push(Instruction::I32Sub);
+            }
+            PhysicalPrimitive::Float32 => {
+                ctx.instructions.push(Instruction::F32Const(0.0));
+                encode_node(ctx, value, None);
+                ctx.instructions.push(Instruction::F32Sub);
+            }
+            PhysicalPrimitive::Int64 => {
+                ctx.instructions.push(Instruction::I64Const(0));
+                encode_node(ctx, value, None);
+                ctx.instructions.push(Instruction::I64Sub);
+            }
+            PhysicalPrimitive::Float64 => {
+                ctx.instructions.push(Instruction::F64Const(0.0));
+                encode_node(ctx, value, None);
+                ctx.instructions.push(Instruction::F64Sub);
+            }
+            ty => unreachable!("ICE: negation nodes must be numeric, not {ty:?}"),
+        },
         LinearNodeValue::Cast { value, from, to } => {
             encode_node(ctx, value, None);
             match (from, to) {

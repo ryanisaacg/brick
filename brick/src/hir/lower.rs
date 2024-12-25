@@ -1,6 +1,6 @@
 use super::{
     ArithmeticOp, BinaryLogicalOp, ComparisonOp, GeneratorProperties, HirFunction, HirModule,
-    HirNode, HirNodeValue, UnaryLogicalOp,
+    HirNode, HirNodeValue, UnaryArithmeticOp, UnaryLogicalOp,
 };
 
 use crate::{
@@ -329,12 +329,12 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
         }
         AstNodeValue::UnaryExpr(op, child) => {
             let child = lower_node_alloc(decls, ast, ast.get(*child));
-            HirNodeValue::UnaryLogical(
-                match op {
-                    UnaryOp::BooleanNot => UnaryLogicalOp::BooleanNot,
-                },
-                child,
-            )
+            match op {
+                UnaryOp::BooleanNot => {
+                    HirNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, child)
+                }
+                UnaryOp::Negate => HirNodeValue::UnaryArithmetic(UnaryArithmeticOp::Negate, child),
+            }
         }
         AstNodeValue::BinExpr(op, left, right) => {
             let left = lower_node_alloc(decls, ast, ast.get(*left));

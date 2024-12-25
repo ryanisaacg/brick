@@ -1607,25 +1607,44 @@ fn typecheck_expression<'a>(
             )?;
             ExpressionType::Collection(CollectionType::Array(Box::new(value_ty.clone())))
         }
-        AstNodeValue::UnaryExpr(op, child) => match op {
-            UnaryOp::BooleanNot => {
-                let child = context.ast.get(*child);
-                let child_ty = typecheck_expression(
-                    child,
-                    outer_scopes,
-                    current_scope,
-                    context,
-                    generator_input_ty,
-                )?;
-                assert_assignable_to(
-                    context.declarations,
-                    &child.provenance,
-                    &ExpressionType::Primitive(PrimitiveType::Bool),
-                    child_ty,
-                )?;
-                ExpressionType::Primitive(PrimitiveType::Bool)
+        AstNodeValue::UnaryExpr(op, child) => {
+            let child = context.ast.get(*child);
+            let child_ty = typecheck_expression(
+                child,
+                outer_scopes,
+                current_scope,
+                context,
+                generator_input_ty,
+            )?;
+            match op {
+                UnaryOp::BooleanNot => {
+                    assert_assignable_to(
+                        context.declarations,
+                        &child.provenance,
+                        &ExpressionType::Primitive(PrimitiveType::Bool),
+                        child_ty,
+                    )?;
+                    ExpressionType::Primitive(PrimitiveType::Bool)
+                }
+                UnaryOp::Negate => {
+                    let ExpressionType::Primitive(primitive_ty) = fully_dereference(child_ty)
+                    else {
+                        return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
+                    };
+                    match primitive_ty {
+                        PrimitiveType::Int32
+                        | PrimitiveType::Int64
+                        | PrimitiveType::Float32
+                        | PrimitiveType::Float64 => ExpressionType::Primitive(*primitive_ty),
+                        _ => {
+                            return Err(TypecheckError::ArithmeticMismatch(
+                                node.provenance.clone(),
+                            ));
+                        }
+                    }
+                }
             }
-        },
+        }
     };
 
     node.ty.set(ty).expect("each node should be visited once");

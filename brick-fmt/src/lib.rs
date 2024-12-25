@@ -241,8 +241,11 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
         AstNodeValue::UnaryExpr(op, operand) => {
             match op {
                 UnaryOp::BooleanNot => result.push('!'),
+                UnaryOp::Negate => result.push('-'),
             }
+            result.push('(');
             write_node(ast, ast.get(*operand), result, indent);
+            result.push(')');
         }
         AstNodeValue::BinExpr(BinOp::Index, lhs, rhs) => {
             write_node(ast, ast.get(*lhs), result, indent);

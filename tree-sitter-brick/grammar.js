@@ -13,7 +13,8 @@ const SUM = COMPARE + 1;
 const FACTOR = SUM + 1;
 // misc
 const CONCAT = FACTOR + 1;
-const REFERENCE = CONCAT + 1;
+const NEGATE = CONCAT + 1;
+const REFERENCE = NEGATE + 1;
 const CALL = REFERENCE + 1;
 const NULL_CHAINING = CALL + 1;
 const DOT = NULL_CHAINING + 1;
@@ -178,6 +179,7 @@ module.exports = grammar({
           $.char_literal,
           $.string_literal,
           $.concat_expr,
+          $.unary_negation,
           seq("(", $._expression, ")")
         )
       ),
@@ -249,6 +251,7 @@ module.exports = grammar({
     deref_expr: ($) => prec(REFERENCE, seq("*", $._expression)),
     concat_expr: ($) =>
       prec.left(CONCAT, seq($._expression, "++", $._expression)),
+    unary_negation: ($) => prec(NEGATE, seq("-", $._expression)),
 
     call_expr: ($) =>
       prec(

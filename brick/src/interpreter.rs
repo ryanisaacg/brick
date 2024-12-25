@@ -7,7 +7,7 @@ use brick_runtime::{
 
 use crate::{
     declaration_context::TypeID,
-    hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryLogicalOp},
+    hir::{ArithmeticOp, BinaryLogicalOp, ComparisonOp, UnaryArithmeticOp, UnaryLogicalOp},
     id::{FunctionID, RegisterID, VariableID},
     linear_ir::{
         DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue, PhysicalCollection,
@@ -746,6 +746,18 @@ impl<'a> VM<'a> {
                 // Write the value out to get it off the stack and discard it
                 let mut temp_buffer = vec![0; ty.size_from_decls(&self.layouts, 1, USIZE)];
                 write(&mut self.op_stack, &self.layouts, &mut temp_buffer, 0, ty);
+            }
+            LinearNodeValue::UnaryArithmetic(UnaryArithmeticOp::Negate, _, op) => {
+                self.evaluate_node(params, op)?;
+                match self.op_stack.pop().unwrap() {
+                    Value::FunctionID(_) | Value::Size(_) | Value::Byte(_) => {
+                        unreachable!("ICE: can't negate this")
+                    }
+                    Value::Int32(val) => self.op_stack.push(Value::Int32(-val)),
+                    Value::Int64(val) => self.op_stack.push(Value::Int64(-val)),
+                    Value::Float32(val) => self.op_stack.push(Value::Float32(-val)),
+                    Value::Float64(val) => self.op_stack.push(Value::Float64(-val)),
+                }
             }
         }
 

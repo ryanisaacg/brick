@@ -317,8 +317,11 @@ impl HirNode {
                 callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), lhs);
                 callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), rhs);
             }
-            HirNodeValue::UnaryLogical(_, child) => {
+            HirNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, child) => {
                 callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), child)
+            }
+            HirNodeValue::UnaryArithmetic(UnaryArithmeticOp::Negate, child) => {
+                callback(Some(&self.ty), child);
             }
             HirNodeValue::VtableCall(vtable, fn_id, args) => {
                 callback(None, vtable);
@@ -538,8 +541,11 @@ impl HirNode {
                 callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), lhs);
                 callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), rhs);
             }
-            HirNodeValue::UnaryLogical(_, child) => {
+            HirNodeValue::UnaryLogical(UnaryLogicalOp::BooleanNot, child) => {
                 callback(Some(&ExpressionType::Primitive(PrimitiveType::Bool)), child)
+            }
+            HirNodeValue::UnaryArithmetic(UnaryArithmeticOp::Negate, child) => {
+                callback(Some(&self.ty), child);
             }
             HirNodeValue::VtableCall(vtable, fn_id, args) => {
                 callback(None, vtable);
@@ -734,6 +740,7 @@ pub enum HirNodeValue {
     DictIndex(Box<HirNode>, Box<HirNode>),
     StringConcat(Box<HirNode>, Box<HirNode>),
     Arithmetic(ArithmeticOp, Box<HirNode>, Box<HirNode>),
+    UnaryArithmetic(UnaryArithmeticOp, Box<HirNode>),
     Comparison(ComparisonOp, Box<HirNode>, Box<HirNode>),
     BinaryLogical(BinaryLogicalOp, Box<HirNode>, Box<HirNode>),
     NullCoalesce(Box<HirNode>, Box<HirNode>),
@@ -849,4 +856,9 @@ pub enum BinaryLogicalOp {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnaryLogicalOp {
     BooleanNot,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum UnaryArithmeticOp {
+    Negate,
 }

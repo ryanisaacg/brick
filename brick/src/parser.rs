@@ -395,6 +395,7 @@ impl AstNodeValue {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnaryOp {
     BooleanNot,
+    Negate,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -1554,11 +1555,6 @@ fn expression_pratt(
     let start = start.clone();
     let cursor = range.end();
     let mut left = match value {
-        // TODO: should this be treated as a unary operator instead?
-        TokenValue::Minus => {
-            let (int, range) = integer(source, &cursor, "expected digit after negative sign")?;
-            try_decimal(source, -(int as i64), range)?
-        }
         TokenValue::OpenParen => {
             let left = expression_pratt(source, context, &cursor, 0, can_be_struct)?;
             assert_next_lexeme_eq(
@@ -1617,6 +1613,7 @@ fn expression_pratt(
                     TokenValue::Unique => AstNodeValue::TakeUnique(right),
                     TokenValue::Asterisk => AstNodeValue::Deref(right),
                     TokenValue::Exclamation => AstNodeValue::UnaryExpr(UnaryOp::BooleanNot, right),
+                    TokenValue::Minus => AstNodeValue::UnaryExpr(UnaryOp::Negate, right),
                     other => unreachable!("prefix operator {:?}", other),
                 },
                 SourceRange::new(range.start(), &end),
@@ -1836,7 +1833,8 @@ const SUM: u8 = COMPARE + 2;
 const FACTOR: u8 = SUM + 2;
 // misc
 const CONCAT: u8 = FACTOR + 2;
-const REFERENCE: u8 = CONCAT + 1;
+const NEGATE: u8 = CONCAT + 1;
+const REFERENCE: u8 = NEGATE + 1;
 const CALL: u8 = REFERENCE + 2;
 const NULL_CHAINING: u8 = CALL + 1;
 const DOT: u8 = NULL_CHAINING + 1;
@@ -1845,6 +1843,7 @@ fn prefix_binding_power(op: &TokenValue) -> Option<((), u8)> {
     let res = match op {
         TokenValue::Ref | TokenValue::Unique | TokenValue::Asterisk => ((), REFERENCE),
         TokenValue::Exclamation => ((), BOOLEAN_NOT),
+        TokenValue::Minus => ((), NEGATE),
         _ => return None,
     };
     Some(res)
@@ -2350,20 +2349,6 @@ fn block(
                 statements.push(context.add(statement));
             }
         }
-    }
-}
-
-fn integer(
-    source: &mut TokenIter,
-    cursor: &SourceMarker,
-    reason: &'static str,
-) -> Result<(u64, SourceRange), ParseError> {
-    match next_token(source, cursor, reason)? {
-        Token {
-            value: TokenValue::Int(int),
-            range,
-        } => Ok((int, range)),
-        other => Err(ParseError::UnexpectedToken(Box::new(other), reason)),
     }
 }
 
