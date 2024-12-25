@@ -6,7 +6,7 @@ use crate::{
 use super::{GeneratorProperties, HirModule, HirNode, HirNodeValue};
 
 pub fn rewrite_generator_calls(module: &mut HirModule) {
-    module.par_visit_mut(|node| {
+    module.par_visit_mut(|_return_ty, node| {
         let HirNodeValue::Call(func, args) = &mut node.value else {
             return;
         };

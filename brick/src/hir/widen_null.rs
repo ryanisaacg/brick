@@ -3,8 +3,8 @@ use crate::{typecheck::ExpressionType, DeclarationContext};
 use super::{HirModule, HirNode, HirNodeValue};
 
 pub fn widen_null(module: &mut HirModule, declarations: &DeclarationContext) {
-    module.par_visit_mut(|node| {
-        node.walk_expected_types_for_children_mut(declarations, |ty, child| {
+    module.par_visit_mut(|return_ty, node| {
+        node.walk_expected_types_for_children_mut(declarations, return_ty, |ty, child| {
             if !matches!(&ty, ExpressionType::Nullable(_)) {
                 return;
             }

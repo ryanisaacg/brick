@@ -8,8 +8,8 @@ use crate::{
 use super::{HirModule, HirNode, HirNodeValue};
 
 pub fn rewrite(module: &mut HirModule, declarations: &DeclarationContext) {
-    module.par_visit_mut(|node| {
-        node.walk_expected_types_for_children_mut(declarations, |expected_ty, child| {
+    module.par_visit_mut(|return_ty, node| {
+        node.walk_expected_types_for_children_mut(declarations, return_ty, |expected_ty, child| {
             let ExpressionType::InstanceOf(expected_ty_id) = expected_ty else {
                 return;
             };

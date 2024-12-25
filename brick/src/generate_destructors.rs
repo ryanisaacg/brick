@@ -97,12 +97,12 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
             TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => unreachable!(),
         };
 
-        gen_destructor_module.functions.push(HirFunction {
-            id: destructor_id,
-            name: None,
-            body: HirNode::new_void(HirNodeValue::Sequence(destructor_body)),
-            generator: None,
-        });
+        gen_destructor_module.functions.push(HirFunction::new(
+            destructor_id,
+            None,
+            HirNode::new_void(HirNodeValue::Sequence(destructor_body)),
+            ExpressionType::Void,
+        ));
     }
 
     let mut func_id_to_func_def = HashMap::new();

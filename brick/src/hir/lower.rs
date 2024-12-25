@@ -78,6 +78,7 @@ fn lower_coroutine(
             func_ty.returns.clone(),
         ),
         generator: None,
+        body_return_ty: func_ty.returns.clone(),
     };
 
     // TODO: pass generator into generator function body
@@ -92,7 +93,7 @@ fn lower_coroutine(
         HirNodeValue::Parameter(0, generator_var_id),
         generator_ty.clone(),
     )];
-    let ExpressionType::Generator { param_ty, .. } = &func_ty.returns else {
+    let ExpressionType::Generator { param_ty, yield_ty } = &func_ty.returns else {
         unreachable!()
     };
     let mut param_types = vec![generator_ty.clone()];
@@ -136,6 +137,7 @@ fn lower_coroutine(
             param_var_id,
             ty: generator_ty.clone(),
         }),
+        body_return_ty: yield_ty.as_ref().clone(),
     };
 
     [coroutine_start, coroutine_body]
@@ -179,6 +181,7 @@ fn lower_function(
         name: Some(func.name),
         body,
         generator: None,
+        body_return_ty: func_ty.returns.clone(),
     }
 }
 

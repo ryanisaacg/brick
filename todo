@@ -108,9 +108,6 @@ boolean operators:
 - equality / inequality:
     - applicable to nullable values
 
-returns:
-- ensure returns get expected type checked against their function in HIR
-
 strings:
 - string manipulation
 - interpolation literals

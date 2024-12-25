@@ -1,0 +1,6 @@
+// Float | 10.0
+
+fn test(): f32 {
+    return 10;
+}
+test()

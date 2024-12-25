@@ -42,7 +42,7 @@ fn extract_constant_value(
 }
 
 pub fn inline_constants(module: &mut HirModule, constant_values: &HashMap<ConstantID, HirNode>) {
-    module.par_visit_mut(|node| {
+    module.par_visit_mut(|_return_ty, node| {
         let HirNodeValue::VariableReference(id) = &node.value else {
             return;
         };

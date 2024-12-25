@@ -41,7 +41,8 @@ pub fn desugar_module<'dest>(
     // This should come before anyone looks too hard at dot operators and function calls
     unions::convert_calls_to_union_literals(&mut module, declarations);
     // Associated function rewriting needs to come before auto_deref
-    module.par_visit_mut(|expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
+    module
+        .par_visit_mut(|_, expr: &mut _| rewrite_associated_functions::rewrite(declarations, expr));
     interface_conversion_pass::rewrite(&mut module, declarations);
     // These passes can be in any order
     coroutines::rewrite_yields(&mut module);
@@ -84,12 +85,20 @@ impl HirModule {
         }
     }
 
-    pub fn par_visit_mut(&mut self, mut callback: impl Fn(&mut HirNode) + Send + Sync) {
+    /**
+     * Call the callback with (return_type, node) for all nodes
+     */
+    pub fn par_visit_mut(
+        &mut self,
+        callback: impl Fn(Option<&ExpressionType>, &mut HirNode) + Send + Sync,
+    ) {
         use rayon::prelude::*;
-        self.top_level_statements.visit_mut_recursive(&mut callback);
-        self.functions
-            .par_iter_mut()
-            .for_each(|func| func.body.visit_mut(&callback));
+        self.top_level_statements
+            .visit_mut_recursive(&mut |node| callback(None, node));
+        self.functions.par_iter_mut().for_each(|func| {
+            func.body
+                .visit_mut(|node: &mut HirNode| callback(Some(&func.body_return_ty), node));
+        });
     }
 
     pub fn par_visit(&self, callback: impl Fn(Option<&HirNode>, &HirNode) + Sync) {
@@ -106,7 +115,28 @@ pub struct HirFunction {
     pub id: FunctionID,
     pub name: Option<String>,
     pub body: HirNode,
+    /**
+     * Either the return or yield type - only used within HIR passes
+     */
+    body_return_ty: ExpressionType,
     pub generator: Option<GeneratorProperties>,
+}
+
+impl HirFunction {
+    pub fn new(
+        id: FunctionID,
+        name: Option<String>,
+        body: HirNode,
+        return_ty: ExpressionType,
+    ) -> HirFunction {
+        HirFunction {
+            id,
+            name,
+            body,
+            body_return_ty: return_ty,
+            generator: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -226,20 +256,21 @@ impl HirNode {
     }
 
     pub fn children<'a>(&'a self, mut callback: impl FnMut(&'a HirNode)) {
-        self.children_impl(None, |_, node| callback(node));
+        self.children_impl(None, None, |_, node| callback(node));
     }
 
     pub fn children_mut<'a>(&'a mut self, mut callback: impl FnMut(&'a mut HirNode)) {
-        self.children_mut_impl(None, |_, node| callback(node));
+        self.children_mut_impl(None, None, |_, node| callback(node));
     }
 
     // TODO: could use a better name
     pub fn walk_expected_types_for_children(
         &self,
         declarations: &DeclarationContext,
+        return_ty: Option<&ExpressionType>,
         mut callback: impl FnMut(&ExpressionType, &HirNode),
     ) {
-        self.children_impl(Some(declarations), |ty, node| {
+        self.children_impl(Some(declarations), return_ty, |ty, node| {
             if let Some(ty) = ty {
                 callback(ty, node);
             }
@@ -249,9 +280,10 @@ impl HirNode {
     pub fn walk_expected_types_for_children_mut(
         &mut self,
         declarations: &DeclarationContext,
+        return_ty: Option<&ExpressionType>,
         mut callback: impl FnMut(&ExpressionType, &mut HirNode),
     ) {
-        self.children_mut_impl(Some(declarations), |ty, node| {
+        self.children_mut_impl(Some(declarations), return_ty, |ty, node| {
             if let Some(ty) = ty {
                 callback(ty, node);
             }
@@ -261,6 +293,7 @@ impl HirNode {
     fn children_impl<'a>(
         &'a self,
         declarations: Option<&DeclarationContext>,
+        return_ty: Option<&ExpressionType>,
         mut callback: impl FnMut(Option<&ExpressionType>, &'a HirNode),
     ) {
         let callback = &mut callback;
@@ -359,8 +392,7 @@ impl HirNode {
             }
             HirNodeValue::Yield(child) | HirNodeValue::Return(child) => {
                 if let Some(child) = child {
-                    // TODO: check return types
-                    callback(None, child);
+                    callback(return_ty, child);
                 }
             }
             // TODO: check return types of blocks
@@ -485,6 +517,7 @@ impl HirNode {
     fn children_mut_impl<'a>(
         &'a mut self,
         declarations: Option<&DeclarationContext>,
+        return_ty: Option<&ExpressionType>,
         mut callback: impl FnMut(Option<&ExpressionType>, &'a mut HirNode),
     ) {
         let callback = &mut callback;
@@ -585,8 +618,7 @@ impl HirNode {
             }
             HirNodeValue::Yield(child) | HirNodeValue::Return(child) => {
                 if let Some(child) = child {
-                    // TODO: check return types
-                    callback(None, child);
+                    callback(return_ty, child);
                 }
             }
             // TODO: check return types of blocks
