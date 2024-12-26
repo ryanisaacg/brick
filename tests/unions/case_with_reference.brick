@@ -1,0 +1,25 @@
+// Int | 30
+
+union U {
+    A(i32),
+    B(i32),
+}
+
+let x = U.A(5);
+let y = case unique x {
+    A(r) => {
+        *r += 5;
+        *r
+    }
+    B(r) => {
+        *r -= 5;
+        *r
+    }
+};
+
+let z = case ref x {
+    A(r) => *r * 2,
+    B(r) => *r / 2,
+};
+
+y + z

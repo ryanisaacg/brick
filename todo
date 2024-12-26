@@ -97,8 +97,6 @@ compilation resume and reload:
 
 unions:
 - faulthrough / default branch in case statement
-- destructor generation for unions
-- case statements of references
 - ?. operator on union lvalues
 
 boolean operators:

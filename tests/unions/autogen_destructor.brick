@@ -1,0 +1,25 @@
+// Counter | 3
+
+extern fn incr_test_counter();
+
+struct X: Resource {
+    fn drop(unique self) {
+        incr_test_counter();
+    }
+}
+
+
+struct Y: Resource {
+    fn drop(unique self) {
+        incr_test_counter();
+        incr_test_counter();
+        incr_test_counter();
+    }
+}
+
+union XorY: Resource {
+    x(X),
+    y(Y),
+}
+
+let val = XorY.y(Y{});

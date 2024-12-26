@@ -928,7 +928,8 @@ fn find_variable_for_lvalue(lvalue: &HirNode) -> &AnyID {
         | HirNodeValue::DictIndex(child, _)
         | HirNodeValue::Dereference(child)
         | HirNodeValue::TakeUnique(child)
-        | HirNodeValue::TakeShared(child) => find_variable_for_lvalue(child),
+        | HirNodeValue::TakeShared(child)
+        | HirNodeValue::UnionVariant(child, _) => find_variable_for_lvalue(child),
         other => panic!("ICE: illegal lvalue: {other:?}"),
     }
 }
@@ -948,7 +949,7 @@ fn build_path_for_lvalue(lvalue: &HirNode, path: &mut Vec<PathSegment>) {
                 path.push(PathSegment::Access(field.clone()));
             }
         }
-        HirNodeValue::Access(lhs, field) => {
+        HirNodeValue::Access(lhs, field) | HirNodeValue::UnionVariant(lhs, field) => {
             build_path_for_lvalue(lhs, path);
             path.push(PathSegment::Access(field.clone()));
         }
