@@ -1,0 +1,7 @@
+// Int | 12
+
+union U {
+    A
+}
+
+case U.A { A => 12, }

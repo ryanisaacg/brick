@@ -1,0 +1,9 @@
+// Int | 10
+
+union U {
+    A
+}
+
+let x = U.A;
+
+case x { A => 2, } * case ref x { A => 5, }
