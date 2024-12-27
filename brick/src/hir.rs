@@ -743,7 +743,10 @@ impl HirNode {
 
     pub fn is_valid_lvalue(self: &HirNode) -> bool {
         match &self.value {
-            HirNodeValue::VariableReference(_) => true,
+            // Technically expressions like Union.Variant are an Access and a
+            // VariableReference, but that Variable is not a valid lvalue. So we make sure the
+            // referenced ID here is a variable and not a type
+            HirNodeValue::VariableReference(id) => matches!(id, AnyID::Variable(_)),
             HirNodeValue::Access(lhs, _) => lhs.is_valid_lvalue(),
             HirNodeValue::Dereference(lhs) => lhs.is_valid_lvalue(),
             HirNodeValue::ArrayIndex(arr, _) => arr.is_valid_lvalue(),
