@@ -105,3 +105,17 @@ tooling:
     - evaluate
     - print
     - loop
+
+coroutines / generators / async (sort of half-done, but maybe I'll wait on wasm-fx to progress):
+- insert generator functions into declaration context
+- stackless coroutines
+    - alloc the generator to match its proper size
+- support arguments to coroutines
+    - either ban references from coroutine args or note that they're borrowed as long as the generator lives
+    - copy arguments into the generator's initial state
+- generators on associated functions
+- non-infinite generators (e.g. generators should return Next(value) | Exhausted)
+- error guardrails:
+    - require coroutines to return generators
+    - prevent calling coroutine through immutable references
+- drop coroutines and their contents correctly

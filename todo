@@ -1,14 +1,4 @@
-borrow checker and lifetimes:
-- clone support
-- can't dereference pointers to Move types
-- drop:
-    - drop dicts
-    - drop strings (may require string buffer vs string view types?)
-    - drop nullables
-- forbid user from calling destructors directly
-- path support:
-    - allow disjoint borrows of collection indices
-    - allow reassignment of affine fields (currently they can't generate drops)
+- bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
 
 collections:
 - tuples
@@ -28,28 +18,6 @@ collections:
 - slices
 - automatically convert types when assigning collections?
 
-wasm backend:
-- handle coroutines
-- figure out and fix issue with dictionaries
-- bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
-- explicitly handle stack overflows
-- correctly arrange stack, data, and heap segments of memory
-
-packages:
-- packages can declare dependencies on one another
-- packages can be imported
-- packages can include a WASM blob
-
-modules:
-- modules can be indexed in a struct / variant literal context
-- modules can be declared explicitly
-- can you index the self module outside import statements?
-
-top-level statements:
-- disallow top-level return
-- decide what happens when more than one file in a package defines top-level statements
-- decide what happens when a dependent package has top-level statements
-
 interfaces:
 - fundamental rethink (*must* be behind a pointer of some kind)
 - self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
@@ -67,6 +35,33 @@ interfaces:
 - interfaces are supported in the interpreter:
     - mutable interfaces (significant borrowck implications)
 
+borrow checker and lifetimes:
+- clone support
+- can't dereference pointers to Move types
+- drop:
+    - drop dicts
+    - drop strings (may require string buffer vs string view types?)
+    - drop nullables
+- forbid user from calling destructors directly
+- path support:
+    - allow disjoint borrows of collection indices
+    - allow reassignment of affine fields (currently they can't generate drops)
+
+packages:
+- packages can declare dependencies on one another
+- packages can be imported
+- packages can include a WASM blob
+
+modules:
+- modules can be indexed in a struct / variant literal context
+- modules can be declared explicitly
+- can you index the self module outside import statements?
+
+top-level statements:
+- disallow top-level return
+- decide what happens when more than one file in a package defines top-level statements
+- decide what happens when a dependent package has top-level statements
+
 type validation:
 - prevent references being stored in collections
 
@@ -75,19 +70,14 @@ build system:
 - packages have a defined compiled format
 - packages can depend on other packages
 
-coroutines / generators / async:
-- insert generator functions into declaration context
-- stackless coroutines
-    - alloc the generator to match its proper size
-- support arguments to coroutines
-    - either ban references from coroutine args or note that they're borrowed as long as the generator lives
-    - copy arguments into the generator's initial state
-- generators on associated functions
-- non-infinite generators (e.g. generators should return Next(value) | Exhausted)
-- error guardrails:
-    - require coroutines to return generators
-    - prevent calling coroutine through immutable references
-- drop coroutines and their contents correctly
+strings:
+- string manipulation
+- interpolation literals
+- multiline literals
+
+import support:
+- alias imports
+- allow imports to include a list of things
 
 compilation resume and reload:
 - rework the hashmaps into an actual environment data structure that allows for generational indexing?
@@ -104,11 +94,7 @@ boolean operators:
 - equality / inequality:
     - applicable to nullable values
 
-strings:
-- string manipulation
-- interpolation literals
-- multiline literals
-
-import support:
-- alias imports
-- allow imports to include a list of things
+wasm backend:
+- figure out and fix issue with dictionaries
+- explicitly handle stack overflows
+- correctly arrange stack, data, and heap segments of memory
