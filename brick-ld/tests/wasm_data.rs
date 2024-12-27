@@ -96,7 +96,6 @@ fn data() {
                     .context("failed to find memory")
                     .unwrap();
                 look_for_value(&mut store, memory, func, test_value, counter).unwrap();
-                println!("{}", test_case.name);
             }
         });
 }
