@@ -52,8 +52,8 @@ pub fn desugar_module<'dest>(
     create_temp_vars_for_lvalues::create_temp_vars_for_lvalues(&mut module);
 
     // These should go after desugaring, to clean up any sequences that are created by earlier passes
-    simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
     simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
+    simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
     simplify_sequence_expressions::simplify_trailing_if(&mut module);
 
     // This should go last, to clean up any expressions that are returning an unused value
@@ -107,6 +107,17 @@ impl HirModule {
         self.functions
             .par_iter()
             .for_each(|func| func.body.visit(&callback));
+    }
+
+    pub fn top_level_nodes_par_mut(
+        &mut self,
+        callback: impl Fn(Option<&ExpressionType>, &mut HirNode) + Send + Sync,
+    ) {
+        use rayon::prelude::*;
+        callback(None, &mut self.top_level_statements);
+        self.functions.par_iter_mut().for_each(|func| {
+            callback(Some(&func.body_return_ty), &mut func.body);
+        });
     }
 }
 

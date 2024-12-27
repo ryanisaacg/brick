@@ -1,0 +1,7 @@
+// Int | 19
+
+union U {
+    A
+}
+
+1 + case ref U.A { A => 18, }
