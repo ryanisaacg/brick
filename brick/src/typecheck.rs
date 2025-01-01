@@ -14,8 +14,11 @@ use crate::{
 
 mod error;
 pub use error::TypecheckError;
+mod safety;
 mod types;
 pub use types::*;
+
+use self::safety::check_safety;
 
 pub struct TypecheckContext<'ast, 'decl> {
     ast: &'ast AstArena,
@@ -256,6 +259,9 @@ pub fn typecheck_node<'a>(
                 context,
                 None,
             )?;
+
+            check_safety(context, statement, false)?;
+
             top_level_statements.push(statement);
         }
     }
@@ -334,6 +340,12 @@ fn typecheck_function<'a>(
 
         typecheck_returns(context, &function_type.returns, body)?;
     }
+
+    check_safety(
+        context,
+        context.ast.get(function.body),
+        function_type.is_unsafe,
+    )?;
 
     Ok(TypecheckedFunction {
         id: function_type.id,
@@ -1217,7 +1229,7 @@ fn typecheck_expression<'a>(
 
             return_type
         }
-        AstNodeValue::Block(children) => {
+        AstNodeValue::UnsafeBlock(children) | AstNodeValue::Block(children) => {
             let mut scopes: Vec<&HashMap<_, _>> = Vec::with_capacity(outer_scopes.len() + 1);
             scopes.push(current_scope);
             scopes.extend_from_slice(outer_scopes);
@@ -1774,6 +1786,7 @@ fn validate_assignment_lhs(
         | AstNodeValue::DictLiteral(_)
         | AstNodeValue::ArrayLiteral(_)
         | AstNodeValue::ArrayLiteralLength(_, _)
+        | AstNodeValue::UnsafeBlock(_)
         | AstNodeValue::Block(_)
         | AstNodeValue::UniqueType(_)
         | AstNodeValue::VoidType
@@ -1870,6 +1883,7 @@ fn validate_is_const(node: &AstNode) -> bool {
         | AstNodeValue::TakeRef(_)
         | AstNodeValue::ReferenceCountLiteral(_)
         | AstNodeValue::CellLiteral(_)
+        | AstNodeValue::UnsafeBlock(_)
         | AstNodeValue::Block(_)
         | AstNodeValue::Deref(_)
         | AstNodeValue::Match(_)
@@ -1991,6 +2005,7 @@ fn validate_lvalue(context: &TypecheckContext, lvalue: &AstNode) -> bool {
         | AstNodeValue::DictLiteral(_)
         | AstNodeValue::ArrayLiteral(_)
         | AstNodeValue::ArrayLiteralLength(_, _)
+        | AstNodeValue::UnsafeBlock(_)
         | AstNodeValue::Block(_)
         | AstNodeValue::UniqueType(_)
         | AstNodeValue::VoidType
@@ -2196,10 +2211,11 @@ pub fn is_assignable_to(
                     let rhs = &context.id_to_func[rhs_ty];
                     // Ignore the first argument to both associated functions -
                     // the type will differ because it's a self param
-                    lhs.params[1..]
-                        .iter()
-                        .zip(rhs.params[1..].iter())
-                        .all(|(lhs, rhs)| lhs == rhs)
+                    lhs.is_unsafe == rhs.is_unsafe
+                        && lhs.params[1..]
+                            .iter()
+                            .zip(rhs.params[1..].iter())
+                            .all(|(lhs, rhs)| lhs == rhs)
                         && lhs.returns == rhs.returns
                 }),
                 (Interface(_), Interface(_)) => left == right,

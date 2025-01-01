@@ -6,7 +6,9 @@ struct Data: Resource {
 
     fn drop(unique self) {
         self.x += 1;
-        incr_test_counter();
+        unsafe {
+            incr_test_counter();
+        }
     }
 }
 
@@ -20,6 +22,8 @@ let x = Data { x: 0 };
 
 // ensure that Data.drop mutations aren't carried forward to avoid a regression
 while x.x > 0 {
-    incr_test_counter();
+    unsafe {
+        incr_test_counter();
+    }
     x.x -= 1;
 }

@@ -116,7 +116,7 @@ impl AstNode {
                 }
                 callback(arena.get(*child));
             }
-            ArrayLiteral(values) | Block(values) => {
+            ArrayLiteral(values) | Block(values) | UnsafeBlock(values) => {
                 for value in values.iter() {
                     callback(arena.get(*value));
                 }
@@ -230,6 +230,7 @@ pub struct FunctionDeclarationValue {
      * is available in the environment
      */
     pub is_extern: bool,
+    pub is_unsafe: bool,
     pub is_coroutine: bool,
 }
 
@@ -239,6 +240,7 @@ pub struct FunctionHeaderValue {
     pub self_param: Option<SelfParameter>,
     pub params: Vec<NameAndType>,
     pub returns: Option<AstNodeId>,
+    pub is_unsafe: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -354,6 +356,7 @@ pub enum AstNodeValue {
     ReferenceCountLiteral(AstNodeId),
     CellLiteral(AstNodeId),
     Block(Vec<AstNodeId>),
+    UnsafeBlock(Vec<AstNodeId>),
     Deref(AstNodeId),
     Match(MatchDeclaration),
 
@@ -555,11 +558,32 @@ fn statement(
 ) -> Result<AstNode, ParseError> {
     Ok(
         match peek_token(source, cursor, "expected let, fn, or expression")?.value {
+            TokenValue::Unsafe => {
+                let token = already_peeked_token(source)?;
+                let peek = peek_token(
+                    source,
+                    &token.range.end(),
+                    "expected 'fn' or block after unsafe",
+                )?;
+                let cursor = peek.range.end();
+                match &peek.value {
+                    TokenValue::Function => {
+                        function_declaration(source, context, &cursor, false, true)?
+                    }
+                    TokenValue::OpenBracket => unsafe_block(source, context, &cursor)?,
+                    _ => {
+                        return Err(ParseError::UnexpectedToken(
+                            Box::new(peek.clone()),
+                            "expected 'fn' or block after unsafe",
+                        ))
+                    }
+                }
+            }
+            TokenValue::Function => function_declaration(source, context, cursor, false, false)?,
             TokenValue::Let
             | TokenValue::Const
             | TokenValue::Borrow
             | TokenValue::Import
-            | TokenValue::Function
             | TokenValue::Gen
             | TokenValue::Extern
             | TokenValue::Struct
@@ -585,17 +609,7 @@ fn statement(
                         statement
                     }
                     TokenValue::Extern => extern_function_declaration(source, context, &cursor)?,
-                    TokenValue::Function => function_declaration(source, context, &cursor, false)?,
-                    TokenValue::Gen => {
-                        let token = assert_next_lexeme_eq(
-                            source,
-                            TokenValue::Function,
-                            &cursor,
-                            "expected fn after gen",
-                        )?;
-                        let cursor = token.range.end();
-                        function_declaration(source, context, &cursor, true)?
-                    }
+                    TokenValue::Gen => function_declaration(source, context, &cursor, true, false)?,
                     TokenValue::Struct => struct_declaration(source, context, &cursor)?,
                     TokenValue::Union => union_declaration(source, context, &cursor)?,
                     TokenValue::Interface => interface_declaration(source, context, &cursor)?,
@@ -771,19 +785,17 @@ fn interface_or_struct_body(
             break;
         }
 
-        if peek_token(source, &cursor, "expected associated function, field, or }")?.value
-            == TokenValue::Function
-        {
+        let peeked = peek_token(source, &cursor, "expected associated function, field, or }")?;
+        if peeked.value == TokenValue::Function || peeked.value == TokenValue::Unsafe {
             let start = cursor;
-            let token = already_peeked_token(source)?;
-            cursor = token.range.end();
             let FunctionHeader {
                 name,
                 self_param,
                 params,
                 returns,
                 end,
-            } = function_header(source, context, &cursor)?;
+                is_unsafe,
+            } = function_header(source, context, &start, false)?;
             cursor = end;
 
             let next = peek_token(source, &cursor, "expected ',', }, or body")?;
@@ -799,6 +811,7 @@ fn interface_or_struct_body(
                         self_param,
                         params,
                         returns,
+                        is_unsafe,
                     }),
                     SourceRange::new(start, &cursor),
                 )));
@@ -822,6 +835,7 @@ fn interface_or_struct_body(
                         body,
                         is_extern: false,
                         is_coroutine: false,
+                        is_unsafe,
                     }),
                     SourceRange::new(start, &cursor),
                 )));
@@ -893,13 +907,9 @@ fn union_declaration(
             break;
         }
 
-        if peek_token(source, &cursor, "expected associated function, field, or }")?.value
-            == TokenValue::Function
-        {
-            let token = already_peeked_token(source)?;
-            cursor = token.range.end();
-
-            let function = function_declaration(source, context, &cursor, false)?;
+        let peeked = peek_token(source, &cursor, "expected associated function, field, or }")?;
+        if peeked.value == TokenValue::Function || peeked.value == TokenValue::Unsafe {
+            let function = function_declaration(source, context, &cursor, false, false)?;
             associated_functions.push(context.add(function));
         } else {
             let (name, name_range) = word(source, &cursor, "expected variant name")?;
@@ -959,21 +969,15 @@ fn extern_function_declaration(
     context: &mut AstArena,
     start: &SourceMarker,
 ) -> Result<AstNode, ParseError> {
-    let mut provenance = assert_next_lexeme_eq(
-        source,
-        TokenValue::Function,
-        start,
-        "expected 'fn' after 'extern'",
-    )?
-    .range;
     let FunctionHeader {
         name,
         self_param,
         params,
         returns,
         end,
-    } = function_header(source, context, &provenance.end())?;
-    provenance.set_end(end.clone());
+        is_unsafe,
+    } = function_header(source, context, start, false)?;
+    let mut provenance = SourceRange::new(start.clone(), &end);
 
     let next = next_token(source, &end, "expected ; or { after extern fn decl")?;
     let (value, end) = match &next.value {
@@ -983,6 +987,7 @@ fn extern_function_declaration(
                 self_param,
                 params,
                 returns,
+                is_unsafe,
             }),
             next.range.end(),
         ),
@@ -998,6 +1003,7 @@ fn extern_function_declaration(
                     body: add_node(context, body),
                     is_extern: true,
                     is_coroutine: false,
+                    is_unsafe,
                 }),
                 end,
             )
@@ -1019,6 +1025,7 @@ fn function_declaration(
     context: &mut AstArena,
     start: &SourceMarker,
     is_generator: bool,
+    override_is_unsafe: bool,
 ) -> Result<AstNode, ParseError> {
     let FunctionHeader {
         name,
@@ -1026,7 +1033,8 @@ fn function_declaration(
         params,
         returns,
         end,
-    } = function_header(source, context, start)?;
+        is_unsafe,
+    } = function_header(source, context, start, override_is_unsafe)?;
     let mut provenance = SourceRange::new(start.clone(), &end);
     let next_token = assert_next_lexeme_eq(
         source,
@@ -1046,6 +1054,7 @@ fn function_declaration(
             body: add_node(context, body),
             is_extern: false,
             is_coroutine: is_generator,
+            is_unsafe,
         }),
         provenance,
     ))
@@ -1057,6 +1066,7 @@ struct FunctionHeader {
     params: Vec<NameAndType>,
     returns: Option<AstNodeId>,
     end: SourceMarker,
+    is_unsafe: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -1070,8 +1080,35 @@ fn function_header(
     source: &mut TokenIter,
     context: &mut AstArena,
     cursor: &SourceMarker,
+    override_is_unsafe: bool,
 ) -> Result<FunctionHeader, ParseError> {
-    let (name, provenance) = word(source, cursor, "expected name after 'fn'")?;
+    let token = next_token(
+        source,
+        cursor,
+        "expected 'fn' or 'unsafe' to start function declaration",
+    )?;
+    let mut cursor = token.range.end();
+    let is_unsafe = match &token.value {
+        TokenValue::Function => override_is_unsafe,
+        TokenValue::Unsafe => {
+            let token = assert_next_lexeme_eq(
+                source,
+                TokenValue::Function,
+                &cursor,
+                "expected 'fn' to follow 'unsafe'",
+            )?;
+            cursor = token.range.end();
+            true
+        }
+        _ => {
+            return Err(ParseError::UnexpectedToken(
+                Box::new(token),
+                "expected 'fn' or 'unsafe' to start function declaration",
+            ))
+        }
+    };
+
+    let (name, provenance) = word(source, &cursor, "expected name after 'fn'")?;
 
     let open_paren = assert_next_lexeme_eq(
         source,
@@ -1079,7 +1116,7 @@ fn function_header(
         &provenance.end(),
         "expected open parenthesis to start parameters",
     )?;
-    let mut cursor = open_paren.range.end();
+    cursor = open_paren.range.end();
 
     let self_param = match peek_token(source, &cursor, "expected either parameters or close paren")?
         .value
@@ -1166,6 +1203,7 @@ fn function_header(
         params,
         returns,
         end: cursor,
+        is_unsafe,
     })
 }
 
@@ -1599,6 +1637,7 @@ fn expression_pratt(
         }
         TokenValue::Case => match_statement(source, context, &cursor)?,
         TokenValue::Loop => parse_loop(source, context, &cursor)?,
+        TokenValue::Unsafe => unsafe_block(source, context, &cursor)?,
         TokenValue::OpenBracket => block(source, context, &cursor)?,
         // Atoms
         TokenValue::True => AstNode::new(AstNodeValue::Bool(true), range),
@@ -2347,6 +2386,25 @@ fn parse_loop(
     let body = add_node(context, body);
 
     Ok(AstNode::new(AstNodeValue::Loop(body), provenance))
+}
+
+fn unsafe_block(
+    source: &mut TokenIter,
+    context: &mut AstArena,
+    cursor: &SourceMarker,
+) -> Result<AstNode, ParseError> {
+    let token = assert_next_lexeme_eq(
+        source,
+        TokenValue::OpenBracket,
+        cursor,
+        "expected a block after 'unsafe'",
+    )?;
+    let mut node = block(source, context, &token.range.end())?;
+    let AstNodeValue::Block(contents) = &mut node.value else {
+        unreachable!();
+    };
+    node.value = AstNodeValue::UnsafeBlock(std::mem::take(contents));
+    Ok(node)
 }
 
 fn block(

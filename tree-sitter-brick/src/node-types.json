@@ -112,6 +112,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -228,6 +232,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -366,6 +374,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "variable_declaration",
           "named": true
         },
@@ -494,6 +506,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -610,6 +626,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -733,6 +753,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -863,6 +887,10 @@
             "named": true
           },
           {
+            "type": "unsafe_block",
+            "named": true
+          },
+          {
             "type": "while_expr",
             "named": true
           }
@@ -975,6 +1003,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -1101,6 +1133,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -1221,6 +1257,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -1384,6 +1424,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -1500,6 +1544,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -1626,6 +1674,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -1745,6 +1797,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -1861,6 +1917,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -2144,6 +2204,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -2275,6 +2339,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -2465,6 +2533,10 @@
             "named": true
           },
           {
+            "type": "unsafe_block",
+            "named": true
+          },
+          {
             "type": "while_expr",
             "named": true
           }
@@ -2581,6 +2653,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -2715,6 +2791,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -2863,6 +2943,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -2982,6 +3066,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -3098,6 +3186,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -3301,6 +3393,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -3461,6 +3557,10 @@
         },
         {
           "type": "union_declaration",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -3652,6 +3752,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -3832,6 +3936,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -3916,6 +4024,149 @@
           }
         ]
       }
+    }
+  },
+  {
+    "type": "unsafe_block",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "add_expr",
+          "named": true
+        },
+        {
+          "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "block",
+          "named": true
+        },
+        {
+          "type": "bool_literal",
+          "named": true
+        },
+        {
+          "type": "boolean_and",
+          "named": true
+        },
+        {
+          "type": "boolean_or",
+          "named": true
+        },
+        {
+          "type": "borrow_declaration",
+          "named": true
+        },
+        {
+          "type": "call_expr",
+          "named": true
+        },
+        {
+          "type": "case_expr",
+          "named": true
+        },
+        {
+          "type": "char_literal",
+          "named": true
+        },
+        {
+          "type": "compare_expr",
+          "named": true
+        },
+        {
+          "type": "concat_expr",
+          "named": true
+        },
+        {
+          "type": "const_declaration",
+          "named": true
+        },
+        {
+          "type": "deref_expr",
+          "named": true
+        },
+        {
+          "type": "dot_expr",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "if_expr",
+          "named": true
+        },
+        {
+          "type": "index_expr",
+          "named": true
+        },
+        {
+          "type": "literal",
+          "named": true
+        },
+        {
+          "type": "loop_expr",
+          "named": true
+        },
+        {
+          "type": "mul_expr",
+          "named": true
+        },
+        {
+          "type": "not_expr",
+          "named": true
+        },
+        {
+          "type": "null",
+          "named": true
+        },
+        {
+          "type": "null_chaining",
+          "named": true
+        },
+        {
+          "type": "null_coalesce",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "return_statement",
+          "named": true
+        },
+        {
+          "type": "string_literal",
+          "named": true
+        },
+        {
+          "type": "take_reference_expr",
+          "named": true
+        },
+        {
+          "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
+          "type": "variable_declaration",
+          "named": true
+        },
+        {
+          "type": "while_expr",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -4035,6 +4286,10 @@
           "named": true
         },
         {
+          "type": "unsafe_block",
+          "named": true
+        },
+        {
           "type": "while_expr",
           "named": true
         }
@@ -4151,6 +4406,10 @@
         },
         {
           "type": "unary_negation",
+          "named": true
+        },
+        {
+          "type": "unsafe_block",
           "named": true
         },
         {
@@ -4414,6 +4673,10 @@
   },
   {
     "type": "unique",
+    "named": false
+  },
+  {
+    "type": "unsafe",
     "named": false
   },
   {

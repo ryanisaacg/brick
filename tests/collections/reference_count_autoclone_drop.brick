@@ -4,7 +4,9 @@ extern fn incr_test_counter();
 
 struct Data: Resource {
     fn drop(unique self) {
-        incr_test_counter();
+        unsafe {
+            incr_test_counter();
+        }
     }
 }
 

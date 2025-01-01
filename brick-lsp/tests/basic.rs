@@ -56,7 +56,7 @@ func();"#,
             range: Range {
                 start: Position {
                     line: 1,
-                    character: 1
+                    character: 0
                 },
                 end: Position {
                     line: 1,
@@ -89,7 +89,7 @@ func();"#,
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position {
                 line: 3,
-                character: 1,
+                character: 0,
             },
         },
         work_done_progress_params: WorkDoneProgressParams {
@@ -108,7 +108,7 @@ func();"#,
             range: Range {
                 start: Position {
                     line: 1,
-                    character: 1
+                    character: 0
                 },
                 end: Position {
                     line: 1,
@@ -160,7 +160,7 @@ fn func2() {
             range: Range {
                 start: Position {
                     line: 1,
-                    character: 1
+                    character: 0
                 },
                 end: Position {
                     line: 1,
@@ -210,7 +210,7 @@ fn func() { }
             text_document: TextDocumentIdentifier { uri: uri.clone() },
             position: Position {
                 line: 3,
-                character: 1,
+                character: 0,
             },
         },
         work_done_progress_params: WorkDoneProgressParams {

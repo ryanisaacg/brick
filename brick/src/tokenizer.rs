@@ -80,6 +80,7 @@ pub enum TokenValue {
     True,
     False,
     Function,
+    Unsafe,
     Gen,
     Import,
     Struct,
@@ -166,6 +167,7 @@ impl TokenValue {
             | TokenValue::Const
             | TokenValue::Borrow
             | TokenValue::Function
+            | TokenValue::Unsafe
             | TokenValue::Gen
             | TokenValue::Import
             | TokenValue::Struct
@@ -230,6 +232,7 @@ impl fmt::Display for TokenValue {
             True => write!(f, "keyword true"),
             False => write!(f, "keyword false"),
             Function => write!(f, "keyword fn"),
+            Unsafe => write!(f, "keyword unsafe"),
             Gen => write!(f, "keyword gen"),
             Import => write!(f, "keyword import"),
             Struct => write!(f, "keyword struct"),
@@ -396,6 +399,7 @@ impl Iterator for TokenIterator {
                         "const" => TokenValue::Const,
                         "borrow" => TokenValue::Borrow,
                         "fn" => TokenValue::Function,
+                        "unsafe" => TokenValue::Unsafe,
                         "gen" => TokenValue::Gen,
                         "import" => TokenValue::Import,
                         "struct" => TokenValue::Struct,

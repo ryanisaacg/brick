@@ -50,6 +50,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 func.returns.map(|returns| ast.get(returns)),
                 func.is_extern,
                 func.is_coroutine,
+                func.is_unsafe,
             );
             result.push(' ');
             write_node(ast, ast.get(func.body), result, indent);
@@ -67,6 +68,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 func.returns.map(|returns| ast.get(returns)),
                 true,
                 false,
+                func.is_unsafe,
             );
             result.push_str(";\n");
         }
@@ -159,6 +161,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 func.returns.map(|returns| ast.get(returns)),
                 false,
                 false,
+                func.is_unsafe,
             );
             result.push_str(",\n");
         }
@@ -407,6 +410,17 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
             write_node(ast, ast.get(*inner), result, indent);
             result.push_str(" }");
         }
+        AstNodeValue::UnsafeBlock(values) => {
+            result.push_str("unsafe {\n");
+            for value in values.iter() {
+                let indent = indent + 1;
+                do_indent(result, indent);
+                write_node(ast, ast.get(*value), result, indent);
+                result.push('\n');
+            }
+            do_indent(result, indent);
+            result.push('}');
+        }
         AstNodeValue::Block(values) => {
             result.push_str("{\n");
             for value in values.iter() {
@@ -509,12 +523,16 @@ fn write_function_header<'iter, 'node: 'iter>(
     returns: Option<&AstNode>,
     is_extern: bool,
     is_coroutine: bool,
+    is_unsafe: bool,
 ) {
     if is_extern {
         result.push_str("extern ");
     }
     if is_coroutine {
         result.push_str("gen ");
+    }
+    if is_unsafe {
+        result.push_str("unsafe ");
     }
     result.push_str("fn ");
     result.push_str(name);

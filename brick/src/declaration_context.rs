@@ -241,6 +241,7 @@ impl DeclarationContext {
                             id,
                             func,
                             false,
+                            true,
                             &statement.provenance,
                             None,
                         ),
@@ -570,6 +571,7 @@ fn fill_in_interface_decl(
                     func_id,
                     func,
                     true,
+                    false,
                     &node.provenance,
                     Some(&ExpressionType::InstanceOf(id)),
                 )
@@ -740,6 +742,8 @@ fn fill_in_fn_decl(
         params: ast_params,
         returns,
         is_coroutine,
+        is_unsafe,
+        is_extern,
         ..
     }: &FunctionDeclarationValue,
     is_associated: bool,
@@ -771,6 +775,8 @@ fn fill_in_fn_decl(
             .unwrap_or(Ok(ExpressionType::Void))?,
         is_associated,
         is_coroutine: *is_coroutine,
+        is_unsafe: *is_unsafe,
+        is_extern: *is_extern,
         provenance: Some(provenance.clone()),
     })
 }
@@ -785,9 +791,11 @@ fn fill_in_fn_header(
         self_param,
         params: ast_params,
         returns,
+        is_unsafe,
         ..
     }: &FunctionHeaderValue,
     is_associated: bool,
+    is_extern: bool,
     provenance: &SourceRange,
     self_context: Option<&ExpressionType>,
 ) -> Result<FuncType, TypecheckError> {
@@ -816,6 +824,8 @@ fn fill_in_fn_header(
             .unwrap_or(Ok(ExpressionType::Void))?,
         is_associated,
         is_coroutine: false,
+        is_unsafe: *is_unsafe,
+        is_extern,
         provenance: Some(provenance.clone()),
     })
 }
@@ -994,6 +1004,7 @@ pub fn resolve_type_expr(
         | AstNodeValue::RecordLiteral { .. }
         | AstNodeValue::ArrayLiteral(_)
         | AstNodeValue::ArrayLiteralLength(_, _)
+        | AstNodeValue::UnsafeBlock(_)
         | AstNodeValue::Block(_)
         | AstNodeValue::StringLiteral(_)
         | AstNodeValue::CharLiteral(_)
@@ -1205,6 +1216,8 @@ fn add_intrinsic(
             params,
             returns,
             is_coroutine: false,
+            is_unsafe: false,
+            is_extern: false,
             provenance: None,
         },
     );

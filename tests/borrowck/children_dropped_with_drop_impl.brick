@@ -8,7 +8,9 @@ struct Outer: Resource {
     c: Inner,
 
     fn drop(unique self) {
-        incr_test_counter();
+        unsafe {
+            incr_test_counter();
+        }
     }
 }
 
@@ -16,7 +18,9 @@ struct Inner: Resource {
     x: i32,
 
     fn drop(unique self) {
-        incr_test_counter();
+        unsafe {
+            incr_test_counter();
+        }
     }
 }
 

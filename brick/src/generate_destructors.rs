@@ -56,6 +56,8 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
                 returns: ExpressionType::Void,
                 is_associated: true,
                 is_coroutine: false,
+                is_unsafe: false,
+                is_extern: false,
                 provenance: None,
             },
         );

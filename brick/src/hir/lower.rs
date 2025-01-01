@@ -203,7 +203,7 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
         AstNodeValue::Loop(body) => {
             HirNodeValue::Loop(lower_node_alloc(decls, ast, ast.get(*body)))
         }
-        AstNodeValue::Block(contents) => {
+        AstNodeValue::Block(contents) | AstNodeValue::UnsafeBlock(contents) => {
             let contents = contents
                 .iter()
                 .map(|node| lower_node(decls, ast, ast.get(*node)))

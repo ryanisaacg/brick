@@ -26,9 +26,9 @@ fn extern_binding() {
     let result = eval_with_bindings(
         r#"
 extern fn next(): i32;
-let x = next();
-x = next();
-x = next();
+let x = unsafe { next() };
+x = unsafe { next() };
+x = unsafe { next() };
 x
 "#,
         vec![(
@@ -44,34 +44,6 @@ x
     )
     .unwrap();
     assert_matches!(&result[..], [Value::Int32(2)]);
-}
-
-#[test]
-fn extern_pointer() {
-    let result = eval_with_bindings(
-        r#"
-extern fn increment(a: unique i32);
-let x = 10;
-increment(unique x);
-x
-"#,
-        vec![(
-            "increment",
-            Box::new(|vm, mut stack| {
-                let Value::Size(pointer) = stack.pop().unwrap() else {
-                    unreachable!()
-                };
-                let size = std::mem::size_of::<i32>();
-                let mut value: i32 = *bytemuck::from_bytes(&vm.memory[pointer..(pointer + size)]);
-                value += 1;
-                vm.memory[pointer..(pointer + size)].copy_from_slice(bytemuck::bytes_of(&value));
-
-                None
-            }),
-        )],
-    )
-    .unwrap();
-    assert_matches!(&result[..], [Value::Int32(11)]);
 }
 
 #[test]

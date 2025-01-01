@@ -6,7 +6,9 @@ struct Data: Resource {
     value: i32,
 
     fn drop(unique self) {
-        incr_test_counter();
+        unsafe {
+            incr_test_counter();
+        }
     }
 }
 

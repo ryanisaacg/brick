@@ -7,14 +7,8 @@ closures:
 - type level support for passing closures
 - use closures for iteration?
 
-unsafe:
-- functions can be declared unsafe
-- you can have unsafe blocks (or statements?)
-- you can only call unsafe functions from within unsafe blocks
-
 extern:
 - opaque extern pointers
-- extern functions are unsafe
 - externs can only do C FFI stuff, for ease of wasm backend
 
 syntax niceties:
@@ -119,3 +113,8 @@ coroutines / generators / async (sort of half-done, but maybe I'll wait on wasm-
     - require coroutines to return generators
     - prevent calling coroutine through immutable references
 - drop coroutines and their contents correctly
+
+
+warnings:
+- unnecessary unsafe fn
+- unecessary unsafe block

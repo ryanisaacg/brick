@@ -247,6 +247,8 @@ pub fn lower_code(
                 returns: *returns,
                 is_associated: false,
                 is_coroutine: false,
+                is_unsafe: false,
+                is_extern: false,
                 provenance: None,
             },
         );

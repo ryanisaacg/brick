@@ -4,16 +4,20 @@ extern fn incr_test_counter();
 
 struct X: Resource {
     fn drop(unique self) {
-        incr_test_counter();
+        unsafe {
+            incr_test_counter();
+        }
     }
 }
 
 
 struct Y: Resource {
     fn drop(unique self) {
-        incr_test_counter();
-        incr_test_counter();
-        incr_test_counter();
+        unsafe {
+            incr_test_counter();
+            incr_test_counter();
+            incr_test_counter();
+        }
     }
 }
 
@@ -22,7 +26,9 @@ union XorY: Resource {
     y(Y),
 
     fn drop(unique self) {
-        incr_test_counter();
+        unsafe {
+            incr_test_counter();
+        }
     }
 }
 

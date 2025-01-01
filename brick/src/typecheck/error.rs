@@ -53,6 +53,8 @@ pub enum TypecheckError {
         name: String,
     },
     TypeDotOperatorLhsMustBeModule(SourceRange),
+    ExternFunctionCalledOutsideUnsafe(SourceRange),
+    UnsafeFunctionCalledOutsideUnsafe(SourceRange),
 }
 
 impl Error for TypecheckError {}
@@ -205,6 +207,14 @@ impl Diagnostic for TypecheckError {
             TypeDotOperatorLhsMustBeModule(range) => DiagnosticMarker::error(
                 range.clone(),
                 "left hand side of dot operator in type context must be a module",
+            ),
+            ExternFunctionCalledOutsideUnsafe(range) => DiagnosticMarker::error(
+                range.clone(),
+                "extern function called outside unsafe range",
+            ),
+            UnsafeFunctionCalledOutsideUnsafe(range) => DiagnosticMarker::error(
+                range.clone(),
+                "unsafe function called outside unsafe range",
             ),
         })
     }

@@ -57,6 +57,7 @@ module.exports = grammar({
 
     _function_header: ($) =>
       seq(
+        optional("unsafe"),
         "fn",
         field("name", $.identifier),
         "(",
@@ -185,8 +186,17 @@ module.exports = grammar({
         )
       ),
     _block_expr: ($) =>
-      choice($.if_expr, $.while_expr, $.loop_expr, $.block, $.case_expr),
+      choice(
+        $.if_expr,
+        $.while_expr,
+        $.loop_expr,
+        $.block,
+        $.case_expr,
+        $.unsafe_block
+      ),
     block: ($) => seq("{", repeat($._statement), optional($._expression), "}"),
+    unsafe_block: ($) =>
+      seq("unsafe", "{", repeat($._statement), optional($._expression), "}"),
 
     return_statement: ($) =>
       seq(choice("yield", "return"), optional($._expression)),

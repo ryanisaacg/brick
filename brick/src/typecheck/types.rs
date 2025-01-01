@@ -288,6 +288,8 @@ pub struct FuncType {
     pub returns: ExpressionType,
     pub is_associated: bool,
     pub is_coroutine: bool,
+    pub is_unsafe: bool,
+    pub is_extern: bool,
     pub provenance: Option<SourceRange>,
 }
 
