@@ -79,7 +79,8 @@ impl ExpressionType {
             | ExpressionType::ReferenceToType(_)
             | ExpressionType::ReferenceToFunction(_)
             | ExpressionType::TypeParameterReference(_) => false,
-            ExpressionType::Pointer(_, _) => true,
+            ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::UniqueRef, _) => true,
+            ExpressionType::Pointer(PointerKind::SharedRaw | PointerKind::UniqueRaw, _) => false,
             ExpressionType::Nullable(inner) => inner.is_reference(),
         }
     }
@@ -138,8 +139,10 @@ pub enum CollectionType {
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum PointerKind {
-    Shared,
-    Unique,
+    SharedRef,
+    UniqueRef,
+    SharedRaw,
+    UniqueRaw,
 }
 
 #[derive(Debug, PartialEq, Eq)]

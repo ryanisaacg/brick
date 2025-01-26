@@ -6,7 +6,7 @@ use brick::{
         AstArena, AstNode, AstNodeValue, BinOp, ParsedFile, SelfParameter, UnaryOp,
         UnionDeclarationVariant,
     },
-    CompileError,
+    CompileError, PointerKind,
 };
 
 pub fn format_str(source: &str) -> Result<String, CompileError> {
@@ -469,12 +469,22 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
             result.push('}');
         }
         AstNodeValue::VoidType => result.push_str("void"),
-        AstNodeValue::TakeUnique(inner) | AstNodeValue::UniqueType(inner) => {
+        AstNodeValue::TakePointer(PointerKind::UniqueRef, inner)
+        | AstNodeValue::UniqueType(inner) => {
             result.push_str("unique ");
             write_node(ast, ast.get(*inner), result, indent);
         }
-        AstNodeValue::TakeRef(inner) | AstNodeValue::SharedType(inner) => {
+        AstNodeValue::TakePointer(PointerKind::SharedRef, inner)
+        | AstNodeValue::SharedType(inner) => {
             result.push_str("ref ");
+            write_node(ast, ast.get(*inner), result, indent);
+        }
+        AstNodeValue::TakePointer(PointerKind::UniqueRaw, inner) => {
+            result.push_str("unique_ptr ");
+            write_node(ast, ast.get(*inner), result, indent);
+        }
+        AstNodeValue::TakePointer(PointerKind::SharedRaw, inner) => {
+            result.push_str("ref_ptr ");
             write_node(ast, ast.get(*inner), result, indent);
         }
         AstNodeValue::ArrayType(inner) => {

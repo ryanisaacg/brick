@@ -4,6 +4,8 @@ use crate::{
     ExpressionType, TypecheckContext, TypecheckError,
 };
 
+use super::PointerKind;
+
 // TODO: do we needd to recurse if unsafe is in fact permitted
 
 pub fn check_safety(
@@ -14,32 +16,49 @@ pub fn check_safety(
     let mut result = Ok(());
 
     if !is_unsafe_permitted {
-        if let AstNodeValue::Call(lhs, _) = &node.value {
-            let lhs_ty = &context.ast.get(*lhs).ty.get().unwrap();
-            match lhs_ty {
-                ExpressionType::ReferenceToFunction(fn_id) => {
-                    let fn_ty = &context.declarations.id_to_func[fn_id];
-                    if fn_ty.is_unsafe {
-                        merge_results(
-                            &mut result,
-                            Err(TypecheckError::UnsafeFunctionCalledOutsideUnsafe(
-                                node.provenance.clone(),
-                            )),
-                        );
-                    } else if fn_ty.is_extern {
-                        merge_results(
-                            &mut result,
-                            Err(TypecheckError::ExternFunctionCalledOutsideUnsafe(
-                                node.provenance.clone(),
-                            )),
-                        );
+        match &node.value {
+            AstNodeValue::Call(lhs, _) => {
+                let lhs_ty = &context.ast.get(*lhs).ty.get().unwrap();
+                match lhs_ty {
+                    ExpressionType::ReferenceToFunction(fn_id) => {
+                        let fn_ty = &context.declarations.id_to_func[fn_id];
+                        if fn_ty.is_unsafe {
+                            merge_results(
+                                &mut result,
+                                Err(TypecheckError::UnsafeFunctionCalledOutsideUnsafe(
+                                    node.provenance.clone(),
+                                )),
+                            );
+                        } else if fn_ty.is_extern {
+                            merge_results(
+                                &mut result,
+                                Err(TypecheckError::ExternFunctionCalledOutsideUnsafe(
+                                    node.provenance.clone(),
+                                )),
+                            );
+                        }
                     }
-                }
-                // For now, generators and function references can't be unsafe
-                ExpressionType::Generator { .. } | ExpressionType::FunctionReference { .. } => {}
+                    // For now, generators and function references can't be unsafe
+                    ExpressionType::Generator { .. } | ExpressionType::FunctionReference { .. } => {
+                    }
 
-                _ => unreachable!("ICE: LHS of function call must be a function type"),
+                    _ => unreachable!("ICE: LHS of function call must be a function type"),
+                }
             }
+            AstNodeValue::Deref(lhs) => {
+                let lhs_ty = &context.ast.get(*lhs).ty.get().unwrap();
+                if let ExpressionType::Pointer(PointerKind::UniqueRaw | PointerKind::SharedRaw, _) =
+                    lhs_ty
+                {
+                    merge_results(
+                        &mut result,
+                        Err(TypecheckError::RawPointerDereferencedOutsideUnsafe(
+                            node.provenance.clone(),
+                        )),
+                    );
+                }
+            }
+            _ => (),
         }
     }
 

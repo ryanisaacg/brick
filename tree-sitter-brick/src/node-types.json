@@ -1980,11 +1980,19 @@
             "named": false
           },
           {
+            "type": "ref_ptr",
+            "named": false
+          },
+          {
             "type": "self",
             "named": false
           },
           {
             "type": "unique",
+            "named": false
+          },
+          {
+            "type": "unique_ptr",
             "named": false
           }
         ]
@@ -2051,11 +2059,19 @@
             "named": false
           },
           {
+            "type": "ref_ptr",
+            "named": false
+          },
+          {
             "type": "self",
             "named": false
           },
           {
             "type": "unique",
+            "named": false
+          },
+          {
+            "type": "unique_ptr",
             "named": false
           }
         ]
@@ -3255,11 +3271,19 @@
             "named": false
           },
           {
+            "type": "ref_ptr",
+            "named": false
+          },
+          {
             "type": "self",
             "named": false
           },
           {
             "type": "unique",
+            "named": false
+          },
+          {
+            "type": "unique_ptr",
             "named": false
           }
         ]
@@ -3406,6 +3430,7 @@
   {
     "type": "source_file",
     "named": true,
+    "root": true,
     "fields": {},
     "children": {
       "multiple": true,
@@ -4652,6 +4677,10 @@
     "named": false
   },
   {
+    "type": "ref_ptr",
+    "named": false
+  },
+  {
     "type": "return",
     "named": false
   },
@@ -4673,6 +4702,10 @@
   },
   {
     "type": "unique",
+    "named": false
+  },
+  {
+    "type": "unique_ptr",
     "named": false
   },
   {

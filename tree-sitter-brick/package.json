@@ -35,11 +35,5 @@
     "bindings/node/*",
     "queries/*",
     "src/**"
-  ],
-  "tree-sitter": [
-    {
-      "scope": "source.brick",
-      "injection-regex": "^brick$"
-    }
   ]
 }

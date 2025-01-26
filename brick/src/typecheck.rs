@@ -402,7 +402,10 @@ fn typecheck_expression<'a>(
                 generator_input_ty,
             )?;
             let mut result = Ok(());
-            if matches!(value_ty, ExpressionType::Pointer(_, _)) {
+            if matches!(
+                value_ty,
+                ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::UniqueRef, _)
+            ) {
                 merge_results(
                     &mut result,
                     Err(TypecheckError::IllegalFirstClassReference(
@@ -419,7 +422,10 @@ fn typecheck_expression<'a>(
                     context.id_to_decl(),
                     type_hint,
                 )?;
-                if matches!(hint_ty, ExpressionType::Pointer(_, _)) {
+                if matches!(
+                    hint_ty,
+                    ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::UniqueRef, _)
+                ) {
                     merge_results(
                         &mut result,
                         Err(TypecheckError::IllegalFirstClassReference(
@@ -465,7 +471,7 @@ fn typecheck_expression<'a>(
             current_scope.insert(name.clone(), ((*variable_id).into(), value_ty.clone()));
 
             let mut results = Ok(());
-            if let AstNodeValue::TakeRef(child) | AstNodeValue::TakeUnique(child) = &value.value {
+            if let AstNodeValue::TakePointer(_, child) = &value.value {
                 if !validate_lvalue(context, context.ast.get(*child)) {
                     merge_results(
                         &mut results,
@@ -1527,21 +1533,8 @@ fn typecheck_expression<'a>(
             )?;
             ExpressionType::Collection(CollectionType::Cell(Box::new(inner_ty.clone())))
         }
-        AstNodeValue::TakeUnique(inner) => ExpressionType::Pointer(
-            PointerKind::Unique,
-            Box::new(
-                typecheck_expression(
-                    context.ast.get(*inner),
-                    outer_scopes,
-                    current_scope,
-                    context,
-                    generator_input_ty,
-                )?
-                .clone(),
-            ),
-        ),
-        AstNodeValue::TakeRef(inner) => ExpressionType::Pointer(
-            PointerKind::Shared,
+        AstNodeValue::TakePointer(pointer_ty, inner) => ExpressionType::Pointer(
+            *pointer_ty,
             Box::new(
                 typecheck_expression(
                     context.ast.get(*inner),
@@ -1742,7 +1735,7 @@ fn validate_assignment_lhs(
             let Some(ExpressionType::Pointer(kind, _)) = inner.ty.get() else {
                 unreachable!()
             };
-            let mut errors = if *kind == PointerKind::Shared {
+            let mut errors = if *kind == PointerKind::SharedRef {
                 Err(TypecheckError::IllegalSharedRefMutation(
                     lhs.provenance.clone(),
                 ))
@@ -1780,8 +1773,7 @@ fn validate_assignment_lhs(
         | AstNodeValue::Match(_)
         | AstNodeValue::Loop(_)
         | AstNodeValue::Call(_, _)
-        | AstNodeValue::TakeUnique(_)
-        | AstNodeValue::TakeRef(_)
+        | AstNodeValue::TakePointer(_, _)
         | AstNodeValue::RecordLiteral { .. }
         | AstNodeValue::DictLiteral(_)
         | AstNodeValue::ArrayLiteral(_)
@@ -1879,8 +1871,7 @@ fn validate_is_const(node: &AstNode) -> bool {
         | AstNodeValue::While(_, _)
         | AstNodeValue::Loop(_)
         | AstNodeValue::Call(_, _)
-        | AstNodeValue::TakeUnique(_)
-        | AstNodeValue::TakeRef(_)
+        | AstNodeValue::TakePointer(_, _)
         | AstNodeValue::ReferenceCountLiteral(_)
         | AstNodeValue::CellLiteral(_)
         | AstNodeValue::UnsafeBlock(_)
@@ -1950,9 +1941,9 @@ fn validate_assignment_lhs_ty(
         | ExpressionType::InstanceOf(_)
         | ExpressionType::Primitive(_)
         | ExpressionType::Generator { .. }
-        | ExpressionType::Pointer(PointerKind::Unique, _) => Ok(()),
+        | ExpressionType::Pointer(PointerKind::UniqueRef | PointerKind::UniqueRaw, _) => Ok(()),
         ExpressionType::Nullable(inner) => validate_assignment_lhs_ty(inner, provenance),
-        ExpressionType::Pointer(PointerKind::Shared, _) => {
+        ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::SharedRaw, _) => {
             Err(TypecheckError::IllegalSharedRefMutation(provenance.clone()))
         }
         ExpressionType::TypeParameterReference(_) => todo!(),
@@ -1969,7 +1960,7 @@ fn validate_lvalue(context: &TypecheckContext, lvalue: &AstNode) -> bool {
             let Some(ExpressionType::Pointer(kind, _)) = inner.ty.get() else {
                 unreachable!()
             };
-            *kind == PointerKind::Unique && validate_lvalue(context, inner)
+            *kind == PointerKind::UniqueRef && validate_lvalue(context, inner)
         }
         AstNodeValue::BinExpr(BinOp::Dot | BinOp::Index, lhs, _) => {
             validate_lvalue(context, context.ast.get(*lhs))
@@ -1999,8 +1990,7 @@ fn validate_lvalue(context: &TypecheckContext, lvalue: &AstNode) -> bool {
         | AstNodeValue::Match(_)
         | AstNodeValue::Loop(_)
         | AstNodeValue::Call(_, _)
-        | AstNodeValue::TakeUnique(_)
-        | AstNodeValue::TakeRef(_)
+        | AstNodeValue::TakePointer(_, _)
         | AstNodeValue::RecordLiteral { .. }
         | AstNodeValue::DictLiteral(_)
         | AstNodeValue::ArrayLiteral(_)
@@ -2053,12 +2043,12 @@ fn find_generic_bindings(
             _,
         ) => {}
         (
-            ExpressionType::Pointer(PointerKind::Shared, left),
-            ExpressionType::Pointer(PointerKind::Shared | PointerKind::Unique, right),
+            ExpressionType::Pointer(PointerKind::SharedRef, left),
+            ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::UniqueRef, right),
         )
         | (
-            ExpressionType::Pointer(PointerKind::Unique, left),
-            ExpressionType::Pointer(PointerKind::Unique, right),
+            ExpressionType::Pointer(PointerKind::UniqueRef, left),
+            ExpressionType::Pointer(PointerKind::UniqueRef, right),
         )
         | (
             ExpressionType::Collection(CollectionType::Array(left)),
@@ -2153,7 +2143,7 @@ pub fn is_assignable_to(
         // Handle pointers and de-referencing
         (Pointer(left_ty, left_inner), Pointer(right_ty, right_inner)) => {
             (left_ty == right_ty
-                || *left_ty == PointerKind::Shared && *right_ty == PointerKind::Unique)
+                || *left_ty == PointerKind::SharedRef && *right_ty == PointerKind::UniqueRef)
                 && is_assignable_to(context, generic_args, left_inner, right_inner)
         }
         // TODO: auto-dereference in the IR

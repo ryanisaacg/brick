@@ -1,4 +1,5 @@
 {
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/grammar.schema.json",
   "name": "brick",
   "rules": {
     "source_file": {
@@ -190,6 +191,14 @@
                               {
                                 "type": "STRING",
                                 "value": "ref"
+                              },
+                              {
+                                "type": "STRING",
+                                "value": "ref_ptr"
+                              },
+                              {
+                                "type": "STRING",
+                                "value": "unique_ptr"
                               }
                             ]
                           },
@@ -833,6 +842,14 @@
               {
                 "type": "STRING",
                 "value": "ref"
+              },
+              {
+                "type": "STRING",
+                "value": "unique_ptr"
+              },
+              {
+                "type": "STRING",
+                "value": "ref_ptr"
               }
             ]
           },
@@ -1913,6 +1930,14 @@
               {
                 "type": "STRING",
                 "value": "ref"
+              },
+              {
+                "type": "STRING",
+                "value": "unique_ptr"
+              },
+              {
+                "type": "STRING",
+                "value": "ref_ptr"
               }
             ]
           },

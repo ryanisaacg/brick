@@ -535,7 +535,7 @@ fn borrow_check_node(
                         borrow_state,
                         &path[..],
                         BorrowLifeState::MutableRefTaken(node.provenance.clone()),
-                        if *ref_ty == PointerKind::Unique {
+                        if *ref_ty == PointerKind::UniqueRef {
                             InvalidateType::AllBorrows
                         } else {
                             InvalidateType::MutableBorrows
@@ -612,7 +612,7 @@ fn borrow_check_node(
                     borrow_check_node(ctx, variable_state, borrow_state, autoclones, param),
                 );
                 match &param.value {
-                    HirNodeValue::TakeUnique(inner) => {
+                    HirNodeValue::TakePointer(PointerKind::UniqueRef, inner) => {
                         let lender_id = find_variable_for_lvalue(inner).as_var();
                         let path = find_path_for_lvalue(inner);
 
@@ -652,7 +652,7 @@ fn borrow_check_node(
                             InvalidateType::AllBorrows,
                         );
                     }
-                    HirNodeValue::TakeShared(inner) => {
+                    HirNodeValue::TakePointer(PointerKind::SharedRef, inner) => {
                         let lender_id = find_variable_for_lvalue(inner).as_var();
                         let path = find_path_for_lvalue(inner);
 
@@ -720,7 +720,7 @@ fn borrow_check_node(
         }
 
         // Only mark as used, don't mark as moved
-        HirNodeValue::TakeUnique(inner) | HirNodeValue::TakeShared(inner) => {
+        HirNodeValue::TakePointer(PointerKind::SharedRef | PointerKind::UniqueRef, inner) => {
             merge_results(
                 &mut results,
                 mark_node_used(variable_state, borrow_state, inner),
@@ -887,7 +887,7 @@ fn invalidate_borrows(
     invalidate_type: InvalidateType,
 ) {
     for (ref_ty, borrow_id) in borrows.iter() {
-        if invalidate_type == InvalidateType::MutableBorrows && *ref_ty == PointerKind::Shared {
+        if invalidate_type == InvalidateType::MutableBorrows && *ref_ty == PointerKind::SharedRef {
             continue;
         }
         let existing_borrow_state = borrow_state.get_mut(borrow_id).unwrap();
@@ -927,8 +927,7 @@ fn find_variable_for_lvalue(lvalue: &HirNode) -> &AnyID {
         | HirNodeValue::ArrayIndex(child, _)
         | HirNodeValue::DictIndex(child, _)
         | HirNodeValue::Dereference(child)
-        | HirNodeValue::TakeUnique(child)
-        | HirNodeValue::TakeShared(child)
+        | HirNodeValue::TakePointer(_, child)
         | HirNodeValue::UnionVariant(child, _) => find_variable_for_lvalue(child),
         other => panic!("ICE: illegal lvalue: {other:?}"),
     }
@@ -957,9 +956,7 @@ fn build_path_for_lvalue(lvalue: &HirNode, path: &mut Vec<PathSegment>) {
             build_path_for_lvalue(lhs, path);
             path.push(PathSegment::Index);
         }
-        HirNodeValue::Dereference(child)
-        | HirNodeValue::TakeUnique(child)
-        | HirNodeValue::TakeShared(child) => {
+        HirNodeValue::Dereference(child) | HirNodeValue::TakePointer(_, child) => {
             build_path_for_lvalue(child, path);
         }
         other => panic!("ICE: illegal lvalue: {other:?}"),

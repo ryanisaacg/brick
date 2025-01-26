@@ -66,7 +66,7 @@ module.exports = grammar({
           seq(
             choice(
               seq(
-                optional(choice("unique", "ref")),
+                optional(choice("unique", "ref", "ref_ptr", "unique_ptr")),
                 "self",
                 repeat(seq(",", $.name_and_type))
               ),
@@ -135,7 +135,8 @@ module.exports = grammar({
       ),
     primitive_type: (_) => choice("bool", "i32", "i64", "f32", "f64"),
     nullable_type: ($) => prec(2, seq($.type, "?")),
-    _reference_type: ($) => prec(0, seq(choice("unique", "ref"), $.type)),
+    _reference_type: ($) =>
+      prec(0, seq(choice("unique", "ref", "unique_ptr", "ref_ptr"), $.type)),
     _generic_type: ($) => prec(1, seq($.type, "[", commaSep1($.type), "]")),
     dot_type_expr: ($) => prec(3, seq($.type, ".", $.identifier)),
 
@@ -270,7 +271,10 @@ module.exports = grammar({
         seq(field("function", $._expression), "(", commaSep($._expression), ")")
       ),
     take_reference_expr: ($) =>
-      prec(REFERENCE, seq(choice("unique", "ref"), $._expression)),
+      prec(
+        REFERENCE,
+        seq(choice("unique", "ref", "unique_ptr", "ref_ptr"), $._expression)
+      ),
 
     if_expr: ($) =>
       seq(

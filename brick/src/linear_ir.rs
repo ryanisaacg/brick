@@ -541,7 +541,7 @@ pub struct LinearContext<'a> {
     pub module: FileDeclarations,
 }
 
-impl<'a> LinearContext<'a> {
+impl LinearContext<'_> {
     pub fn linearize_function(
         &mut self,
         declarations: &DeclarationContext,
@@ -851,7 +851,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 ty,
             }
         }
-        HirNodeValue::TakeUnique(inner) | HirNodeValue::TakeShared(inner) => {
+        HirNodeValue::TakePointer(_, inner) => {
             let (ptr, offset) = lower_lvalue(ctx, *inner);
             LinearNodeValue::Arithmetic(
                 ArithmeticOp::Add,
@@ -1669,8 +1669,7 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
         HirNodeValue::Null => todo!(),
         HirNodeValue::CharLiteral(_) => todo!(),
         HirNodeValue::StringLiteral(_) => todo!(),
-        HirNodeValue::TakeUnique(_) => todo!(),
-        HirNodeValue::TakeShared(_) => todo!(),
+        HirNodeValue::TakePointer(_, _) => todo!(),
         HirNodeValue::Sequence(_) => todo!(),
         HirNodeValue::If(_, _, _) => todo!(),
         HirNodeValue::While(_, _) => todo!(),

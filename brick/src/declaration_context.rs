@@ -843,10 +843,10 @@ fn include_self_param(
         };
         Some(match self_param {
             crate::parser::SelfParameter::Unique => {
-                ExpressionType::Pointer(PointerKind::Unique, Box::new(self_context.clone()))
+                ExpressionType::Pointer(PointerKind::UniqueRef, Box::new(self_context.clone()))
             }
             crate::parser::SelfParameter::Shared => {
-                ExpressionType::Pointer(PointerKind::Shared, Box::new(self_context.clone()))
+                ExpressionType::Pointer(PointerKind::SharedRef, Box::new(self_context.clone()))
             }
             crate::parser::SelfParameter::Owned => self_context.clone(),
         })
@@ -877,7 +877,7 @@ pub fn resolve_type_expr(
         },
         AstNodeValue::VoidType => ExpressionType::Void,
         AstNodeValue::UniqueType(inner) => ExpressionType::Pointer(
-            PointerKind::Unique,
+            PointerKind::UniqueRef,
             Box::new(resolve_type_expr(
                 ast,
                 name_to_type_id,
@@ -886,7 +886,7 @@ pub fn resolve_type_expr(
             )?),
         ),
         AstNodeValue::SharedType(inner) => ExpressionType::Pointer(
-            PointerKind::Shared,
+            PointerKind::SharedRef,
             Box::new(resolve_type_expr(
                 ast,
                 name_to_type_id,
@@ -999,8 +999,7 @@ pub fn resolve_type_expr(
         | AstNodeValue::While(_, _)
         | AstNodeValue::Loop(_)
         | AstNodeValue::Call(_, _)
-        | AstNodeValue::TakeUnique(_)
-        | AstNodeValue::TakeRef(_)
+        | AstNodeValue::TakePointer(_, _)
         | AstNodeValue::RecordLiteral { .. }
         | AstNodeValue::ArrayLiteral(_)
         | AstNodeValue::ArrayLiteralLength(_, _)
@@ -1051,11 +1050,11 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         IntrinsicFunction::ArrayLength,
         1,
         vec![ExpressionType::Pointer(
-            PointerKind::Shared,
+            PointerKind::SharedRef,
             Box::new(ExpressionType::TypeParameterReference(0)),
         )],
         ExpressionType::Primitive(PrimitiveType::PointerSize),
-        PointerKind::Shared,
+        PointerKind::SharedRef,
     );
     add_intrinsic(
         ctx,
@@ -1065,7 +1064,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         1,
         vec![
             ExpressionType::Pointer(
-                PointerKind::Unique,
+                PointerKind::UniqueRef,
                 Box::new(ExpressionType::Collection(CollectionType::Array(Box::new(
                     ExpressionType::TypeParameterReference(0),
                 )))),
@@ -1073,7 +1072,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
             ExpressionType::TypeParameterReference(0),
         ],
         ExpressionType::Void,
-        PointerKind::Unique,
+        PointerKind::UniqueRef,
     );
     ctx.array_intrinsics = array_intrinsics;
 
@@ -1086,19 +1085,19 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         2,
         vec![
             ExpressionType::Pointer(
-                PointerKind::Shared,
+                PointerKind::SharedRef,
                 Box::new(ExpressionType::Collection(CollectionType::Dict(
                     Box::new(ExpressionType::TypeParameterReference(0)),
                     Box::new(ExpressionType::TypeParameterReference(1)),
                 ))),
             ),
             ExpressionType::Pointer(
-                PointerKind::Shared,
+                PointerKind::SharedRef,
                 Box::new(ExpressionType::TypeParameterReference(0)),
             ),
         ],
         ExpressionType::Primitive(PrimitiveType::Bool),
-        PointerKind::Shared,
+        PointerKind::SharedRef,
     );
     add_intrinsic(
         ctx,
@@ -1108,7 +1107,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         2,
         vec![
             ExpressionType::Pointer(
-                PointerKind::Unique,
+                PointerKind::UniqueRef,
                 Box::new(ExpressionType::Collection(CollectionType::Dict(
                     Box::new(ExpressionType::TypeParameterReference(0)),
                     Box::new(ExpressionType::TypeParameterReference(1)),
@@ -1118,7 +1117,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
             ExpressionType::TypeParameterReference(1),
         ],
         ExpressionType::Void,
-        PointerKind::Unique,
+        PointerKind::UniqueRef,
     );
     ctx.dict_intrinsics = dict_intrinsics;
 
@@ -1130,7 +1129,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         IntrinsicFunction::RcClone,
         1,
         vec![ExpressionType::Pointer(
-            PointerKind::Shared,
+            PointerKind::SharedRef,
             Box::new(ExpressionType::Collection(
                 CollectionType::ReferenceCounter(Box::new(ExpressionType::TypeParameterReference(
                     0,
@@ -1140,7 +1139,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         ExpressionType::Collection(CollectionType::ReferenceCounter(Box::new(
             ExpressionType::TypeParameterReference(0),
         ))),
-        PointerKind::Shared,
+        PointerKind::SharedRef,
     );
     ctx.rc_intrinsics = rc_intrinsics;
 
@@ -1153,18 +1152,18 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         1,
         vec![
             ExpressionType::Pointer(
-                PointerKind::Shared,
+                PointerKind::SharedRef,
                 Box::new(ExpressionType::Collection(CollectionType::Cell(Box::new(
                     ExpressionType::TypeParameterReference(0),
                 )))),
             ),
             ExpressionType::Pointer(
-                PointerKind::Unique,
+                PointerKind::UniqueRef,
                 Box::new(ExpressionType::TypeParameterReference(0)),
             ),
         ],
         ExpressionType::Void,
-        PointerKind::Shared,
+        PointerKind::SharedRef,
     );
     add_intrinsic(
         ctx,
@@ -1174,7 +1173,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         1,
         vec![
             ExpressionType::Pointer(
-                PointerKind::Shared,
+                PointerKind::SharedRef,
                 Box::new(ExpressionType::Collection(CollectionType::Cell(Box::new(
                     ExpressionType::TypeParameterReference(0),
                 )))),
@@ -1182,7 +1181,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
             ExpressionType::TypeParameterReference(0),
         ],
         ExpressionType::Void,
-        PointerKind::Shared,
+        PointerKind::SharedRef,
     );
     ctx.cell_intrinsics = cell_intrinsics;
 }

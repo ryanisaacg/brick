@@ -1,0 +1,7 @@
+// Int | 25
+
+let value = 25;
+let raw_ptr = unique_ptr value;
+unsafe {
+    *raw_ptr
+}

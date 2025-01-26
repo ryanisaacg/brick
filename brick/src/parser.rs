@@ -5,7 +5,7 @@ use crate::{
     id::{AnyID, ConstantID, VariableID},
     provenance::{SourceMarker, SourceRange},
     tokenizer::{LexError, Token, TokenValue},
-    typecheck::ExpressionType,
+    typecheck::{ExpressionType, PointerKind},
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -66,8 +66,7 @@ impl AstNode {
         match &self.value {
             Return(Some(child))
             | Yield(Some(child))
-            | TakeRef(child)
-            | TakeUnique(child)
+            | TakePointer(_, child)
             | ArrayLiteralLength(child, _)
             | UniqueType(child)
             | SharedType(child)
@@ -344,8 +343,7 @@ pub enum AstNodeValue {
     While(AstNodeId, AstNodeId),
     Loop(AstNodeId),
     Call(AstNodeId, Vec<AstNodeId>),
-    TakeUnique(AstNodeId),
-    TakeRef(AstNodeId),
+    TakePointer(PointerKind, AstNodeId),
     RecordLiteral {
         name: AstNodeId,
         fields: HashMap<String, AstNodeId>,
@@ -1672,8 +1670,12 @@ fn expression_pratt(
             let right = add_node(context, right);
             AstNode::new(
                 match value {
-                    TokenValue::Ref => AstNodeValue::TakeRef(right),
-                    TokenValue::Unique => AstNodeValue::TakeUnique(right),
+                    TokenValue::Ref => AstNodeValue::TakePointer(PointerKind::SharedRef, right),
+                    TokenValue::Unique => AstNodeValue::TakePointer(PointerKind::UniqueRef, right),
+                    TokenValue::RefPtr => AstNodeValue::TakePointer(PointerKind::SharedRaw, right),
+                    TokenValue::UniquePtr => {
+                        AstNodeValue::TakePointer(PointerKind::UniqueRaw, right)
+                    }
                     TokenValue::Asterisk => AstNodeValue::Deref(right),
                     TokenValue::Exclamation => AstNodeValue::UnaryExpr(UnaryOp::BooleanNot, right),
                     TokenValue::Minus => AstNodeValue::UnaryExpr(UnaryOp::Negate, right),
@@ -1904,7 +1906,11 @@ const DOT: u8 = NULL_CHAINING + 1;
 
 fn prefix_binding_power(op: &TokenValue) -> Option<((), u8)> {
     let res = match op {
-        TokenValue::Ref | TokenValue::Unique | TokenValue::Asterisk => ((), REFERENCE),
+        TokenValue::Ref
+        | TokenValue::Unique
+        | TokenValue::RefPtr
+        | TokenValue::UniquePtr
+        | TokenValue::Asterisk => ((), REFERENCE),
         TokenValue::Exclamation => ((), BOOLEAN_NOT),
         TokenValue::Minus => ((), NEGATE),
         _ => return None,

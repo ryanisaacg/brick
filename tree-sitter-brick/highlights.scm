@@ -15,10 +15,13 @@
     "let"
     "borrow"
     "const"
+    "unsafe"
 ] @keyword
 [
     "unique"
     "ref"
+    "unique_ptr"
+    "ref_ptr"
     "and"
     "or"
 ] @keyword.operator

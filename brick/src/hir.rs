@@ -6,8 +6,8 @@ use crate::{
     parser::{AstArena, AstNode},
     provenance::SourceRange,
     typecheck::{
-        is_assignable_to, CollectionType, ExpressionType, PrimitiveType, TypeDeclaration,
-        TypecheckedFile,
+        is_assignable_to, CollectionType, ExpressionType, PointerKind, PrimitiveType,
+        TypeDeclaration, TypecheckedFile,
     },
     DeclarationContext,
 };
@@ -475,8 +475,7 @@ impl HirNode {
             HirNodeValue::Access(child, _)
             | HirNodeValue::NullableTraverse(child, _)
             | HirNodeValue::InterfaceAddress(child)
-            | HirNodeValue::TakeUnique(child)
-            | HirNodeValue::TakeShared(child)
+            | HirNodeValue::TakePointer(_, child)
             | HirNodeValue::Dereference(child)
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
@@ -702,8 +701,7 @@ impl HirNode {
             HirNodeValue::Access(child, _)
             | HirNodeValue::NullableTraverse(child, _)
             | HirNodeValue::InterfaceAddress(child)
-            | HirNodeValue::TakeUnique(child)
-            | HirNodeValue::TakeShared(child)
+            | HirNodeValue::TakePointer(_, child)
             | HirNodeValue::Dereference(child)
             | HirNodeValue::NumericCast { value: child, .. }
             | HirNodeValue::MakeNullable(child)
@@ -810,8 +808,7 @@ pub enum HirNodeValue {
         to: PrimitiveType,
     },
 
-    TakeUnique(Box<HirNode>),
-    TakeShared(Box<HirNode>),
+    TakePointer(PointerKind, Box<HirNode>),
     Dereference(Box<HirNode>),
 
     /// Like a Block in that it's a collection of nodes, but the IR
@@ -866,8 +863,7 @@ impl HirNodeValue {
             HirNodeValue::Call(lvalue, _)
             | HirNodeValue::Access(lvalue, _)
             | HirNodeValue::NullableTraverse(lvalue, _)
-            | HirNodeValue::TakeUnique(lvalue)
-            | HirNodeValue::TakeShared(lvalue)
+            | HirNodeValue::TakePointer(_, lvalue)
             | HirNodeValue::UnionTag(lvalue)
             | HirNodeValue::UnionVariant(lvalue, _)
             | HirNodeValue::StructToInterface { value: lvalue, .. } => Some(lvalue),

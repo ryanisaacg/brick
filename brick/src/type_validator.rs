@@ -228,7 +228,7 @@ fn validate_drop(
                     );
                 } else {
                     let is_self_unique_ptr =
-                        if let ExpressionType::Pointer(PointerKind::Unique, inner) =
+                        if let ExpressionType::Pointer(PointerKind::UniqueRef, inner) =
                             &fn_ty.params[0]
                         {
                             match inner.as_ref() {

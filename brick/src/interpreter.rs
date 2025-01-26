@@ -94,7 +94,7 @@ impl<'a> VM<'a> {
         layouts: HashMap<TypeID, DeclaredTypeLayout>,
         functions: &'a HashMap<FunctionID, Function>,
         constant_data_region: Vec<u8>,
-    ) -> VM {
+    ) -> VM<'a> {
         let mut memory = vec![0; CONSTANT_DATA_START];
         memory.extend(constant_data_region);
         unsafe {

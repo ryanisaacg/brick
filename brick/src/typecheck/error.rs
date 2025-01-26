@@ -55,6 +55,7 @@ pub enum TypecheckError {
     TypeDotOperatorLhsMustBeModule(SourceRange),
     ExternFunctionCalledOutsideUnsafe(SourceRange),
     UnsafeFunctionCalledOutsideUnsafe(SourceRange),
+    RawPointerDereferencedOutsideUnsafe(SourceRange),
 }
 
 impl Error for TypecheckError {}
@@ -215,6 +216,10 @@ impl Diagnostic for TypecheckError {
             UnsafeFunctionCalledOutsideUnsafe(range) => DiagnosticMarker::error(
                 range.clone(),
                 "unsafe function called outside unsafe range",
+            ),
+            RawPointerDereferencedOutsideUnsafe(range) => DiagnosticMarker::error(
+                range.clone(),
+                "raw pointer derefernced outside unsafe range",
             ),
         })
     }

@@ -1,0 +1,5 @@
+// NoCompile
+
+let value = 25;
+let raw_ptr = ref_ptr value;
+*raw_ptr = 5;

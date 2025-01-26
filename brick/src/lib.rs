@@ -14,7 +14,9 @@ pub use linear_ir::{
 use linear_ir::{layout_types, LinearContext};
 use parser::ParsedFile;
 use typecheck::typecheck;
-pub use typecheck::{typecheck_node, ExpressionType, FuncType, TypeDeclaration, TypecheckContext};
+pub use typecheck::{
+    typecheck_node, ExpressionType, FuncType, PointerKind, TypeDeclaration, TypecheckContext,
+};
 
 mod borrowck;
 mod declaration_context;

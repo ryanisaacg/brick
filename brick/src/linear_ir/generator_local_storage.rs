@@ -55,5 +55,5 @@ fn is_special(
     param_var_id: Option<VariableID>,
     var_id: VariableID,
 ) -> bool {
-    generator_id == var_id || param_var_id.map_or(false, |param_var_id| param_var_id == var_id)
+    generator_id == var_id || param_var_id == Some(var_id)
 }

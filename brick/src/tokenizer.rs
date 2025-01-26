@@ -87,6 +87,8 @@ pub enum TokenValue {
     Union,
     Unique,
     Ref,
+    UniquePtr,
+    RefPtr,
     Return,
     Extern,
     Null,
@@ -128,6 +130,8 @@ impl TokenValue {
             | TokenValue::False
             | TokenValue::Unique
             | TokenValue::Ref
+            | TokenValue::UniquePtr
+            | TokenValue::RefPtr
             | TokenValue::Null
             | TokenValue::Yield
             | TokenValue::Case
@@ -239,6 +243,8 @@ impl fmt::Display for TokenValue {
             Union => write!(f, "keyword union"),
             Unique => write!(f, "keyword unique"),
             Ref => write!(f, "keyword ref"),
+            UniquePtr => write!(f, "keyword unique_ptr"),
+            RefPtr => write!(f, "keyword ref_ptr"),
             Return => write!(f, "keyword return"),
             Extern => write!(f, "keyword extern"),
             Null => write!(f, "keyword null"),
@@ -406,6 +412,8 @@ impl Iterator for TokenIterator {
                         "union" => TokenValue::Union,
                         "unique" => TokenValue::Unique,
                         "ref" => TokenValue::Ref,
+                        "unique_ptr" => TokenValue::UniquePtr,
+                        "ref_ptr" => TokenValue::RefPtr,
                         "return" => TokenValue::Return,
                         "extern" => TokenValue::Extern,
                         "null" => TokenValue::Null,
