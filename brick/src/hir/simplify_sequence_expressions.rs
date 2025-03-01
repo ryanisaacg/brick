@@ -8,11 +8,22 @@ use crate::{
 use super::{HirModule, HirNode, HirNodeValue};
 
 /**
+ * Turn the expression-oriented language into a statement-oriented one for ease of analysis and
+ * backend compilation
+ */
+pub fn simplify_sequences(module: &mut HirModule, declarations: &DeclarationContext) {
+    simplify_sequence_uses(module, declarations);
+    simplify_sequence_assignments(module);
+    simplify_trailing_if(module);
+    always_mark_trailing_as_return(module);
+}
+
+/**
  * Wherever a sequence (or an if statement) is assigned to a variable, replace it with a sequence
  * that ends in that variable's assignment (e.g. x = if a { 1 } else { 2 } should become if a { x =
  * 1 } else { x = 2 })
  */
-pub fn simplify_sequence_assignments(module: &mut HirModule) {
+fn simplify_sequence_assignments(module: &mut HirModule) {
     module.par_visit_mut(|_return_ty, node| {
         let HirNodeValue::Assignment(lhs, rhs) = &mut node.value else {
             return;
@@ -87,7 +98,7 @@ fn replace_last_with_assignment(
  * If any such child exists, all children are converted to temp variables to preserve control flow.
  * Otherwise, you encounter bugs where certain sub-trees are moved improperly and out-of-order
  */
-pub fn simplify_sequence_uses(module: &mut HirModule, declarations: &DeclarationContext) {
+fn simplify_sequence_uses(module: &mut HirModule, declarations: &DeclarationContext) {
     module.top_level_nodes_par_mut(|return_ty, node| {
         simplify_sequence_for_node(declarations, return_ty, node);
     });
@@ -171,7 +182,7 @@ fn simplify_sequence_for_node(
     );
 }
 
-pub fn simplify_trailing_if(module: &mut HirModule) {
+fn simplify_trailing_if(module: &mut HirModule) {
     module.par_visit_mut(|_return_ty, node| {
         let HirNodeValue::Sequence(children) = &mut node.value else {
             return;
@@ -251,4 +262,26 @@ fn is_node_sequence(node: &HirNode) -> bool {
         &node.value,
         HirNodeValue::Sequence(_) | HirNodeValue::If(_, _, _) | HirNodeValue::Switch { .. },
     )
+}
+
+fn always_mark_trailing_as_return(module: &mut HirModule) {
+    use rayon::prelude::*;
+
+    module.functions.par_iter_mut().for_each(|func| {
+        if func.body.ty != ExpressionType::Void && func.body.ty != ExpressionType::Unreachable {
+            replace_innermost_trailing_expression_with_return(&mut func.body);
+        }
+    });
+}
+
+fn replace_innermost_trailing_expression_with_return(body: &mut HirNode) {
+    if let HirNodeValue::Sequence(nodes) = &mut body.value {
+        if let Some(last) = nodes.last_mut() {
+            replace_innermost_trailing_expression_with_return(last);
+        }
+    } else {
+        let provenance = body.provenance.clone();
+        *body = HirNode::new_void(HirNodeValue::Return(Some(Box::new(std::mem::take(body)))));
+        body.provenance = provenance;
+    }
 }

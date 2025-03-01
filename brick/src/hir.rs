@@ -53,9 +53,7 @@ pub fn desugar_module<'dest>(
     create_temp_vars_for_lvalues::create_temp_vars_for_lvalues(&mut module);
 
     // These should go after desugaring, to clean up any sequences that are created by earlier passes
-    simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
-    simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
-    simplify_sequence_expressions::simplify_trailing_if(&mut module);
+    simplify_sequence_expressions::simplify_sequences(&mut module, declarations);
 
     break_up_complex_returns::break_up_complex_returns(&mut module);
 

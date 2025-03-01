@@ -158,6 +158,7 @@ fn parse_test_value(ty: &str, value: &str) -> TestValue {
     }
 }
 
+#[derive(Debug)]
 pub struct TestCase {
     pub root: PathBuf,
     pub sources: Vec<PathBuf>,
