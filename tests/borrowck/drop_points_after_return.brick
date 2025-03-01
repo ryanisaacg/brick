@@ -1,0 +1,21 @@
+// Counter | 1
+extern fn incr_test_counter();
+
+struct Data: Resource {
+    field: i32,
+
+    fn drop(unique self) {
+        unsafe {
+            incr_test_counter();
+        }
+    }
+}
+
+
+fn calculate(): i32 {
+    let x = Data { field: 5 };
+    return x.field;
+}
+
+
+let _ = calculate();

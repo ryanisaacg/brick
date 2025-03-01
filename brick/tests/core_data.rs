@@ -33,16 +33,13 @@ fn data() {
     );
 }
 
-/*
-TO TEST A SINGLE TEST FILE: uncomment this function and rewrite the path
 #[test]
 fn single_test() -> anyhow::Result<()> {
     let mut path = std::env::current_dir().unwrap();
     path.pop();
-    path.push("tests/borrowck/lifetime_returned_value.brick");
+    path.push("tests/borrowck/drop_points_after_return.brick");
     data_test_driver::test_file(path, does_compile, does_succeed)
 }
-*/
 
 fn does_compile(contents: &[&'static str]) -> anyhow::Result<()> {
     check_types(

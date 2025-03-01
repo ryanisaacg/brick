@@ -14,6 +14,7 @@ use crate::{
 
 mod auto_deref_dot;
 mod auto_numeric_cast;
+mod break_up_complex_returns;
 pub mod constant_inlining;
 mod coroutines;
 mod create_temp_vars_for_lvalues;
@@ -55,6 +56,8 @@ pub fn desugar_module<'dest>(
     simplify_sequence_expressions::simplify_sequence_uses(&mut module, declarations);
     simplify_sequence_expressions::simplify_sequence_assignments(&mut module);
     simplify_sequence_expressions::simplify_trailing_if(&mut module);
+
+    break_up_complex_returns::break_up_complex_returns(&mut module);
 
     // This should go last, to clean up any expressions that are returning an unused value
     discard_unused_values::discard_unused_values(&mut module, declarations);
