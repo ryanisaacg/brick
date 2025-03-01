@@ -6,13 +6,12 @@ use crate::{
     diagnostic::{Diagnostic, DiagnosticContents, DiagnosticMarker},
     multi_error::{merge_results, MultiError},
     typecheck::{InterfaceType, MoveSemantics, PointerKind, StructType, UnionType},
-    DeclarationContext, ExpressionType, FuncType, SourceRange, TypeDeclaration, TypeID,
+    DeclarationContext, ExpressionType, SourceRange, TypeDeclaration, TypeID,
 };
 
 #[derive(Debug)]
 pub enum TypeValidationError {
     MultiError(Vec<TypeValidationError>),
-    ReferenceReturn(SourceRange),
     DropOnNormalType(SourceRange),
     DropOnInterface(SourceRange),
     NonVoidDrop(SourceRange),
@@ -45,10 +44,6 @@ impl Diagnostic for TypeValidationError {
                 }
                 return DiagnosticContents::Vector(contents);
             }
-            TypeValidationError::ReferenceReturn(range) => DiagnosticMarker::error(
-                range.clone(),
-                "illegal return of a reference from a function",
-            ),
             TypeValidationError::DropOnNormalType(range) => DiagnosticMarker::error(
                 range.clone(),
                 "drop may not be defined on normal types (they must be affine)",
@@ -109,13 +104,6 @@ pub fn validate_types(decls: &DeclarationContext) -> Result<(), TypeValidationEr
             .id_to_decl
             .par_iter()
             .map(|(_, decl)| validate_decl(decls, decl)),
-    );
-    acc(
-        &mut validate_results,
-        decls
-            .id_to_func
-            .par_iter()
-            .map(|(_, decl)| validate_fn(decls, decl)),
     );
     acc(
         &mut validate_results,
@@ -302,27 +290,6 @@ fn validate_interface_fns(
     }
 
     Ok(())
-}
-
-fn validate_fn(decls: &DeclarationContext, fn_ty: &FuncType) -> Result<(), TypeValidationError> {
-    let mut result = Ok(());
-
-    // TODO: Allow custom functions to return borrows
-    if matches!(&fn_ty.returns, ExpressionType::Pointer(_, _))
-        && !decls.id_to_intrinsic.contains_key(&fn_ty.id)
-    {
-        merge_results(
-            &mut result,
-            Err(TypeValidationError::ReferenceReturn(
-                fn_ty
-                    .provenance
-                    .clone()
-                    .expect("all non-intrinsic functions have a provenance"),
-            )),
-        );
-    }
-
-    result
 }
 
 fn validate_nonrecursive(

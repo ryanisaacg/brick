@@ -1,0 +1,15 @@
+// NoCompile
+
+fn ref_max(x: ref i32, y: ref i32): ref i32 {
+    if *x > *y {
+        x
+    } else {
+        y
+    }
+}
+
+let a = 10;
+let b = 20;
+borrow c = ref_max(ref a, ref b);
+borrow a_ = unique a;
+*c

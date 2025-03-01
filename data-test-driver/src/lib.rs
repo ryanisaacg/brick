@@ -20,9 +20,43 @@ pub fn test_folder(
         + RefUnwindSafe,
     should_fail: HashSet<&str>,
 ) {
-    use rayon::prelude::*;
+    run_test_cases(find_tests(path), check_does_compile, execute, should_fail);
+}
 
-    let paths = find_tests(path);
+pub fn test_files(
+    paths: Vec<PathBuf>,
+    check_does_compile: impl Fn(&[&'static str]) -> anyhow::Result<()> + Send + Sync,
+    execute: impl (Fn(&[&'static str], &TestValue) -> anyhow::Result<TestValue>)
+        + Send
+        + Sync
+        + UnwindSafe
+        + RefUnwindSafe,
+) {
+    run_test_cases(
+        paths
+            .into_iter()
+            .map(|path| TestCase {
+                root: path.clone(),
+                sources: vec![path],
+            })
+            .collect(),
+        check_does_compile,
+        execute,
+        HashSet::new(),
+    );
+}
+
+fn run_test_cases(
+    paths: Vec<TestCase>,
+    check_does_compile: impl Fn(&[&'static str]) -> anyhow::Result<()> + Send + Sync,
+    execute: impl (Fn(&[&'static str], &TestValue) -> anyhow::Result<TestValue>)
+        + Send
+        + Sync
+        + UnwindSafe
+        + RefUnwindSafe,
+    should_fail: HashSet<&str>,
+) {
+    use rayon::prelude::*;
 
     let results: Vec<_> = paths
         .into_par_iter()
@@ -64,26 +98,6 @@ pub fn test_folder(
     println!("{failed_count} tests failed");
     if failed_count > 0 {
         panic!();
-    }
-}
-
-pub fn test_file(
-    path: PathBuf,
-    check_does_compile: impl Fn(&[&'static str]) -> anyhow::Result<()> + Send + Sync,
-    execute: impl (Fn(&[&'static str], &TestValue) -> anyhow::Result<TestValue>)
-        + Send
-        + Sync
-        + UnwindSafe
-        + RefUnwindSafe,
-) -> anyhow::Result<()> {
-    let case = TestCase {
-        root: path.clone(),
-        sources: vec![path],
-    };
-    let result = case.run(check_does_compile, execute);
-    match result {
-        TestSuccessOrFailure::Succeeded(_) => Ok(()),
-        _ => Err(anyhow::anyhow!("{result}")),
     }
 }
 

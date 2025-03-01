@@ -1,0 +1,15 @@
+// NoCompile
+
+struct Data {
+    field: i32
+}
+
+
+fn get_field(data: ref Data): ref i32 {
+    let x = 1;
+    return (ref x)
+}
+
+let x = Data { field: 1 };
+borrow field = get_field(ref x);
+*field

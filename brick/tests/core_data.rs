@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::bail;
 use brick::{check_types, interpret_code, SourceFile, Value};
@@ -34,11 +37,25 @@ fn data() {
 }
 
 #[test]
-fn single_test() -> anyhow::Result<()> {
+fn specific_files() {
+    data_test_driver::test_files(
+        vec![
+            // Include specific cases here
+            test("tests/borrowck/return_borrowed_field.brick"),
+            test("tests/borrowck/prevent_local_value_reference_return.brick"),
+            test("tests/borrowck/prevent_local_value_reference_expression_return.brick"),
+            test("tests/borrowck/prevent_function_call_borrow_from_let_assign.brick"),
+        ],
+        does_compile,
+        does_succeed,
+    );
+}
+
+fn test(test_path: &str) -> PathBuf {
     let mut path = std::env::current_dir().unwrap();
     path.pop();
-    path.push("tests/borrowck/drop_points_after_return.brick");
-    data_test_driver::test_file(path, does_compile, does_succeed)
+    path.push(test_path);
+    path
 }
 
 fn does_compile(contents: &[&'static str]) -> anyhow::Result<()> {

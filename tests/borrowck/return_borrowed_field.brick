@@ -1,0 +1,14 @@
+// Int | 1
+
+struct Data {
+    field: i32
+}
+
+
+fn get_field(data: ref Data): ref i32 {
+    ref data.field
+}
+
+let x = Data { field: 1 };
+borrow field = get_field(ref x);
+*field

@@ -263,7 +263,6 @@ fn is_node_sequence(node: &HirNode) -> bool {
         HirNodeValue::Sequence(_) | HirNodeValue::If(_, _, _) | HirNodeValue::Switch { .. },
     )
 }
-
 fn always_mark_trailing_as_return(module: &mut HirModule) {
     use rayon::prelude::*;
 
