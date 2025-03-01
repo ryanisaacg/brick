@@ -471,21 +471,35 @@ fn typecheck_expression<'a>(
             current_scope.insert(name.clone(), ((*variable_id).into(), value_ty.clone()));
 
             let mut results = Ok(());
-            if let AstNodeValue::TakePointer(_, child) = &value.value {
-                if !validate_lvalue(context, context.ast.get(*child)) {
+            match &value.value {
+                AstNodeValue::TakePointer(_, child) => {
+                    if !validate_lvalue(context, context.ast.get(*child)) {
+                        merge_results(
+                            &mut results,
+                            Err(TypecheckError::IllegalNonLvalueBorrow(
+                                node.provenance.clone(),
+                            )),
+                        );
+                    }
+                }
+                AstNodeValue::Call(_, _) => {
+                    if !matches!(value_ty, ExpressionType::Pointer(_, _)) {
+                        merge_results(
+                            &mut results,
+                            Err(TypecheckError::IllegalNonReferenceReturnFunctionBorrow(
+                                node.provenance.clone(),
+                            )),
+                        );
+                    }
+                }
+                _ => {
                     merge_results(
                         &mut results,
-                        Err(TypecheckError::IllegalNonLvalueBorrow(
-                            node.provenance.clone(),
-                        )),
+                        Err(TypecheckError::IllegalNonRefBorrow(node.provenance.clone())),
                     );
                 }
-            } else {
-                merge_results(
-                    &mut results,
-                    Err(TypecheckError::IllegalNonRefBorrow(node.provenance.clone())),
-                );
-            };
+            }
+
             results?;
 
             ExpressionType::Void

@@ -115,7 +115,7 @@ pub fn validate_types(decls: &DeclarationContext) -> Result<(), TypeValidationEr
         decls
             .id_to_func
             .par_iter()
-            .map(|(_, decl)| validate_fn(decl)),
+            .map(|(_, decl)| validate_fn(decls, decl)),
     );
     acc(
         &mut validate_results,
@@ -304,10 +304,13 @@ fn validate_interface_fns(
     Ok(())
 }
 
-fn validate_fn(fn_ty: &FuncType) -> Result<(), TypeValidationError> {
+fn validate_fn(decls: &DeclarationContext, fn_ty: &FuncType) -> Result<(), TypeValidationError> {
     let mut result = Ok(());
 
-    if matches!(&fn_ty.returns, ExpressionType::Pointer(_, _)) {
+    // TODO: Allow custom functions to return borrows
+    if matches!(&fn_ty.returns, ExpressionType::Pointer(_, _))
+        && !decls.id_to_intrinsic.contains_key(&fn_ty.id)
+    {
         merge_results(
             &mut result,
             Err(TypeValidationError::ReferenceReturn(

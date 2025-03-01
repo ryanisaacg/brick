@@ -26,6 +26,7 @@ pub struct DeclarationContext {
     pub id_to_decl: HashMap<TypeID, TypeDeclaration>,
     pub id_to_func: HashMap<FunctionID, FuncType>,
     pub intrinsic_to_id: HashMap<IntrinsicFunction, FunctionID>,
+    pub id_to_intrinsic: HashMap<FunctionID, IntrinsicFunction>,
     pub array_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
     pub dict_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
     pub rc_intrinsics: HashMap<&'static str, CollectionIntrinsic>,
@@ -45,6 +46,7 @@ impl DeclarationContext {
             id_to_decl: HashMap::new(),
             id_to_func: HashMap::new(),
             intrinsic_to_id: HashMap::new(),
+            id_to_intrinsic: HashMap::new(),
             array_intrinsics: HashMap::new(),
             dict_intrinsics: HashMap::new(),
             rc_intrinsics: HashMap::new(),
@@ -1023,6 +1025,7 @@ pub enum IntrinsicFunction {
     ArrayLength,
     ArrayPush,
     ArrayFree,
+    ArrayGet,
 
     DictionaryInsert,
     DictionaryContains,
@@ -1073,6 +1076,27 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         ],
         ExpressionType::Void,
         PointerKind::UniqueRef,
+    );
+    add_intrinsic(
+        ctx,
+        &mut array_intrinsics,
+        "get",
+        IntrinsicFunction::ArrayGet,
+        1,
+        vec![
+            ExpressionType::Pointer(
+                PointerKind::SharedRef,
+                Box::new(ExpressionType::Collection(CollectionType::Array(Box::new(
+                    ExpressionType::TypeParameterReference(0),
+                )))),
+            ),
+            ExpressionType::Primitive(PrimitiveType::PointerSize),
+        ],
+        ExpressionType::Pointer(
+            PointerKind::SharedRef,
+            Box::new(ExpressionType::TypeParameterReference(0)),
+        ),
+        PointerKind::SharedRef,
     );
     ctx.array_intrinsics = array_intrinsics;
 
@@ -1221,4 +1245,5 @@ fn add_intrinsic(
         },
     );
     ctx.intrinsic_to_id.insert(intrinsic_fn, fn_id);
+    ctx.id_to_intrinsic.insert(fn_id, intrinsic_fn);
 }

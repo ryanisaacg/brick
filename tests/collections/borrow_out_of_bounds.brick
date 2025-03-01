@@ -1,0 +1,4 @@
+// Abort
+let x = list[1, 2, 3];
+borrow val = x.get(10);
+*val

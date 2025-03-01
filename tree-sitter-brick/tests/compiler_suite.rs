@@ -1,4 +1,4 @@
-use data_test_driver::{find_tests, load_test_contents, TestExpectation};
+use data_test_driver::{find_tests, TestCase, TestExpectation};
 
 #[test]
 fn data() {
@@ -8,7 +8,7 @@ fn data() {
 
     let test_contents: Vec<_> = find_tests(test_dir)
         .iter()
-        .map(load_test_contents)
+        .map(TestCase::load_test_contents)
         .filter(|contents| {
             // Don't include tests with compilation errors, because they may have syntax errors
             contents.expectation != TestExpectation::DoesNotCompile

@@ -34,6 +34,7 @@ pub enum TypecheckError {
     IllegalFirstClassReference(SourceRange),
     IllegalNonRefBorrow(SourceRange),
     IllegalNonLvalueBorrow(SourceRange),
+    IllegalNonReferenceReturnFunctionBorrow(SourceRange),
     IllegalReferenceInsideDataType(SourceRange),
     UnknownProperty(String, SourceRange),
     FieldNotPresent(String, SourceRange),
@@ -135,11 +136,15 @@ impl Diagnostic for TypecheckError {
             ),
             IllegalNonRefBorrow(range) => DiagnosticMarker::error(
                 range.clone(),
-                "right hand side of 'borrow' statement must be a reference",
+                "right hand side of 'borrow' statement must be a reference statement or function call",
             ),
             IllegalNonLvalueBorrow(range) => DiagnosticMarker::error(
                 range.clone(),
-                "right hand side of 'borrow' statement must be a valid lvalue",
+                "right hand side of 'borrow' statement must be a valid lvalue or function call",
+            ),
+            IllegalNonReferenceReturnFunctionBorrow(range) => DiagnosticMarker::error(
+                range.clone(),
+                "right hand side of 'borrow' statement must return a reference when calling a function",
             ),
             IllegalReferenceInsideDataType(range) => {
                 DiagnosticMarker::error(range.clone(), "illegal reference inside data type")

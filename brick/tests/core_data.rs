@@ -11,35 +11,8 @@ fn data() {
     working_dir.push("tests");
     data_test_driver::test_folder(
         working_dir,
-        |contents| -> anyhow::Result<()> {
-            check_types(
-                &contents
-                    .iter()
-                    .map(|path| SourceFile::from_filename(path).unwrap())
-                    .collect::<Vec<_>>(),
-            )?;
-            Ok(())
-        },
-        |contents, expected| -> anyhow::Result<TestValue> {
-            let counter = Arc::new(Mutex::new(0));
-
-            let func_counter = counter.clone();
-            let (mut results, memory) = interpret_code(
-                &contents
-                    .iter()
-                    .map(|path| SourceFile::from_filename(path).unwrap())
-                    .collect::<Vec<_>>(),
-                vec![(
-                    "incr_test_counter",
-                    Box::new(move |_, _| {
-                        *func_counter.lock().unwrap() += 1;
-                        None
-                    }),
-                )],
-            )?;
-            let counter = *counter.lock().unwrap();
-            look_for_value(&mut results, &memory[..], expected, counter)
-        },
+        does_compile,
+        does_succeed,
         [
             // Coroutines temporarily don't compile
             "coroutine/count_up.brick",
@@ -58,6 +31,48 @@ fn data() {
         .into_iter()
         .collect(),
     );
+}
+
+/*
+TO TEST A SINGLE TEST FILE: uncomment this function and rewrite the path
+#[test]
+fn single_test() -> anyhow::Result<()> {
+    let mut path = std::env::current_dir().unwrap();
+    path.pop();
+    path.push("tests/borrowck/lifetime_returned_value.brick");
+    data_test_driver::test_file(path, does_compile, does_succeed)
+}
+*/
+
+fn does_compile(contents: &[&'static str]) -> anyhow::Result<()> {
+    check_types(
+        &contents
+            .iter()
+            .map(|path| SourceFile::from_filename(path).unwrap())
+            .collect::<Vec<_>>(),
+    )?;
+    Ok(())
+}
+
+fn does_succeed(contents: &[&'static str], expected: &TestValue) -> anyhow::Result<TestValue> {
+    let counter = Arc::new(Mutex::new(0));
+
+    let func_counter = counter.clone();
+    let (mut results, memory) = interpret_code(
+        &contents
+            .iter()
+            .map(|path| SourceFile::from_filename(path).unwrap())
+            .collect::<Vec<_>>(),
+        vec![(
+            "incr_test_counter",
+            Box::new(move |_, _| {
+                *func_counter.lock().unwrap() += 1;
+                None
+            }),
+        )],
+    )?;
+    let counter = *counter.lock().unwrap();
+    look_for_value(&mut results, &memory[..], expected, counter)
 }
 
 fn look_for_value(

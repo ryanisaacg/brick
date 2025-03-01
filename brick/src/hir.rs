@@ -866,6 +866,8 @@ impl HirNodeValue {
             | HirNodeValue::TakePointer(_, lvalue)
             | HirNodeValue::UnionTag(lvalue)
             | HirNodeValue::UnionVariant(lvalue, _)
+            | HirNodeValue::ArrayIndex(lvalue, _)
+            | HirNodeValue::DictIndex(lvalue, _)
             | HirNodeValue::StructToInterface { value: lvalue, .. } => Some(lvalue),
             _ => None,
         }

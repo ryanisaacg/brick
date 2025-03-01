@@ -4,7 +4,7 @@ use anyhow::{bail, Context};
 use brick::SourceFile;
 use brick_ld::InputModule;
 use brick_wasm_backend::{compile, BackendOptions};
-use data_test_driver::{find_tests, load_test_contents, TestExpectation, TestValue};
+use data_test_driver::{find_tests, TestCase, TestExpectation, TestValue};
 use rayon::prelude::*;
 use runtime_binary::wasm_runtime;
 use wasmtime::{Engine, Func, Linker, Memory, Module, Store, Val};
@@ -17,7 +17,7 @@ fn data() {
 
     let test_contents: Vec<_> = find_tests(test_dir)
         .iter()
-        .map(load_test_contents)
+        .map(TestCase::load_test_contents)
         .filter(|contents| {
             // Only include tests that meaningfully run - compiles/nocompiles/aborts all handled by
             // brick-wasmtime's tests

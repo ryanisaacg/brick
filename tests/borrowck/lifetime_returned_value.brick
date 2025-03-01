@@ -1,0 +1,9 @@
+// Int | 6
+
+let x = list[1, 2, 3];
+let y = 5;
+{
+    borrow val = x.get(0);
+    y += *val;
+}
+y

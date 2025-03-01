@@ -1,0 +1,6 @@
+// NoCompile
+
+let x = list[1, 2, 3];
+borrow val = x.get(0);
+borrow val_ = unique x;
+*val

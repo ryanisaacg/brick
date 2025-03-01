@@ -27,49 +27,7 @@ pub fn test_folder(
     let results: Vec<_> = paths
         .into_par_iter()
         .map(|test_case| {
-            let root = test_case.root.clone();
-            let TestContents {
-                expectation,
-                sources,
-                ..
-            } = load_test_contents(&test_case);
-            let result = match expectation {
-                TestExpectation::Compiles => match check_does_compile(&sources) {
-                    Ok(_) => TestSuccessOrFailure::Succeeded(root),
-                    Err(error) => TestSuccessOrFailure::FailsToCompile(root, error),
-                },
-                TestExpectation::DoesNotCompile => match check_does_compile(&sources) {
-                    Ok(_) => TestSuccessOrFailure::CompiledButShouldnt(root),
-                    Err(_) => TestSuccessOrFailure::Succeeded(root),
-                },
-                TestExpectation::Aborts => {
-                    if check_does_compile(&sources).is_ok()
-                        && execute(&sources, &TestValue::Void).is_err()
-                    {
-                        TestSuccessOrFailure::Succeeded(root)
-                    } else {
-                        TestSuccessOrFailure::RanButShouldnt(root)
-                    }
-                }
-                TestExpectation::ProducesValue(expected) => {
-                    match panic::catch_unwind(|| execute(&sources, &expected)) {
-                        Ok(result) => match result {
-                            Ok(received) if expected == received => {
-                                TestSuccessOrFailure::Succeeded(root)
-                            }
-                            Ok(received) => TestSuccessOrFailure::MismatchedResult {
-                                path: root,
-                                expected,
-                                received,
-                            },
-                            Err(error) => TestSuccessOrFailure::ErroredWhenRun(root, error),
-                        },
-                        Err(panic) => {
-                            TestSuccessOrFailure::PanickedWhenRun(test_case.root.clone(), panic)
-                        }
-                    }
-                }
-            };
+            let result = test_case.run(&check_does_compile, &execute);
             (test_case.root, result)
         })
         .map(|(path, result)| {
@@ -109,6 +67,26 @@ pub fn test_folder(
     }
 }
 
+pub fn test_file(
+    path: PathBuf,
+    check_does_compile: impl Fn(&[&'static str]) -> anyhow::Result<()> + Send + Sync,
+    execute: impl (Fn(&[&'static str], &TestValue) -> anyhow::Result<TestValue>)
+        + Send
+        + Sync
+        + UnwindSafe
+        + RefUnwindSafe,
+) -> anyhow::Result<()> {
+    let case = TestCase {
+        root: path.clone(),
+        sources: vec![path],
+    };
+    let result = case.run(check_does_compile, execute);
+    match result {
+        TestSuccessOrFailure::Succeeded(_) => Ok(()),
+        _ => Err(anyhow::anyhow!("{result}")),
+    }
+}
+
 pub fn find_tests(test_root: PathBuf) -> Vec<TestCase> {
     let mut source_files = test_root.clone();
     source_files.push("**");
@@ -142,21 +120,6 @@ pub fn find_tests(test_root: PathBuf) -> Vec<TestCase> {
     }
 
     paths
-}
-
-pub fn load_test_contents(TestCase { root, sources }: &TestCase) -> TestContents {
-    let contents = fs::read_to_string(root).unwrap();
-    let sources: Vec<_> = sources
-        .iter()
-        .map(|path| path.to_str().unwrap().to_string().leak() as &'static str)
-        .collect();
-    let expectation = parse_intended_result(&contents);
-    TestContents {
-        name: path_display(root),
-        expectation,
-        sources,
-        contents,
-    }
 }
 
 fn parse_intended_result(contents: &str) -> TestExpectation {
@@ -198,6 +161,76 @@ fn parse_test_value(ty: &str, value: &str) -> TestValue {
 pub struct TestCase {
     pub root: PathBuf,
     pub sources: Vec<PathBuf>,
+}
+
+impl TestCase {
+    fn run(
+        &self,
+        check_does_compile: impl Fn(&[&'static str]) -> anyhow::Result<()> + Send + Sync,
+        execute: impl (Fn(&[&'static str], &TestValue) -> anyhow::Result<TestValue>)
+            + Send
+            + Sync
+            + UnwindSafe
+            + RefUnwindSafe,
+    ) -> TestSuccessOrFailure {
+        let root = self.root.clone();
+        let TestContents {
+            expectation,
+            sources,
+            ..
+        } = self.load_test_contents();
+        match expectation {
+            TestExpectation::Compiles => match check_does_compile(&sources) {
+                Ok(_) => TestSuccessOrFailure::Succeeded(root),
+                Err(error) => TestSuccessOrFailure::FailsToCompile(root, error),
+            },
+            TestExpectation::DoesNotCompile => match check_does_compile(&sources) {
+                Ok(_) => TestSuccessOrFailure::CompiledButShouldnt(root),
+                Err(_) => TestSuccessOrFailure::Succeeded(root),
+            },
+            TestExpectation::Aborts => {
+                if check_does_compile(&sources).is_ok()
+                    && execute(&sources, &TestValue::Void).is_err()
+                {
+                    TestSuccessOrFailure::Succeeded(root)
+                } else {
+                    TestSuccessOrFailure::RanButShouldnt(root)
+                }
+            }
+            TestExpectation::ProducesValue(expected) => {
+                match panic::catch_unwind(|| execute(&sources, &expected)) {
+                    Ok(result) => match result {
+                        Ok(received) if expected == received => {
+                            TestSuccessOrFailure::Succeeded(root)
+                        }
+                        Ok(received) => TestSuccessOrFailure::MismatchedResult {
+                            path: root,
+                            expected,
+                            received,
+                        },
+                        Err(error) => TestSuccessOrFailure::ErroredWhenRun(root, error),
+                    },
+                    Err(panic) => TestSuccessOrFailure::PanickedWhenRun(self.root.clone(), panic),
+                }
+            }
+        }
+    }
+
+    pub fn load_test_contents(&self) -> TestContents {
+        let contents = fs::read_to_string(&self.root).unwrap();
+        let sources: Vec<_> = self
+            .sources
+            .iter()
+            .map(|path| path.to_str().unwrap().to_string().leak() as &'static str)
+            .collect();
+        let expectation = parse_intended_result(&contents);
+        TestContents {
+            name: path_display(&self.root),
+            expectation,
+            sources,
+            contents,
+        }
+    }
 }
 
 #[derive(Debug)]

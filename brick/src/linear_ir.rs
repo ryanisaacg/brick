@@ -127,6 +127,7 @@ impl LinearNode {
         }
     }
 
+    // TODO: delete this ideally
     fn write_multi_register(value: LinearNode, ids: Vec<Option<RegisterID>>) -> LinearNode {
         LinearNode {
             value: LinearNodeValue::WriteRegistersSplitting(Box::new(value), ids),
@@ -784,7 +785,8 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
             ])
         }
         HirNodeValue::ArrayIndex(arr, idx) => {
-            let (location, offset) = array_index_location(ctx, *arr, *idx, &ty);
+            let (arr_location, arr_offset) = lower_lvalue(ctx, *arr);
+            let (location, offset) = array_index_location(ctx, arr_location, arr_offset, *idx, &ty);
             LinearNodeValue::ReadMemory {
                 location: Box::new(location),
                 offset,
@@ -1235,6 +1237,19 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 value: Box::new(inserted),
             }
         }
+        HirNodeValue::IntrinsicCall(IntrinsicFunction::ArrayGet, mut args) => {
+            let idx = args.pop().unwrap();
+            let arr = args.pop().unwrap();
+            let arr_location = lower_expression(ctx, arr);
+            let (location, offset) = array_index_location(ctx, arr_location, 0, idx, &ty);
+
+            LinearNodeValue::Arithmetic(
+                ArithmeticOp::Add,
+                PhysicalPrimitive::PointerSize,
+                Box::new(location),
+                Box::new(LinearNode::size(offset)),
+            )
+        }
         HirNodeValue::IntrinsicCall(IntrinsicFunction::ArrayFree, mut args) => {
             let arr = args.pop().unwrap();
             let array = lower_expression(ctx, arr);
@@ -1649,7 +1664,10 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
         HirNodeValue::VariableReference(id) => (LinearNode::var_location(id.as_var()), 0),
         HirNodeValue::Access(lhs, rhs) => access_location(ctx, *lhs, rhs),
         HirNodeValue::Dereference(inner) => (lower_expression(ctx, *inner), 0),
-        HirNodeValue::ArrayIndex(arr, idx) => array_index_location(ctx, *arr, *idx, &lvalue.ty),
+        HirNodeValue::ArrayIndex(arr, idx) => {
+            let (arr_location, arr_offset) = lower_lvalue(ctx, *arr);
+            array_index_location(ctx, arr_location, arr_offset, *idx, &lvalue.ty)
+        }
         HirNodeValue::DictIndex(dict, idx) => dict_index_location_or_abort(ctx, *dict, *idx),
         HirNodeValue::UnionVariant(union, variant) => access_location(ctx, *union, variant),
 
@@ -1729,13 +1747,13 @@ fn access_location(ctx: &mut LinearContext<'_>, lhs: HirNode, rhs: String) -> (L
 
 fn array_index_location(
     ctx: &mut LinearContext<'_>,
-    arr: HirNode,
+    arr_location: LinearNode,
+    arr_offset: usize,
     idx: HirNode,
     ty: &ExpressionType,
 ) -> (LinearNode, usize) {
     let size = expr_ty_to_physical(ty).size(ctx);
     let idx = lower_expression(ctx, idx);
-    let arr = lower_expression(ctx, arr);
 
     let idx_register = RegisterID::new();
     let arr_ptr_register = RegisterID::new();
@@ -1745,7 +1763,11 @@ fn array_index_location(
         LinearNode::new(LinearNodeValue::Sequence(vec![
             LinearNode::write_register(idx_register, idx),
             LinearNode::write_multi_register(
-                arr,
+                LinearNode::read_memory(
+                    arr_location,
+                    arr_offset,
+                    PhysicalType::Collection(PhysicalCollection::Array),
+                ),
                 vec![Some(arr_ptr_register), Some(length_register), None],
             ),
             LinearNode::if_node(

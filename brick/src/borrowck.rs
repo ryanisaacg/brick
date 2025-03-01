@@ -527,8 +527,28 @@ fn borrow_check_node(
                         InvalidateType::AllBorrows,
                     );
                 } else if let ExpressionType::Pointer(ref_ty, _) = &lhs.ty {
-                    let lender_id = find_variable_for_lvalue(rhs).as_var();
-                    let path = find_path_for_lvalue(rhs);
+                    let (lender_id, path) = match &rhs.value {
+                        // TODO: support lifetime annotations. for now, only one
+                        // borrow may be passed into a function that returns a
+                        // reference, and that borrow serves as the lender
+                        HirNodeValue::VtableCall(_, _, _) => {
+                            todo!("interfaces cannot yet return borrowed values")
+                        }
+                        HirNodeValue::Call(_, args) | HirNodeValue::IntrinsicCall(_, args) => {
+                            let lender_arg = args
+                                .iter()
+                                .find(|arg| matches!(arg.ty, ExpressionType::Pointer(_, _)))
+                                .expect("ICE: borrowing function takes no borrows");
+                            (
+                                find_variable_for_lvalue(lender_arg).as_var(),
+                                find_path_for_lvalue(lender_arg),
+                            )
+                        }
+                        _ => (
+                            find_variable_for_lvalue(rhs).as_var(),
+                            find_path_for_lvalue(rhs),
+                        ),
+                    };
                     invalidate_borrowers(
                         lender_id,
                         variable_state,
