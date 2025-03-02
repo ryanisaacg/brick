@@ -1,39 +1,29 @@
-- bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
+generics:
+- ability to define generic functions
+- ability to define polymorphic types - both via pointer and directly
+- some way to store references inside variants to pass / return from functions
 
-collections:
+standard library:
+- some way of defining a stdlib that is available as an import path
+- rewrite arrays to be a collection in stdlib
+- rewrite dictionaries to be a collection in stdlib
+- rewrite RCs to be a collection in stdlib
+
+language-level collections:
 - tuples
-- arrays:
-    - allow empty arrays to typecheck (requires generic type syntax)
-- dicts:
-    - use a hash table
-    - take references as keys, not the direct key type
-    - allow empty dicts to type check (requires generic type syntax)
-    - should set syntax auto-insert if necessary?
-- rc's:
-    - can take RC'ed references to collections? maybe even RC'ed subreferences to user-defined collections?
-    - can get a ref from within an RC
-    - atomic decrement?
-- cells:
-    - replace cells with a concurrency-safe lock
+- boxes
+- cells
 - slices
-- automatically convert types when assigning collections?
 
 interfaces:
-- fundamental rethink (*must* be behind a pointer of some kind)
+- interface are something that is converted from references, not values
 - self parameters for interfaces can only be passed by reference (otherwise linear IR doesn't work)
     - when making the method -> function conversion, automatically take a reference if it's required
-- modules can be converted to interfaces:
-    - produce and consume a nullpointer for the vtable call? (might mean we need to generate shim functions)
-- interfaces can be structurally converted between each other:
-    - in typechecking
-    - in the IR
-    - in the interpreter
+- interfaces can be structurally converted between each other
 - interface conversion:
     - checks return statements
     - checks implicit returns due to the end of blocks
     - check assignments
-- interfaces are supported in the interpreter:
-    - mutable interfaces (significant borrowck implications)
 
 borrow checker and lifetimes:
 - clone support
@@ -47,14 +37,8 @@ borrow checker and lifetimes:
     - allow disjoint borrows of collection indices
     - allow reassignment of affine fields (currently they can't generate drops)
 
-packages:
-- packages can declare dependencies on one another
-- packages can be imported
-- packages can include a WASM blob
-
 modules:
 - modules can be indexed in a struct / variant literal context
-- modules can be declared explicitly
 - can you index the self module outside import statements?
 
 top-level statements:
@@ -65,11 +49,6 @@ top-level statements:
 type validation:
 - prevent references being stored in collections
 
-build system:
-- cargo-like "build" command that automatically passes source files to the compiler
-- packages have a defined compiled format
-- packages can depend on other packages
-
 strings:
 - string manipulation
 - interpolation literals
@@ -79,22 +58,12 @@ import support:
 - alias imports
 - allow imports to include a list of things
 
-compilation resume and reload:
-- rework the hashmaps into an actual environment data structure that allows for generational indexing?
-- differentiate modules and compilation units, or give up on first class modules
-- make IDs relative to compilation units
-- allow a compilation pass to have some existing compilation units to start off (for partial compilation)
-
-unions:
-- faulthrough / default branch in case statement
-- ?. operator on union lvalues
-
 boolean operators:
 - short-circuiting boolean evaluation
 - equality / inequality:
     - applicable to nullable values
 
 wasm backend:
-- figure out and fix issue with dictionaries
 - explicitly handle stack overflows
 - correctly arrange stack, data, and heap segments of memory
+- bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer

@@ -118,3 +118,19 @@ coroutines / generators / async (sort of half-done, but maybe I'll wait on wasm-
 warnings:
 - unnecessary unsafe fn
 - unecessary unsafe block
+
+packages:
+- packages can declare dependencies on one another
+- packages can be imported
+- packages can include a WASM blob
+- the stdlib is a package
+
+unions:
+- rework unions to something resembling polymorphic variants
+- faulthrough / default branch in case statement
+
+compilation resume and reload:
+- rework the hashmaps into an actual environment data structure that allows for generational indexing?
+- differentiate modules and compilation units, or give up on first class modules
+- make IDs relative to compilation units
+- allow a compilation pass to have some existing compilation units to start off (for partial compilation)
