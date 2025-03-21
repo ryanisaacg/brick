@@ -224,6 +224,7 @@ pub struct FunctionDeclarationValue {
     pub params: Vec<(VariableID, NameAndType)>,
     pub returns: Option<AstNodeId>,
     pub body: AstNodeId,
+    pub type_parameters: Vec<TypeParameter>,
     /**
      * Whether this function is available to extern. Distinct from declaring an extern function
      * is available in the environment
@@ -240,6 +241,7 @@ pub struct FunctionHeaderValue {
     pub params: Vec<NameAndType>,
     pub returns: Option<AstNodeId>,
     pub is_unsafe: bool,
+    pub type_parameters: Vec<TypeParameter>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -248,6 +250,7 @@ pub struct StructDeclarationValue {
     pub fields: Vec<NameAndType>,
     pub associated_functions: Vec<AstNodeId>,
     pub properties: Vec<String>,
+    pub type_parameters: Vec<TypeParameter>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -256,6 +259,14 @@ pub struct UnionDeclarationValue {
     pub variants: Vec<UnionDeclarationVariant>,
     pub associated_functions: Vec<AstNodeId>,
     pub properties: Vec<String>,
+    pub type_parameters: Vec<TypeParameter>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct TypeParameter {
+    pub name: String,
+    pub constraints: Vec<AstNodeId>,
+    pub provenance: SourceRange,
 }
 
 #[derive(Debug, PartialEq)]
@@ -690,6 +701,7 @@ fn struct_declaration(
     let start = cursor;
     let (name, provenance) = word(source, cursor, "expected name after 'struct'")?;
     let cursor = provenance.end();
+    let (type_parameters, cursor) = type_parameter_list(source, context, &cursor)?;
     let (properties, cursor) = property_list(source, &cursor)?;
     let (end, fields, associated_functions) =
         interface_or_struct_body(source, context, &cursor, false)?;
@@ -700,6 +712,7 @@ fn struct_declaration(
             fields,
             associated_functions,
             properties,
+            type_parameters,
         }),
         SourceRange::new(start.clone(), &end),
     ))
@@ -735,6 +748,72 @@ fn property_list(
         },
         cursor,
     ))
+}
+
+fn type_parameter_list(
+    source: &mut TokenIter,
+    context: &mut AstArena,
+    cursor: &SourceMarker,
+) -> Result<(Vec<TypeParameter>, SourceMarker), ParseError> {
+    if !matches!(
+        peek_token_optional(source)?,
+        Some(Token {
+            value: TokenValue::OpenSquare,
+            ..
+        })
+    ) {
+        return Ok((vec![], cursor.clone()));
+    }
+
+    let mut type_parameters = Vec::new();
+
+    let token = already_peeked_token(source)?;
+    let mut cursor = token.range.end();
+    loop {
+        type_parameters.push(parse_type_paramter(source, context, &cursor)?);
+        cursor = type_parameters.last().unwrap().provenance.end();
+
+        let (should_end, range) = comma_or_end_list(
+            source,
+            TokenValue::CloseSquare,
+            &cursor,
+            "expected another type parameter or ]",
+        )?;
+        cursor = range.end();
+        if should_end {
+            break;
+        }
+    }
+
+    Ok((type_parameters, cursor.clone()))
+}
+
+fn parse_type_paramter(
+    source: &mut TokenIter,
+    context: &mut AstArena,
+    cursor: &SourceMarker,
+) -> Result<TypeParameter, ParseError> {
+    let (name, provenance) = word(source, cursor, "expected name of type parameter")?;
+    let mut cursor = provenance.end();
+
+    let constraints = match peek_token_optional(source)? {
+        Some(token) if token.value == TokenValue::Colon => {
+            let token = already_peeked_token(source)?;
+            cursor = token.range.end();
+            // In the future, maybe have more than one constraint?
+            let type_hint = type_expression(source, context, &cursor)?;
+            cursor = type_hint.provenance.end();
+
+            vec![add_node(context, type_hint)]
+        }
+        _ => Vec::new(),
+    };
+
+    Ok(TypeParameter {
+        name,
+        constraints,
+        provenance: SourceRange::new(provenance.start(), &cursor),
+    })
 }
 
 fn interface_declaration(
@@ -793,6 +872,7 @@ fn interface_or_struct_body(
                 returns,
                 end,
                 is_unsafe,
+                type_parameters,
             } = function_header(source, context, &start, false)?;
             cursor = end;
 
@@ -810,6 +890,7 @@ fn interface_or_struct_body(
                         params,
                         returns,
                         is_unsafe,
+                        type_parameters,
                     }),
                     SourceRange::new(start, &cursor),
                 )));
@@ -831,6 +912,7 @@ fn interface_or_struct_body(
                         params: params.into_iter().map(|p| (VariableID::new(), p)).collect(),
                         returns,
                         body,
+                        type_parameters,
                         is_extern: false,
                         is_coroutine: false,
                         is_unsafe,
@@ -881,6 +963,7 @@ fn union_declaration(
 ) -> Result<AstNode, ParseError> {
     let (name, mut provenance) = word(source, cursor, "expected name after 'union'")?;
     let cursor = provenance.end();
+    let (type_parameters, cursor) = type_parameter_list(source, context, &cursor)?;
     let (properties, mut cursor) = property_list(source, &cursor)?;
 
     cursor = assert_next_lexeme_eq(
@@ -957,6 +1040,7 @@ fn union_declaration(
             variants,
             properties,
             associated_functions,
+            type_parameters,
         }),
         provenance,
     ))
@@ -974,6 +1058,7 @@ fn extern_function_declaration(
         returns,
         end,
         is_unsafe,
+        type_parameters,
     } = function_header(source, context, start, false)?;
     let mut provenance = SourceRange::new(start.clone(), &end);
 
@@ -986,6 +1071,7 @@ fn extern_function_declaration(
                 params,
                 returns,
                 is_unsafe,
+                type_parameters,
             }),
             next.range.end(),
         ),
@@ -1002,6 +1088,7 @@ fn extern_function_declaration(
                     is_extern: true,
                     is_coroutine: false,
                     is_unsafe,
+                    type_parameters,
                 }),
                 end,
             )
@@ -1032,6 +1119,7 @@ fn function_declaration(
         returns,
         end,
         is_unsafe,
+        type_parameters,
     } = function_header(source, context, start, override_is_unsafe)?;
     let mut provenance = SourceRange::new(start.clone(), &end);
     let next_token = assert_next_lexeme_eq(
@@ -1053,6 +1141,7 @@ fn function_declaration(
             is_extern: false,
             is_coroutine: is_generator,
             is_unsafe,
+            type_parameters,
         }),
         provenance,
     ))
@@ -1064,6 +1153,7 @@ struct FunctionHeader {
     params: Vec<NameAndType>,
     returns: Option<AstNodeId>,
     end: SourceMarker,
+    type_parameters: Vec<TypeParameter>,
     is_unsafe: bool,
 }
 
@@ -1107,11 +1197,12 @@ fn function_header(
     };
 
     let (name, provenance) = word(source, &cursor, "expected name after 'fn'")?;
+    let (type_parameters, mut cursor) = type_parameter_list(source, context, &provenance.end())?;
 
     let open_paren = assert_next_lexeme_eq(
         source,
         TokenValue::OpenParen,
-        &provenance.end(),
+        &cursor,
         "expected open parenthesis to start parameters",
     )?;
     cursor = open_paren.range.end();
@@ -1202,6 +1293,7 @@ fn function_header(
         returns,
         end: cursor,
         is_unsafe,
+        type_parameters,
     })
 }
 

@@ -617,6 +617,7 @@ fn fill_in_union_decl(
         name,
         properties,
         associated_functions,
+        type_parameters: _,
     }: &UnionDeclarationValue,
     provenance: &SourceRange,
 ) -> Result<TypeDeclaration, TypecheckError> {

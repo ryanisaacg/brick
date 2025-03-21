@@ -1,0 +1,13 @@
+// Compile
+
+// DONTMERGE: can these generics be inferred?
+
+union Option[T] {
+    Some(T),
+    None,
+}
+
+struct Value { x: i32 }
+
+let x = Option.Some(5);
+let y = Option.Some(Option[Value].None);
