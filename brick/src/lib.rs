@@ -252,6 +252,7 @@ pub fn lower_code(
                 is_unsafe: false,
                 is_extern: false,
                 provenance: None,
+                type_parameters: HashMap::new(),
             },
         );
     }

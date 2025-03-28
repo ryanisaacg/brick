@@ -57,6 +57,7 @@ pub enum TypecheckError {
     ExternFunctionCalledOutsideUnsafe(SourceRange),
     UnsafeFunctionCalledOutsideUnsafe(SourceRange),
     RawPointerDereferencedOutsideUnsafe(SourceRange),
+    DuplicateNameTypeParameter(String, SourceRange),
 }
 
 impl Error for TypecheckError {}
@@ -225,6 +226,11 @@ impl Diagnostic for TypecheckError {
             RawPointerDereferencedOutsideUnsafe(range) => DiagnosticMarker::error(
                 range.clone(),
                 "raw pointer derefernced outside unsafe range",
+            ),
+            DuplicateNameTypeParameter(name, range) => DiagnosticMarker::error_context(
+                range.clone(),
+                "duplicate names in type parameter declarations",
+                name.clone()
             ),
         })
     }

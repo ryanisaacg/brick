@@ -27,7 +27,6 @@ interfaces:
 
 borrow checker and lifetimes:
 - clone support
-- allow references to be returned. the lifetime must be specified.
 - can't dereference pointers to Move types
 - drop:
     - drop dicts

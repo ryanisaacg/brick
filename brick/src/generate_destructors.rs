@@ -59,6 +59,7 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
                 is_unsafe: false,
                 is_extern: false,
                 provenance: None,
+                type_parameters: HashMap::new(),
             },
         );
 

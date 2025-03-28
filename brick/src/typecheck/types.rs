@@ -151,6 +151,7 @@ pub enum TypeDeclaration {
     Interface(InterfaceType),
     Union(UnionType),
     Module(ModuleType),
+    TypeParameter(TypeParameterType),
 }
 
 impl TypeDeclaration {
@@ -160,6 +161,7 @@ impl TypeDeclaration {
             TypeDeclaration::Interface(inner) => inner.id,
             TypeDeclaration::Union(inner) => inner.id,
             TypeDeclaration::Module(inner) => inner.id,
+            TypeDeclaration::TypeParameter(inner) => inner.id,
         }
     }
 
@@ -169,6 +171,9 @@ impl TypeDeclaration {
             TypeDeclaration::Interface(InterfaceType { provenance, .. }) => provenance.as_ref(),
             TypeDeclaration::Union(UnionType { provenance, .. }) => provenance.as_ref(),
             TypeDeclaration::Module(ModuleType { provenance, .. }) => provenance.as_ref(),
+            TypeDeclaration::TypeParameter(TypeParameterType { provenance, .. }) => {
+                provenance.as_ref()
+            }
         }
     }
 
@@ -178,6 +183,7 @@ impl TypeDeclaration {
             TypeDeclaration::Interface(inner) => inner.id.into(),
             TypeDeclaration::Union(inner) => inner.id.into(),
             TypeDeclaration::Module(inner) => inner.id.into(),
+            TypeDeclaration::TypeParameter(inner) => inner.id.into(),
         }
     }
 
@@ -187,6 +193,8 @@ impl TypeDeclaration {
             TypeDeclaration::Interface(_) => false,
             TypeDeclaration::Union(decl) => decl.is_affine,
             TypeDeclaration::Module(_) => false,
+            // DONTMERGE: decide if type parameters are affine
+            TypeDeclaration::TypeParameter(_) => todo!(),
         };
         if is_affine {
             MoveSemantics::Resource
@@ -254,6 +262,7 @@ impl TypeDeclaration {
                 .ok_or_else(|| {
                     TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
                 }),
+            TypeDeclaration::TypeParameter(_) => todo!(),
         }
     }
 
@@ -261,7 +270,8 @@ impl TypeDeclaration {
         match self {
             TypeDeclaration::Struct(_)
             | TypeDeclaration::Interface(_)
-            | TypeDeclaration::Union(_) => None,
+            | TypeDeclaration::Union(_)
+            | TypeDeclaration::TypeParameter(_) => None,
             TypeDeclaration::Module(module) => Some(module),
         }
     }
@@ -275,12 +285,20 @@ pub struct ModuleType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct TypeParameterType {
+    pub id: TypeID,
+    pub constraints: Vec<ExpressionType>,
+    pub provenance: Option<SourceRange>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct StructType {
     pub id: TypeID,
     pub fields: HashMap<String, ExpressionType>,
     pub associated_functions: HashMap<String, FunctionID>,
     pub is_affine: bool,
     pub provenance: Option<SourceRange>,
+    pub type_parameters: HashMap<String, TypeID>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -294,6 +312,7 @@ pub struct FuncType {
     pub is_unsafe: bool,
     pub is_extern: bool,
     pub provenance: Option<SourceRange>,
+    pub type_parameters: HashMap<String, TypeID>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -304,6 +323,7 @@ pub struct UnionType {
     pub associated_functions: HashMap<String, FunctionID>,
     pub is_affine: bool,
     pub provenance: Option<SourceRange>,
+    pub type_parameters: HashMap<String, TypeID>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

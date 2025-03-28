@@ -6,11 +6,11 @@ use crate::{
     parser::{
         AstArena, AstNode, AstNodeId, AstNodeValue, BinOp, FunctionDeclarationValue,
         FunctionHeaderValue, InterfaceDeclarationValue, NameAndType, ParsedFile, SelfParameter,
-        StructDeclarationValue, UnionDeclarationValue, UnionDeclarationVariant,
+        StructDeclarationValue, TypeParameter, UnionDeclarationValue, UnionDeclarationVariant,
     },
     typecheck::{
         CollectionType, FuncType, InterfaceType, ModuleType, PointerKind, PrimitiveType,
-        StructType, TypecheckError, UnionType,
+        StructType, TypeParameterType, TypecheckError, UnionType,
     },
     ExpressionType, SourceRange, TypeDeclaration,
 };
@@ -193,6 +193,7 @@ impl DeclarationContext {
                     &mut result,
                     fill_in_struct_info(
                         &source.arena,
+                        file,
                         &names_to_type_id,
                         file,
                         &mut self.id_to_func,
@@ -205,6 +206,7 @@ impl DeclarationContext {
                     &mut result,
                     fill_in_union_decl(
                         &source.arena,
+                        file,
                         &names_to_type_id,
                         file,
                         &mut self.id_to_func,
@@ -217,6 +219,7 @@ impl DeclarationContext {
                     &mut result,
                     fill_in_interface_decl(
                         &source.arena,
+                        file,
                         &names_to_type_id,
                         file,
                         &mut self.id_to_func,
@@ -228,6 +231,40 @@ impl DeclarationContext {
                 _ => None,
             };
             if let Some(decl) = decl {
+                // Fill in type parameters
+                let type_parameter_ids = match &decl {
+                    TypeDeclaration::Struct(struct_type) => match &statement.value {
+                        AstNodeValue::StructDeclaration(node) => {
+                            Some((&struct_type.type_parameters, &node.type_parameters[..]))
+                        }
+                        _ => unreachable!("ICE: struct/struct mismatch in parsing"),
+                    },
+                    TypeDeclaration::Interface(_) => None,
+                    TypeDeclaration::Union(struct_type) => match &statement.value {
+                        AstNodeValue::UnionDeclaration(node) => {
+                            Some((&struct_type.type_parameters, &node.type_parameters[..]))
+                        }
+                        _ => unreachable!("ICE: struct/struct mismatch in parsing"),
+                    },
+                    TypeDeclaration::Module(_) => None,
+                    TypeDeclaration::TypeParameter(_) => {
+                        unreachable!("ICE: declarations cannot be of the type parameter kind")
+                    }
+                };
+                if let Some((name_to_param_id, type_params)) = type_parameter_ids {
+                    merge_results(
+                        &mut result,
+                        fill_in_type_parameters(
+                            &source.arena,
+                            &names_to_type_id,
+                            &self.id_to_decl,
+                            name_to_param_id,
+                            type_params,
+                            &mut declarations,
+                        ),
+                    );
+                }
+                // DONTMERGE: collect type parameters on functions
                 declarations.push(decl);
             }
             let func = match &statement.value {
@@ -238,6 +275,7 @@ impl DeclarationContext {
                         &mut result,
                         fill_in_fn_header(
                             &source.arena,
+                            file,
                             &names_to_type_id,
                             &self.id_to_decl,
                             id,
@@ -258,6 +296,7 @@ impl DeclarationContext {
                         &mut result,
                         fill_in_fn_decl(
                             &source.arena,
+                            file,
                             &names_to_type_id,
                             &self.id_to_decl,
                             id,
@@ -473,6 +512,7 @@ fn resolve_import(
 
 fn fill_in_struct_info(
     ast: &AstArena,
+    file: &FileDeclarations,
     names_to_type_id: &HashMap<&str, TypeID>,
     module: &FileDeclarations,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
@@ -483,6 +523,17 @@ fn fill_in_struct_info(
     let id = names_to_type_id[decl.name.as_str()];
 
     let mut result = Ok(());
+
+    let type_parameters = merge_results_or_value(
+        &mut result,
+        type_parameters_to_map(file, &decl.type_parameters),
+    )
+    .unwrap_or_default();
+    let name_to_type_id_with_params =
+        extend_with_type_parameters(names_to_type_id, &type_parameters);
+    let names_to_type_id = name_to_type_id_with_params
+        .as_ref()
+        .unwrap_or(names_to_type_id);
 
     let fields: HashMap<_, _> = merge_results_or_value(
         &mut result,
@@ -508,6 +559,7 @@ fn fill_in_struct_info(
         &mut result,
         fill_in_associated_functions(
             ast,
+            file,
             module,
             names_to_type_id,
             id_to_func,
@@ -542,11 +594,13 @@ fn fill_in_struct_info(
         associated_functions,
         is_affine,
         provenance: Some(provenance.clone()),
+        type_parameters,
     }))
 }
 
 fn fill_in_interface_decl(
     ast: &AstArena,
+    file: &FileDeclarations,
     names_to_type_id: &HashMap<&str, TypeID>,
     module: &FileDeclarations,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
@@ -568,6 +622,7 @@ fn fill_in_interface_decl(
                 associated_functions.insert(func.name.clone(), func_id);
                 fill_in_fn_header(
                     ast,
+                    file,
                     names_to_type_id,
                     id_to_decl,
                     func_id,
@@ -582,6 +637,7 @@ fn fill_in_interface_decl(
                 associated_functions.insert(func.name.clone(), func_id);
                 fill_in_fn_decl(
                     ast,
+                    file,
                     names_to_type_id,
                     id_to_decl,
                     func_id,
@@ -608,6 +664,7 @@ fn fill_in_interface_decl(
 
 fn fill_in_union_decl(
     ast: &AstArena,
+    file: &FileDeclarations,
     names_to_type_id: &HashMap<&str, TypeID>,
     module: &FileDeclarations,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
@@ -617,13 +674,21 @@ fn fill_in_union_decl(
         name,
         properties,
         associated_functions,
-        type_parameters: _,
+        type_parameters,
     }: &UnionDeclarationValue,
     provenance: &SourceRange,
 ) -> Result<TypeDeclaration, TypecheckError> {
     let id = names_to_type_id[name.as_str()];
 
     let mut result = Ok(());
+    let type_parameters =
+        merge_results_or_value(&mut result, type_parameters_to_map(file, &type_parameters))
+            .unwrap_or_default();
+    let name_to_type_id_with_params =
+        extend_with_type_parameters(names_to_type_id, &type_parameters);
+    let names_to_type_id = name_to_type_id_with_params
+        .as_ref()
+        .unwrap_or(names_to_type_id);
 
     let variants = merge_results_or_value(
         &mut result,
@@ -652,6 +717,7 @@ fn fill_in_union_decl(
         &mut result,
         fill_in_associated_functions(
             ast,
+            file,
             module,
             names_to_type_id,
             id_to_func,
@@ -689,12 +755,14 @@ fn fill_in_union_decl(
         variants,
         associated_functions,
         is_affine,
+        type_parameters,
         provenance: Some(provenance.clone()),
     }))
 }
 
 fn fill_in_associated_functions(
     ast: &AstArena,
+    file: &FileDeclarations,
     module: &FileDeclarations,
     names_to_type_id: &HashMap<&str, TypeID>,
     id_to_func: &mut HashMap<FunctionID, FuncType>,
@@ -715,6 +783,7 @@ fn fill_in_associated_functions(
                     &mut result,
                     fill_in_fn_decl(
                         ast,
+                        file,
                         names_to_type_id,
                         id_to_decl,
                         func_id,
@@ -737,6 +806,7 @@ fn fill_in_associated_functions(
 #[allow(clippy::too_many_arguments)]
 fn fill_in_fn_decl(
     ast: &AstArena,
+    file: &FileDeclarations,
     names_to_type_id: &HashMap<&str, TypeID>,
     id_to_decl: &HashMap<TypeID, TypeDeclaration>,
     id: FunctionID,
@@ -747,12 +817,24 @@ fn fill_in_fn_decl(
         is_coroutine,
         is_unsafe,
         is_extern,
+        type_parameters,
         ..
     }: &FunctionDeclarationValue,
     is_associated: bool,
     provenance: &SourceRange,
     self_context: Option<&ExpressionType>,
 ) -> Result<FuncType, TypecheckError> {
+    let mut result = Ok(());
+
+    let type_parameters =
+        merge_results_or_value(&mut result, type_parameters_to_map(file, &type_parameters))
+            .unwrap_or_default();
+    let name_to_type_id_with_params =
+        extend_with_type_parameters(names_to_type_id, &type_parameters);
+
+    let names_to_type_id = name_to_type_id_with_params
+        .as_ref()
+        .unwrap_or(names_to_type_id);
     let self_param_ty = include_self_param(self_param.as_ref(), self_context, provenance)?;
     let mut params =
         Vec::with_capacity(if self_param.is_some() { 1 } else { 0 } + ast_params.len());
@@ -768,6 +850,8 @@ fn fill_in_fn_decl(
         )?);
     }
 
+    result?;
+
     Ok(FuncType {
         id,
         type_param_count: 0,
@@ -780,6 +864,7 @@ fn fill_in_fn_decl(
         is_coroutine: *is_coroutine,
         is_unsafe: *is_unsafe,
         is_extern: *is_extern,
+        type_parameters,
         provenance: Some(provenance.clone()),
     })
 }
@@ -787,6 +872,7 @@ fn fill_in_fn_decl(
 #[allow(clippy::too_many_arguments)]
 fn fill_in_fn_header(
     ast: &AstArena,
+    file: &FileDeclarations,
     names_to_type_id: &HashMap<&str, TypeID>,
     id_to_decl: &HashMap<TypeID, TypeDeclaration>,
     id: FunctionID,
@@ -795,6 +881,7 @@ fn fill_in_fn_header(
         params: ast_params,
         returns,
         is_unsafe,
+        type_parameters,
         ..
     }: &FunctionHeaderValue,
     is_associated: bool,
@@ -802,6 +889,13 @@ fn fill_in_fn_header(
     provenance: &SourceRange,
     self_context: Option<&ExpressionType>,
 ) -> Result<FuncType, TypecheckError> {
+    let type_parameters = type_parameters_to_map(file, &type_parameters)?;
+    let name_to_type_id_with_params =
+        extend_with_type_parameters(names_to_type_id, &type_parameters);
+    let names_to_type_id = name_to_type_id_with_params
+        .as_ref()
+        .unwrap_or(names_to_type_id);
+
     let self_param_ty = include_self_param(self_param.as_ref(), self_context, provenance)?;
     let mut params =
         Vec::with_capacity(if self_param.is_some() { 1 } else { 0 } + ast_params.len());
@@ -829,6 +923,7 @@ fn fill_in_fn_header(
         is_coroutine: false,
         is_unsafe: *is_unsafe,
         is_extern,
+        type_parameters,
         provenance: Some(provenance.clone()),
     })
 }
@@ -856,6 +951,74 @@ fn include_self_param(
     } else {
         None
     })
+}
+
+fn extend_with_type_parameters<'a>(
+    names_to_type_id: &HashMap<&'a str, TypeID>,
+    type_parameter_map: &'a HashMap<String, TypeID>,
+) -> Option<HashMap<&'a str, TypeID>> {
+    if type_parameter_map.is_empty() {
+        None
+    } else {
+        let mut map: HashMap<&str, TypeID> = HashMap::new();
+        map.extend(names_to_type_id.iter());
+        map.extend(
+            type_parameter_map
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.clone())),
+        );
+        Some(map)
+    }
+}
+
+fn type_parameters_to_map(
+    file: &FileDeclarations,
+    type_parameters: &[TypeParameter],
+) -> Result<HashMap<String, TypeID>, TypecheckError> {
+    let mut result = Ok(());
+
+    let mut map = HashMap::new();
+    for param in type_parameters.iter() {
+        let previous = map.insert(param.name.clone(), file.new_type_id());
+        if previous.is_some() {
+            merge_results(
+                &mut result,
+                Err(TypecheckError::DuplicateNameTypeParameter(
+                    param.name.clone(),
+                    param.provenance.clone(),
+                )),
+            );
+        }
+    }
+
+    result.map(|()| map)
+}
+
+fn fill_in_type_parameters(
+    ast: &AstArena,
+    name_to_type_id: &HashMap<&str, TypeID>,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
+    type_parameter_ids: &HashMap<String, TypeID>,
+    type_parameter_node: &[TypeParameter],
+    declarations: &mut Vec<TypeDeclaration>,
+) -> Result<(), TypecheckError> {
+    let mut result = Ok(());
+
+    for param in type_parameter_node.iter() {
+        let constraints = merge_result_list(param.constraints.iter().map(|constraint| {
+            resolve_type_expr(ast, name_to_type_id, id_to_decl, ast.get(*constraint))
+        }));
+        let Some(constraints) = merge_results_or_value(&mut result, constraints) else {
+            continue;
+        };
+        declarations.push(TypeDeclaration::TypeParameter(TypeParameterType {
+            id: type_parameter_ids[&param.name],
+            constraints,
+            provenance: Some(param.provenance.clone()),
+        }));
+    }
+
+    result
 }
 
 pub fn resolve_type_expr(
@@ -1243,6 +1406,7 @@ fn add_intrinsic(
             is_unsafe: false,
             is_extern: false,
             provenance: None,
+            type_parameters: HashMap::new(),
         },
     );
     ctx.intrinsic_to_id.insert(intrinsic_fn, fn_id);

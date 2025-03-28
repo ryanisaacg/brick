@@ -41,10 +41,7 @@ fn specific_files() {
     data_test_driver::test_files(
         vec![
             // Include specific cases here
-            test("tests/borrowck/return_borrowed_field.brick"),
-            test("tests/borrowck/prevent_local_value_reference_return.brick"),
-            test("tests/borrowck/prevent_local_value_reference_expression_return.brick"),
-            test("tests/borrowck/prevent_function_call_borrow_from_let_assign.brick"),
+            test("tests/generics/option.brick"),
         ],
         does_compile,
         does_succeed,
