@@ -32,7 +32,9 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
                     need_generated_destructor.push(*decl_id);
                 }
             }
-            TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => unreachable!(),
+            TypeDeclaration::Interface(_)
+            | TypeDeclaration::Module(_)
+            | TypeDeclaration::TypeParameter(_) => unreachable!(),
         }
     }
 
@@ -48,7 +50,6 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
             destructor_id,
             FuncType {
                 id: destructor_id,
-                type_param_count: 0,
                 params: vec![ExpressionType::Pointer(
                     PointerKind::UniqueRef,
                     Box::new(ExpressionType::InstanceOf(*decl_id)),
@@ -74,7 +75,9 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
             }) => {
                 associated_functions.insert("drop".to_string(), destructor_id);
             }
-            TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => unreachable!(),
+            TypeDeclaration::Interface(_)
+            | TypeDeclaration::Module(_)
+            | TypeDeclaration::TypeParameter(_) => unreachable!(),
         }
     }
 
@@ -108,7 +111,9 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
                 destructor_id = associated_functions["drop"];
                 drop_union_variant(declarations, ty, param, &mut destructor_body);
             }
-            TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => unreachable!(),
+            TypeDeclaration::Interface(_)
+            | TypeDeclaration::Module(_)
+            | TypeDeclaration::TypeParameter(_) => unreachable!(),
         };
 
         gen_destructor_module.functions.push(HirFunction::new(
@@ -162,7 +167,9 @@ pub fn generate_destructors(modules: &mut Vec<HirModule>, declarations: &mut Dec
                 let param = *param;
                 drop_union_variant(declarations, ty, param, destructor_body);
             }
-            TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => unreachable!(),
+            TypeDeclaration::Interface(_)
+            | TypeDeclaration::Module(_)
+            | TypeDeclaration::TypeParameter(_) => unreachable!(),
         };
     }
 

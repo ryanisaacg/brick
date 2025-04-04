@@ -244,7 +244,6 @@ pub fn lower_code(
             fn_id,
             FuncType {
                 id: fn_id,
-                type_param_count: 0,
                 params: parameters,
                 returns: *returns,
                 is_associated: false,

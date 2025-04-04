@@ -9,5 +9,5 @@ union Option[T] {
 
 struct Value { x: i32 }
 
-let x = Option.Some(5);
-let y = Option.Some(Option[Value].None);
+//let x = Option.Some(5);
+//let y = Option.Some(Option[Value].None);

@@ -17,7 +17,6 @@ pub enum ExpressionType {
     Collection(CollectionType),
     Null,
     Nullable(Box<ExpressionType>),
-    TypeParameterReference(usize),
     Generator {
         yield_ty: Box<ExpressionType>,
         param_ty: Box<ExpressionType>,
@@ -40,7 +39,6 @@ impl ExpressionType {
             | ExpressionType::Collection(_)
             | ExpressionType::Null
             | ExpressionType::Nullable(_)
-            | ExpressionType::TypeParameterReference(_)
             | ExpressionType::Generator { .. }
             | ExpressionType::FunctionReference { .. } => None,
         }
@@ -58,7 +56,6 @@ impl ExpressionType {
             ExpressionType::InstanceOf(id) => declarations[id].move_semantics(),
             ExpressionType::Collection(CollectionType::ReferenceCounter(_)) => MoveSemantics::Autoclone,
             ExpressionType::ReferenceToType(_)
-            | ExpressionType::TypeParameterReference(_)
             | ExpressionType::Collection(_)
             | ExpressionType::Generator { .. }
             | ExpressionType::ReferenceToFunction(_)
@@ -77,53 +74,10 @@ impl ExpressionType {
             | ExpressionType::Generator { .. }
             | ExpressionType::FunctionReference { .. }
             | ExpressionType::ReferenceToType(_)
-            | ExpressionType::ReferenceToFunction(_)
-            | ExpressionType::TypeParameterReference(_) => false,
+            | ExpressionType::ReferenceToFunction(_) => false,
             ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::UniqueRef, _) => true,
             ExpressionType::Pointer(PointerKind::SharedRaw | PointerKind::UniqueRaw, _) => false,
             ExpressionType::Nullable(inner) => inner.is_reference(),
-        }
-    }
-
-    pub(super) fn resolve_generics(&mut self, bindings: &[ExpressionType]) {
-        match self {
-            ExpressionType::Void
-            | ExpressionType::Unreachable
-            | ExpressionType::Primitive(_)
-            | ExpressionType::InstanceOf(_)
-            | ExpressionType::ReferenceToType(_)
-            | ExpressionType::ReferenceToFunction(_)
-            | ExpressionType::Null
-            | ExpressionType::Collection(CollectionType::String) => {}
-            ExpressionType::Nullable(child)
-            | ExpressionType::Pointer(_, child)
-            | ExpressionType::Collection(
-                CollectionType::Array(child)
-                | CollectionType::ReferenceCounter(child)
-                | CollectionType::Cell(child),
-            ) => {
-                child.resolve_generics(bindings);
-            }
-            ExpressionType::Collection(CollectionType::Dict(key, value)) => {
-                key.resolve_generics(bindings);
-                value.resolve_generics(bindings);
-            }
-            ExpressionType::TypeParameterReference(idx) => {
-                *self = bindings[*idx].clone();
-            }
-            ExpressionType::Generator { yield_ty, param_ty } => {
-                yield_ty.resolve_generics(bindings);
-                param_ty.resolve_generics(bindings);
-            }
-            ExpressionType::FunctionReference {
-                parameters,
-                returns,
-            } => {
-                for param in parameters.iter_mut() {
-                    param.resolve_generics(bindings);
-                }
-                returns.resolve_generics(bindings);
-            }
         }
     }
 }
@@ -194,7 +148,7 @@ impl TypeDeclaration {
             TypeDeclaration::Union(decl) => decl.is_affine,
             TypeDeclaration::Module(_) => false,
             // DONTMERGE: decide if type parameters are affine
-            TypeDeclaration::TypeParameter(_) => todo!(),
+            TypeDeclaration::TypeParameter(_) => false,
         };
         if is_affine {
             MoveSemantics::Resource
@@ -304,7 +258,6 @@ pub struct StructType {
 #[derive(Debug, PartialEq, Eq)]
 pub struct FuncType {
     pub id: FunctionID,
-    pub type_param_count: usize,
     pub params: Vec<ExpressionType>,
     pub returns: ExpressionType,
     pub is_associated: bool,

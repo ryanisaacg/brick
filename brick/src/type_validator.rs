@@ -254,6 +254,7 @@ fn validate_drop(
                 ));
             }
         }
+        TypeDeclaration::TypeParameter(_) => {}
     }
 
     Ok(())
@@ -323,7 +324,9 @@ fn is_recursive(decls: &DeclarationContext, current: TypeID, visited: &HashSet<T
             .values()
             .filter_map(|field| field.as_ref().and_then(|field| field.type_id()))
             .any(|ty_id| is_recursive(decls, *ty_id, &visited)),
-        TypeDeclaration::Interface(_) | TypeDeclaration::Module(_) => false,
+        TypeDeclaration::Interface(_)
+        | TypeDeclaration::Module(_)
+        | TypeDeclaration::TypeParameter(_) => false,
     }
 }
 
@@ -375,6 +378,8 @@ fn validate_affine_fields(
                 Ok(())
             }
         }
-        TypeDeclaration::Module(_) | TypeDeclaration::Interface(_) => Ok(()),
+        TypeDeclaration::Module(_)
+        | TypeDeclaration::Interface(_)
+        | TypeDeclaration::TypeParameter(_) => Ok(()),
     }
 }

@@ -2357,6 +2357,10 @@ fn layout_static_decl(
             // Modules are completely compiled out
             return 0;
         }
+        TypeDeclaration::TypeParameter(_) => {
+            // Type parameters should be monomorphized out
+            return 0;
+        }
     };
     let size = layout.size;
     layouts.insert(decl.id(), layout);
@@ -2410,7 +2414,6 @@ pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         }
         ExpressionType::ReferenceToType(_) => todo!(),
         ExpressionType::ReferenceToFunction(_) => todo!(),
-        ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => PhysicalType::Generator,
         ExpressionType::FunctionReference { .. } => {
             PhysicalType::Primitive(PhysicalPrimitive::FunctionPointer)

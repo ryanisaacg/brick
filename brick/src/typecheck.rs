@@ -56,7 +56,6 @@ impl<'ast, 'decl> TypecheckContext<'ast, 'decl> {
                 | ExpressionType::Collection(_)
                 | ExpressionType::Null
                 | ExpressionType::Nullable(_)
-                | ExpressionType::TypeParameterReference(_)
                 | ExpressionType::Generator { .. }
                 | ExpressionType::FunctionReference { .. }
                 | ExpressionType::InstanceOf(_) => unreachable!(),
@@ -197,7 +196,12 @@ pub fn typecheck_node<'a>(
         AstNodeValue::FunctionDeclaration(func) => {
             let func_id = &context.top_level_function_names[func.name.as_str()];
             let func_type = &context.declarations.id_to_func[func_id];
-            functions.push(typecheck_function(context, func, func_type)?);
+            functions.push(typecheck_function(
+                context,
+                func,
+                func_type,
+                &HashMap::new(),
+            )?);
         }
         AstNodeValue::StructDeclaration(StructDeclarationValue {
             name,
@@ -239,7 +243,7 @@ pub fn typecheck_node<'a>(
                     };
                     let func_id = &associated_functions_ty[func.name.as_str()];
                     let func_ty = &context.declarations.id_to_func[func_id];
-                    Some(typecheck_function(context, func, func_ty))
+                    Some(typecheck_function(context, func, func_ty, &HashMap::new()))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             functions.extend(associated_functions.iter().cloned());
@@ -258,6 +262,7 @@ pub fn typecheck_node<'a>(
                 top_level_scope,
                 context,
                 None,
+                &HashMap::new(),
             )?;
 
             check_safety(context, statement, false)?;
@@ -273,6 +278,7 @@ fn typecheck_function<'a>(
     context: &TypecheckContext,
     function: &'a FunctionDeclarationValue,
     function_type: &FuncType,
+    type_parameter_resolutions: &HashMap<TypeID, ExpressionType>,
 ) -> Result<TypecheckedFunction<'a>, TypecheckError> {
     let mut self_var_id = None;
 
@@ -314,6 +320,7 @@ fn typecheck_function<'a>(
             &mut HashMap::new(),
             context,
             Some(param_ty),
+            &type_parameter_resolutions,
         )?;
 
         if return_ty != &ExpressionType::Void && return_ty != &ExpressionType::Unreachable {
@@ -330,6 +337,7 @@ fn typecheck_function<'a>(
             &mut HashMap::new(),
             context,
             None,
+            &type_parameter_resolutions,
         )?;
         assert_assignable_to(
             context.declarations,
@@ -361,6 +369,7 @@ fn typecheck_expression<'a>(
     current_scope: &mut HashMap<String, (AnyID, ExpressionType)>,
     context: &TypecheckContext,
     generator_input_ty: Option<&ExpressionType>,
+    type_parameter_resolutions: &HashMap<TypeID, ExpressionType>,
 ) -> Result<&'a ExpressionType, TypecheckError> {
     let ty = match &node.value {
         AstNodeValue::FunctionDeclaration(_)
@@ -390,6 +399,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             ExpressionType::Void
         }
@@ -400,6 +410,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let mut result = Ok(());
             if matches!(
@@ -467,6 +478,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             current_scope.insert(name.clone(), ((*variable_id).into(), value_ty.clone()));
 
@@ -515,6 +527,7 @@ fn typecheck_expression<'a>(
                     current_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 )?;
             }
 
@@ -531,6 +544,7 @@ fn typecheck_expression<'a>(
                     current_scope,
                     context,
                     Some(yield_ctx_ty),
+                    type_parameter_resolutions,
                 )?;
             }
 
@@ -578,6 +592,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let AstNodeValue::Name { value: name, .. } = &right.value else {
                 return Err(TypecheckError::IllegalDotRHS(right.provenance.clone()));
@@ -614,7 +629,9 @@ fn typecheck_expression<'a>(
                         })?
                         .clone(),
                     // TODO: static functions on structs?
-                    TypeDeclaration::Struct(_) | TypeDeclaration::Interface(_) => {
+                    TypeDeclaration::Struct(_)
+                    | TypeDeclaration::Interface(_)
+                    | TypeDeclaration::TypeParameter(_) => {
                         return Err(TypecheckError::IllegalDotLHS(left.provenance.clone()));
                     }
                 },
@@ -665,6 +682,7 @@ fn typecheck_expression<'a>(
                     current_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 )
                 .and_then(|left_ty| {
                     assert_assignable_to(
@@ -683,6 +701,7 @@ fn typecheck_expression<'a>(
                     current_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 )
                 .and_then(|right_ty| {
                     assert_assignable_to(
@@ -707,6 +726,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let ExpressionType::Nullable(ty) = fully_dereference(left) else {
                 panic!("TODO: left side of nullable dot operator");
@@ -733,6 +753,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             match collection_ty {
                 ExpressionType::Collection(CollectionType::Array(item_ty)) => {
@@ -742,6 +763,7 @@ fn typecheck_expression<'a>(
                         current_scope,
                         context,
                         generator_input_ty,
+                        type_parameter_resolutions,
                     )?;
                     assert_assignable_to(
                         context.declarations,
@@ -759,6 +781,7 @@ fn typecheck_expression<'a>(
                         current_scope,
                         context,
                         generator_input_ty,
+                        type_parameter_resolutions,
                     )?;
                     assert_assignable_to(
                         context.declarations,
@@ -786,6 +809,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(left) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
@@ -796,6 +820,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(right) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
@@ -818,6 +843,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let right_ty = typecheck_expression(
                 right,
@@ -825,6 +851,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
 
             let mut results = Ok(());
@@ -869,6 +896,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(left) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
@@ -879,6 +907,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let ExpressionType::Primitive(_) = fully_dereference(right) else {
                 return Err(TypecheckError::ArithmeticMismatch(node.provenance.clone()));
@@ -897,6 +926,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             merge_results(&mut errors, validate_assignment_lhs(context, left));
             merge_results(
@@ -911,6 +941,7 @@ fn typecheck_expression<'a>(
                     current_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 ),
             );
 
@@ -945,6 +976,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             merge_results(&mut errors, validate_assignment_lhs(context, left));
             merge_results(
@@ -957,6 +989,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
 
             if !matches!(fully_dereference(left_ty), ExpressionType::Primitive(_))
@@ -987,6 +1020,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let right_ty = typecheck_expression(
                 right,
@@ -994,6 +1028,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let ExpressionType::Nullable(ty) = left_ty else {
                 return Err(TypecheckError::ExpectedNullableLHS(left.provenance.clone()));
@@ -1013,6 +1048,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let condition_deref = fully_dereference(condition_ty);
             if !matches!(
@@ -1032,6 +1068,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
 
             ExpressionType::Void
@@ -1043,6 +1080,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             ExpressionType::Unreachable
         }
@@ -1060,6 +1098,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let condition_deref = fully_dereference(condition_ty);
             if !matches!(
@@ -1079,6 +1118,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let else_ty = else_branch
                 .as_ref()
@@ -1089,6 +1129,7 @@ fn typecheck_expression<'a>(
                         current_scope,
                         context,
                         generator_input_ty,
+                        type_parameter_resolutions,
                     )
                 })
                 .transpose()?;
@@ -1119,6 +1160,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let Some(TypeDeclaration::Union(union_ty)) = shallow_dereference(input_ty)
                 .type_id()
@@ -1209,6 +1251,7 @@ fn typecheck_expression<'a>(
                     &mut child_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 )?;
                 if let Some(return_type) = &return_type {
                     merge_results(
@@ -1266,6 +1309,7 @@ fn typecheck_expression<'a>(
                     &mut child_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 )?;
 
                 if expr_ty != ExpressionType::Unreachable {
@@ -1303,22 +1347,24 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?) {
                 ExpressionType::ReferenceToFunction(func_ty) => {
                     let func_ty = &context.declarations.id_to_func[func_ty];
-                    let mut generic_args =
-                        vec![ExpressionType::Unreachable; func_ty.type_param_count];
+
+                    let mut type_parameter_resolutions = type_parameter_resolutions.clone();
 
                     let params = if func_ty.is_associated {
                         if let AstNodeValue::BinExpr(BinOp::NullChaining | BinOp::Dot, lhs, _) =
                             &func.value
                         {
                             let lhs = context.ast.get(*lhs);
-                            find_generic_bindings(
-                                &mut generic_args[..],
+                            resolve_type_parameter_and_check_assignable_to(
+                                context,
+                                &mut type_parameter_resolutions,
                                 &func_ty.params[0],
                                 lhs.ty.get().expect("type info to be filled in"),
-                            );
+                            )?;
                         }
 
                         &func_ty.params[1..]
@@ -1337,25 +1383,18 @@ fn typecheck_expression<'a>(
                             current_scope,
                             context,
                             generator_input_ty,
+                            &type_parameter_resolutions,
                         )?;
-                        find_generic_bindings(&mut generic_args[..], param, arg_ty);
-                        if !is_assignable_to(
-                            context.declarations,
-                            Some(&generic_args),
+                        resolve_type_parameter_and_check_assignable_to(
+                            context,
+                            &mut type_parameter_resolutions,
                             param,
                             arg_ty,
-                        ) {
-                            return Err(TypecheckError::TypeMismatch {
-                                provenance: arg.provenance.clone(),
-                                received: arg_ty.clone(),
-                                expected: param.clone(),
-                            });
-                        }
+                        )?;
                     }
 
-                    let mut returns = func_ty.returns.clone();
-                    returns.resolve_generics(&generic_args[..]);
-                    returns
+                    // DONTMERGE: check against the resolved type parameters
+                    func_ty.returns.clone()
                 }
                 ExpressionType::Generator { yield_ty, param_ty } => {
                     // TODO: allow more than one parameter
@@ -1375,6 +1414,7 @@ fn typecheck_expression<'a>(
                             current_scope,
                             context,
                             generator_input_ty,
+                            type_parameter_resolutions,
                         )?;
                         // TODO: generic generators?
                         assert_assignable_to(
@@ -1399,6 +1439,7 @@ fn typecheck_expression<'a>(
                             current_scope,
                             context,
                             generator_input_ty,
+                            type_parameter_resolutions,
                         )?;
                         merge_results(
                             &mut results,
@@ -1426,6 +1467,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?
             else {
                 return Err(TypecheckError::CantCall(node.provenance.clone()));
@@ -1449,6 +1491,7 @@ fn typecheck_expression<'a>(
                             current_scope,
                             context,
                             generator_input_ty,
+                            type_parameter_resolutions,
                         ) {
                             Ok(arg_field_ty) => {
                                 merge_results(
@@ -1473,7 +1516,8 @@ fn typecheck_expression<'a>(
                 }
                 TypeDeclaration::Union(_)
                 | TypeDeclaration::Interface(_)
-                | TypeDeclaration::Module(_) => {
+                | TypeDeclaration::Module(_)
+                | TypeDeclaration::TypeParameter(_) => {
                     return Err(TypecheckError::NonStructDeclStructLiteral(
                         node.provenance.clone(),
                     ));
@@ -1491,6 +1535,7 @@ fn typecheck_expression<'a>(
                     current_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 )?;
                 if let Some(expected_key_ty) = result_key_ty {
                     assert_assignable_to(
@@ -1509,6 +1554,7 @@ fn typecheck_expression<'a>(
                     current_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 )?;
                 if let Some(expected_value_ty) = result_value_ty {
                     assert_assignable_to(
@@ -1534,6 +1580,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             ExpressionType::Collection(CollectionType::ReferenceCounter(Box::new(inner_ty.clone())))
         }
@@ -1544,6 +1591,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             ExpressionType::Collection(CollectionType::Cell(Box::new(inner_ty.clone())))
         }
@@ -1556,6 +1604,7 @@ fn typecheck_expression<'a>(
                     current_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 )?
                 .clone(),
             ),
@@ -1568,6 +1617,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let (ExpressionType::Pointer(_, ty)
             | ExpressionType::Collection(CollectionType::ReferenceCounter(ty))) = ty
@@ -1589,6 +1639,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?
             .clone();
             for remaining in iter {
@@ -1599,6 +1650,7 @@ fn typecheck_expression<'a>(
                     current_scope,
                     context,
                     generator_input_ty,
+                    type_parameter_resolutions,
                 )?;
                 if &ty != this_ty {
                     return Err(TypecheckError::TypeMismatch {
@@ -1617,6 +1669,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             let length = context.ast.get(*length);
             let length_ty = typecheck_expression(
@@ -1625,6 +1678,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             assert_assignable_to(
                 context.declarations,
@@ -1642,6 +1696,7 @@ fn typecheck_expression<'a>(
                 current_scope,
                 context,
                 generator_input_ty,
+                type_parameter_resolutions,
             )?;
             match op {
                 UnaryOp::BooleanNot => {
@@ -1829,7 +1884,14 @@ fn typecheck_const<'a>(
         unreachable!()
     };
     let value = context.ast.get(*value);
-    let value_ty = typecheck_expression(value, outer_scopes, current_scope, context, None)?;
+    let value_ty = typecheck_expression(
+        value,
+        outer_scopes,
+        current_scope,
+        context,
+        None,
+        &HashMap::new(),
+    )?;
     let mut result = Ok(());
     if !validate_is_const(value) {
         merge_results(
@@ -1934,7 +1996,6 @@ fn ensure_no_assignment_to_reference(
         ExpressionType::Pointer(_, _) => {
             Err(TypecheckError::CantAssignToReference(provenance.clone()))
         }
-        ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::FunctionReference { .. } => todo!(),
     }
 }
@@ -1960,7 +2021,6 @@ fn validate_assignment_lhs_ty(
         ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::SharedRaw, _) => {
             Err(TypecheckError::IllegalSharedRefMutation(provenance.clone()))
         }
-        ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::FunctionReference { .. } => todo!(),
     }
 }
@@ -2038,6 +2098,27 @@ fn resolve_name(
         .cloned()
 }
 
+fn resolve_type_parameter_and_check_assignable_to(
+    context: &TypecheckContext,
+    type_parameter_resolutions: &mut HashMap<TypeID, ExpressionType>,
+    parameter: &ExpressionType,
+    argument: &ExpressionType,
+) -> Result<(), TypecheckError> {
+    let ExpressionType::InstanceOf(parameter_ty_id) = parameter else {
+        return Ok(());
+    };
+    let TypeDeclaration::TypeParameter(_parameter_ty) =
+        &context.declarations.id_to_decl[parameter_ty_id]
+    else {
+        return Ok(());
+    };
+    // DONTMERGE: Ensure that argument is compatible with parameter_ty
+    // DONTMERGE: If there's already a resolution, ensure it's assignable to
+    type_parameter_resolutions.insert(*parameter_ty_id, argument.clone());
+
+    Ok(())
+}
+
 fn find_generic_bindings(
     generic_args: &mut [ExpressionType],
     left: &ExpressionType,
@@ -2087,11 +2168,6 @@ fn find_generic_bindings(
             find_generic_bindings(generic_args, left_key, right_key);
             find_generic_bindings(generic_args, left_value, right_value);
         }
-        (ExpressionType::TypeParameterReference(idx), _) => {
-            if generic_args[*idx] == ExpressionType::Unreachable {
-                generic_args[*idx] = right.clone();
-            }
-        }
         (
             ExpressionType::Generator {
                 yield_ty: left_yield_ty,
@@ -2139,12 +2215,6 @@ pub fn is_assignable_to(
     use PrimitiveType::*;
 
     match (left, right) {
-        (TypeParameterReference(idx), _) => {
-            is_assignable_to(context, generic_args, &generic_args.unwrap()[*idx], right)
-        }
-        (_, TypeParameterReference(_)) => {
-            todo!("can you ever end up here?")
-        }
         (Unreachable, Unreachable) => true,
         (Unreachable, _) => false,
         (_, Unreachable) => true,
@@ -2223,6 +2293,9 @@ pub fn is_assignable_to(
                         && lhs.returns == rhs.returns
                 }),
                 (Interface(_), Interface(_)) => left == right,
+
+                (TypeParameter(_), TypeParameter(_)) => left == right,
+                (_, TypeParameter(_)) | (TypeParameter(_), _) => false,
 
                 (_, Module(_)) => false,
                 // You can never assign to a module
