@@ -389,6 +389,5 @@ pub fn drop_variable(
         ExpressionType::Nullable(_) => {
             // TODO
         }
-        ExpressionType::TypeParameterReference(_) => todo!(),
     }
 }

@@ -14,10 +14,10 @@ interface Value {
 
 fn least[T: Value](values: list[T]): i32 {
     let lowest_idx = 0;
-    let lowest_value = 0;//values[0].value();
+    let lowest_value = values[0].value();
     let index = 1;
     while index < values.len() {
-        let current_value = 1;//values[index].value();
+        let current_value = values[index].value();
         if current_value < lowest_value {
             lowest_idx = index;
             lowest_value = current_value;

@@ -286,6 +286,7 @@ impl DeclarationContext {
                             None,
                         ),
                     )
+                    .map(|ty| (ty, &func.type_parameters))
                 }
                 AstNodeValue::FunctionDeclaration(func) => {
                     let id = get_id_for_func_name(file, &self.id_to_decl, func.name.as_str());
@@ -306,10 +307,22 @@ impl DeclarationContext {
                             None,
                         ),
                     )
+                    .map(|ty| (ty, &func.type_parameters))
                 }
                 _ => None,
             };
-            if let Some(func) = func {
+            if let Some((func, type_parameters)) = func {
+                merge_results(
+                    &mut result,
+                    fill_in_type_parameters(
+                        &source.arena,
+                        &names_to_type_id,
+                        &self.id_to_decl,
+                        &func.type_parameters,
+                        type_parameters,
+                        &mut declarations,
+                    ),
+                );
                 self.id_to_func.insert(func.id, func);
             }
         }
@@ -1227,7 +1240,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         IntrinsicFunction::ArrayLength,
         vec![ExpressionType::Pointer(
             PointerKind::SharedRef,
-            Box::new(array_ty),
+            Box::new(array_ty.clone()),
         )],
         ExpressionType::Primitive(PrimitiveType::PointerSize),
         PointerKind::SharedRef,
@@ -1238,7 +1251,7 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         "push",
         IntrinsicFunction::ArrayPush,
         vec![
-            ExpressionType::Pointer(PointerKind::UniqueRef, Box::new(array_ty)),
+            ExpressionType::Pointer(PointerKind::UniqueRef, Box::new(array_ty.clone())),
             ExpressionType::ReferenceToType(array_type_ty),
         ],
         ExpressionType::Void,
@@ -1262,22 +1275,39 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
     ctx.array_intrinsics = array_intrinsics;
 
     let mut dict_intrinsics = HashMap::new();
+    let dict_key = ctx.intrinsic_module.new_type_id();
+    let dict_value = ctx.intrinsic_module.new_type_id();
+    ctx.id_to_decl.insert(
+        dict_key,
+        TypeDeclaration::TypeParameter(TypeParameterType {
+            id: dict_key,
+            // DONTMERGE: hash
+            constraints: vec![],
+            provenance: None,
+        }),
+    );
+    ctx.id_to_decl.insert(
+        dict_value,
+        TypeDeclaration::TypeParameter(TypeParameterType {
+            id: dict_value,
+            constraints: vec![],
+            provenance: None,
+        }),
+    );
+    let dict_ty = ExpressionType::Collection(CollectionType::Dict(
+        Box::new(ExpressionType::ReferenceToType(dict_key)),
+        Box::new(ExpressionType::ReferenceToType(dict_value)),
+    ));
     add_intrinsic(
         ctx,
         &mut dict_intrinsics,
         "contains_key",
         IntrinsicFunction::DictionaryContains,
         vec![
+            ExpressionType::Pointer(PointerKind::SharedRef, Box::new(dict_ty.clone())),
             ExpressionType::Pointer(
                 PointerKind::SharedRef,
-                Box::new(ExpressionType::Collection(CollectionType::Dict(
-                    Box::new(ExpressionType::TypeParameterReference(0)),
-                    Box::new(ExpressionType::TypeParameterReference(1)),
-                ))),
-            ),
-            ExpressionType::Pointer(
-                PointerKind::SharedRef,
-                Box::new(ExpressionType::TypeParameterReference(0)),
+                Box::new(ExpressionType::ReferenceToType(dict_key)),
             ),
         ],
         ExpressionType::Primitive(PrimitiveType::Bool),
@@ -1289,15 +1319,9 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         "insert",
         IntrinsicFunction::DictionaryInsert,
         vec![
-            ExpressionType::Pointer(
-                PointerKind::UniqueRef,
-                Box::new(ExpressionType::Collection(CollectionType::Dict(
-                    Box::new(ExpressionType::TypeParameterReference(0)),
-                    Box::new(ExpressionType::TypeParameterReference(1)),
-                ))),
-            ),
-            ExpressionType::TypeParameterReference(0),
-            ExpressionType::TypeParameterReference(1),
+            ExpressionType::Pointer(PointerKind::UniqueRef, Box::new(dict_ty.clone())),
+            ExpressionType::ReferenceToType(dict_key),
+            ExpressionType::ReferenceToType(dict_value),
         ],
         ExpressionType::Void,
         PointerKind::UniqueRef,
@@ -1305,6 +1329,18 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
     ctx.dict_intrinsics = dict_intrinsics;
 
     let mut rc_intrinsics = HashMap::new();
+    let rc_content_ty = ctx.intrinsic_module.new_type_id();
+    ctx.id_to_decl.insert(
+        rc_content_ty,
+        TypeDeclaration::TypeParameter(TypeParameterType {
+            id: rc_content_ty,
+            constraints: vec![],
+            provenance: None,
+        }),
+    );
+    let rc_ty = ExpressionType::Collection(CollectionType::ReferenceCounter(Box::new(
+        ExpressionType::ReferenceToType(rc_content_ty),
+    )));
     add_intrinsic(
         ctx,
         &mut rc_intrinsics,
@@ -1312,35 +1348,36 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         IntrinsicFunction::RcClone,
         vec![ExpressionType::Pointer(
             PointerKind::SharedRef,
-            Box::new(ExpressionType::Collection(
-                CollectionType::ReferenceCounter(Box::new(ExpressionType::TypeParameterReference(
-                    0,
-                ))),
-            )),
+            Box::new(rc_ty.clone()),
         )],
-        ExpressionType::Collection(CollectionType::ReferenceCounter(Box::new(
-            ExpressionType::TypeParameterReference(0),
-        ))),
+        rc_ty,
         PointerKind::SharedRef,
     );
     ctx.rc_intrinsics = rc_intrinsics;
 
     let mut cell_intrinsics = HashMap::new();
+    let cell_content_ty = ctx.intrinsic_module.new_type_id();
+    ctx.id_to_decl.insert(
+        cell_content_ty,
+        TypeDeclaration::TypeParameter(TypeParameterType {
+            id: cell_content_ty,
+            constraints: vec![],
+            provenance: None,
+        }),
+    );
+    let cell_ty = ExpressionType::Collection(CollectionType::Cell(Box::new(
+        ExpressionType::ReferenceToType(cell_content_ty),
+    )));
     add_intrinsic(
         ctx,
         &mut cell_intrinsics,
         "get",
         IntrinsicFunction::CellGet,
         vec![
-            ExpressionType::Pointer(
-                PointerKind::SharedRef,
-                Box::new(ExpressionType::Collection(CollectionType::Cell(Box::new(
-                    ExpressionType::TypeParameterReference(0),
-                )))),
-            ),
+            ExpressionType::Pointer(PointerKind::SharedRef, Box::new(cell_ty.clone())),
             ExpressionType::Pointer(
                 PointerKind::UniqueRef,
-                Box::new(ExpressionType::TypeParameterReference(0)),
+                Box::new(ExpressionType::ReferenceToType(cell_content_ty)),
             ),
         ],
         ExpressionType::Void,
@@ -1352,13 +1389,8 @@ fn add_intrinsics(ctx: &mut DeclarationContext) {
         "set",
         IntrinsicFunction::CellSet,
         vec![
-            ExpressionType::Pointer(
-                PointerKind::SharedRef,
-                Box::new(ExpressionType::Collection(CollectionType::Cell(Box::new(
-                    ExpressionType::TypeParameterReference(0),
-                )))),
-            ),
-            ExpressionType::TypeParameterReference(0),
+            ExpressionType::Pointer(PointerKind::SharedRef, Box::new(cell_ty)),
+            ExpressionType::ReferenceToType(cell_content_ty),
         ],
         ExpressionType::Void,
         PointerKind::SharedRef,

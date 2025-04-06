@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     id::{AnyID, ConstantID, FunctionID},
-    SourceRange, TypeID, TypecheckError,
+    DeclarationContext, SourceRange, TypeID, TypecheckError,
 };
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -164,6 +164,7 @@ impl TypeDeclaration {
     pub fn field_access(
         &self,
         field: &str,
+        context: &DeclarationContext,
         provenance: &SourceRange,
     ) -> Result<ExpressionType, TypecheckError> {
         match self {
@@ -216,7 +217,19 @@ impl TypeDeclaration {
                 .ok_or_else(|| {
                     TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
                 }),
-            TypeDeclaration::TypeParameter(_) => todo!(),
+            TypeDeclaration::TypeParameter(ty_parameter) => {
+                if ty_parameter.constraints.len() != 1 {
+                    todo!("DONTMERGE: constraints that can overlap?");
+                }
+                let constraint = &ty_parameter.constraints[0];
+                let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceToType(id)) =
+                    constraint
+                else {
+                    todo!("DONTMERGE: what do");
+                };
+                let constraint_ty = &context.id_to_decl[id];
+                constraint_ty.field_access(field, context, provenance)
+            }
         }
     }
 
