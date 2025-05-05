@@ -268,7 +268,7 @@ pub struct StructType {
     pub type_parameters: HashMap<String, TypeID>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FuncType {
     pub id: FunctionID,
     pub params: Vec<ExpressionType>,

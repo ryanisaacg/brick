@@ -78,7 +78,7 @@ impl HirModule {
         }
     }
 
-    pub fn visit(&self, mut callback: impl FnMut(Option<&HirNode>, &HirNode)) {
+    pub fn visit<'a>(&'a self, mut callback: impl FnMut(Option<&HirNode>, &'a HirNode)) {
         self.top_level_statements
             .visit_recursive(None, &mut callback);
         for func in self.functions.iter() {
@@ -122,7 +122,7 @@ impl HirModule {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct HirFunction {
     pub id: FunctionID,
     pub name: Option<String>,
@@ -256,10 +256,10 @@ impl HirNode {
         self.visit_recursive(None, &mut callback);
     }
 
-    fn visit_recursive(
-        &self,
+    fn visit_recursive<'a>(
+        &'a self,
         parent: Option<&HirNode>,
-        callback: &mut impl FnMut(Option<&HirNode>, &HirNode),
+        callback: &mut impl FnMut(Option<&HirNode>, &'a HirNode),
     ) {
         callback(parent, self);
         self.children(|child| {

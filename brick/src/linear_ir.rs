@@ -579,6 +579,10 @@ impl LinearContext<'_> {
         }
     }
 
+    pub fn linearize_node(&mut self, node: HirNode) -> LinearNode {
+        lower_expression(self, node)
+    }
+
     pub fn linearize_nodes(&mut self, nodes: Vec<HirNode>) -> Vec<LinearNode> {
         nodes
             .into_iter()
