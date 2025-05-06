@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     declaration_context::{resolve_type_expr, DeclarationContext, FileDeclarations, TypeID},
     id::{AnyID, FunctionID, VariableID},
+    monomorph::monomorphize_type,
     multi_error::{merge_results, merge_results_or_value},
     parser::{
         AstArena, AstNode, AstNodeValue, BinOp, FunctionDeclarationValue, IfDeclaration,
@@ -56,7 +57,6 @@ impl<'ast, 'decl> TypecheckContext<'ast, 'decl> {
                 | ExpressionType::Collection(_)
                 | ExpressionType::Null
                 | ExpressionType::Nullable(_)
-                | ExpressionType::TypeParameterReference(_)
                 | ExpressionType::Generator { .. }
                 | ExpressionType::FunctionReference { .. }
                 | ExpressionType::InstanceOf(_) => unreachable!(),
@@ -482,7 +482,7 @@ fn typecheck_expression<'a>(
                         );
                     }
                 }
-                AstNodeValue::Call(_, _) => {
+                AstNodeValue::Call(..) => {
                     if !matches!(value_ty, ExpressionType::Pointer(_, _)) {
                         merge_results(
                             &mut results,
@@ -583,10 +583,11 @@ fn typecheck_expression<'a>(
                 return Err(TypecheckError::IllegalDotRHS(right.provenance.clone()));
             };
             match fully_dereference(left_ty) {
-                ExpressionType::InstanceOf(id) => context
-                    .decl(id)
-                    .unwrap()
-                    .field_access(name, &right.provenance)?,
+                ExpressionType::InstanceOf(id) => context.decl(id).unwrap().field_access(
+                    name,
+                    context.declarations,
+                    &right.provenance,
+                )?,
                 ExpressionType::ReferenceToType(id) => match context.decl(id).unwrap() {
                     TypeDeclaration::Union(union_ty) => {
                         let variant_ty = union_ty.variants.get(name).ok_or_else(|| {
@@ -614,7 +615,9 @@ fn typecheck_expression<'a>(
                         })?
                         .clone(),
                     // TODO: static functions on structs?
-                    TypeDeclaration::Struct(_) | TypeDeclaration::Interface(_) => {
+                    TypeDeclaration::Struct(_)
+                    | TypeDeclaration::Interface(_)
+                    | TypeDeclaration::TypeParameter(_) => {
                         return Err(TypecheckError::IllegalDotLHS(left.provenance.clone()));
                     }
                 },
@@ -719,7 +722,11 @@ fn typecheck_expression<'a>(
                 let ExpressionType::InstanceOf(id) = ty else {
                     unreachable!()
                 };
-                field_ty = context.decl(id).unwrap().field_access(name, provenance);
+                field_ty =
+                    context
+                        .decl(id)
+                        .unwrap()
+                        .field_access(name, context.declarations, provenance);
             });
             ExpressionType::Nullable(Box::new(field_ty?))
         }
@@ -1295,7 +1302,7 @@ fn typecheck_expression<'a>(
             }
             expr_ty
         }
-        AstNodeValue::Call(func, args) => {
+        AstNodeValue::Call(func, args, node_type_parameter_resolutions) => {
             let func = context.ast.get(*func);
             match fully_dereference(typecheck_expression(
                 func,
@@ -1306,19 +1313,21 @@ fn typecheck_expression<'a>(
             )?) {
                 ExpressionType::ReferenceToFunction(func_ty) => {
                     let func_ty = &context.declarations.id_to_func[func_ty];
-                    let mut generic_args =
-                        vec![ExpressionType::Unreachable; func_ty.type_param_count];
+
+                    let mut type_parameter_resolutions = HashMap::new();
 
                     let params = if func_ty.is_associated {
                         if let AstNodeValue::BinExpr(BinOp::NullChaining | BinOp::Dot, lhs, _) =
                             &func.value
                         {
                             let lhs = context.ast.get(*lhs);
-                            find_generic_bindings(
-                                &mut generic_args[..],
+                            resolve_type_parameters(
+                                context,
+                                &mut type_parameter_resolutions,
+                                &lhs.provenance,
                                 &func_ty.params[0],
                                 lhs.ty.get().expect("type info to be filled in"),
-                            );
+                            )?;
                         }
 
                         &func_ty.params[1..]
@@ -1338,24 +1347,32 @@ fn typecheck_expression<'a>(
                             context,
                             generator_input_ty,
                         )?;
-                        find_generic_bindings(&mut generic_args[..], param, arg_ty);
-                        if !is_assignable_to(
-                            context.declarations,
-                            Some(&generic_args),
+                        resolve_type_parameters(
+                            context,
+                            &mut type_parameter_resolutions,
+                            &arg.provenance,
                             param,
                             arg_ty,
-                        ) {
-                            return Err(TypecheckError::TypeMismatch {
-                                provenance: arg.provenance.clone(),
-                                received: arg_ty.clone(),
-                                expected: param.clone(),
-                            });
-                        }
+                        )?;
+                        assert_assignable_to_with_type_parameters(
+                            context.declarations,
+                            &arg.provenance,
+                            &type_parameter_resolutions,
+                            param,
+                            arg_ty,
+                        )?;
                     }
 
-                    let mut returns = func_ty.returns.clone();
-                    returns.resolve_generics(&generic_args[..]);
-                    returns
+                    let mut return_ty = func_ty.returns.clone();
+                    monomorphize_type(&type_parameter_resolutions, &mut return_ty);
+
+                    if !type_parameter_resolutions.is_empty() {
+                        node_type_parameter_resolutions
+                            .set(type_parameter_resolutions)
+                            .expect("each node should only be traversed once");
+                    }
+
+                    return_ty
                 }
                 ExpressionType::Generator { yield_ty, param_ty } => {
                     // TODO: allow more than one parameter
@@ -1473,7 +1490,8 @@ fn typecheck_expression<'a>(
                 }
                 TypeDeclaration::Union(_)
                 | TypeDeclaration::Interface(_)
-                | TypeDeclaration::Module(_) => {
+                | TypeDeclaration::Module(_)
+                | TypeDeclaration::TypeParameter(_) => {
                     return Err(TypecheckError::NonStructDeclStructLiteral(
                         node.provenance.clone(),
                     ));
@@ -1676,7 +1694,7 @@ fn typecheck_expression<'a>(
 
     node.ty.set(ty).expect("each node should be visited once");
 
-    Ok(node.ty.get().expect("just set"))
+    Ok(node.ty.get().expect("ICE: this value was just set"))
 }
 
 enum BindingState<'a> {
@@ -1786,7 +1804,7 @@ fn validate_assignment_lhs(
         | AstNodeValue::While(_, _)
         | AstNodeValue::Match(_)
         | AstNodeValue::Loop(_)
-        | AstNodeValue::Call(_, _)
+        | AstNodeValue::Call(_, _, _)
         | AstNodeValue::TakePointer(_, _)
         | AstNodeValue::RecordLiteral { .. }
         | AstNodeValue::DictLiteral(_)
@@ -1884,7 +1902,7 @@ fn validate_is_const(node: &AstNode) -> bool {
         | AstNodeValue::If(_)
         | AstNodeValue::While(_, _)
         | AstNodeValue::Loop(_)
-        | AstNodeValue::Call(_, _)
+        | AstNodeValue::Call(_, _, _)
         | AstNodeValue::TakePointer(_, _)
         | AstNodeValue::ReferenceCountLiteral(_)
         | AstNodeValue::CellLiteral(_)
@@ -1934,7 +1952,6 @@ fn ensure_no_assignment_to_reference(
         ExpressionType::Pointer(_, _) => {
             Err(TypecheckError::CantAssignToReference(provenance.clone()))
         }
-        ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::FunctionReference { .. } => todo!(),
     }
 }
@@ -1960,7 +1977,6 @@ fn validate_assignment_lhs_ty(
         ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::SharedRaw, _) => {
             Err(TypecheckError::IllegalSharedRefMutation(provenance.clone()))
         }
-        ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::FunctionReference { .. } => todo!(),
     }
 }
@@ -2003,7 +2019,7 @@ fn validate_lvalue(context: &TypecheckContext, lvalue: &AstNode) -> bool {
         | AstNodeValue::While(_, _)
         | AstNodeValue::Match(_)
         | AstNodeValue::Loop(_)
-        | AstNodeValue::Call(_, _)
+        | AstNodeValue::Call(_, _, _)
         | AstNodeValue::TakePointer(_, _)
         | AstNodeValue::RecordLiteral { .. }
         | AstNodeValue::DictLiteral(_)
@@ -2038,32 +2054,39 @@ fn resolve_name(
         .cloned()
 }
 
-fn find_generic_bindings(
-    generic_args: &mut [ExpressionType],
-    left: &ExpressionType,
-    right: &ExpressionType,
-) {
-    match (left, right) {
+fn resolve_type_parameters(
+    context: &TypecheckContext,
+    type_parameter_resolutions: &mut HashMap<TypeID, ExpressionType>,
+    provenance: &SourceRange,
+    parameter: &ExpressionType,
+    argument: &ExpressionType,
+) -> Result<(), TypecheckError> {
+    match (parameter, argument) {
+        (ExpressionType::InstanceOf(ty_id) | ExpressionType::ReferenceToType(ty_id), argument) => {
+            let TypeDeclaration::TypeParameter(_type_parameter) =
+                &context.declarations.id_to_decl[ty_id]
+            else {
+                return Ok(());
+            };
+            if let Some(ty) = type_parameter_resolutions.get(ty_id) {
+                assert_assignable_to(context.declarations, provenance, ty, argument)
+            } else {
+                // TODO: Ensure that argument is compatible with parameter_ty
+                type_parameter_resolutions.insert(*ty_id, argument.clone());
+                Ok(())
+            }
+        }
         // All scalar expression types cannot contain a generic binding. They may not match
         // the right side of the expression, but we're not checking that in this method
         (
             ExpressionType::Void
             | ExpressionType::Unreachable
             | ExpressionType::Primitive(_)
-            | ExpressionType::InstanceOf(_)
-            | ExpressionType::ReferenceToType(_)
             | ExpressionType::Null
             | ExpressionType::Collection(CollectionType::String),
             _,
-        ) => {}
-        (
-            ExpressionType::Pointer(PointerKind::SharedRef, left),
-            ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::UniqueRef, right),
-        )
-        | (
-            ExpressionType::Pointer(PointerKind::UniqueRef, left),
-            ExpressionType::Pointer(PointerKind::UniqueRef, right),
-        )
+        ) => Ok(()),
+        (ExpressionType::Pointer(_, left), ExpressionType::Pointer(_, right))
         | (
             ExpressionType::Collection(CollectionType::Array(left)),
             ExpressionType::Collection(CollectionType::Array(right)),
@@ -2077,20 +2100,33 @@ fn find_generic_bindings(
             ExpressionType::Collection(CollectionType::Cell(right)),
         )
         | (ExpressionType::Nullable(left), ExpressionType::Nullable(right)) => {
-            find_generic_bindings(generic_args, left, right);
+            resolve_type_parameters(context, type_parameter_resolutions, provenance, left, right)
         }
-        (ExpressionType::Nullable(left), _) => find_generic_bindings(generic_args, left, right),
+        (ExpressionType::Nullable(left), _) => resolve_type_parameters(
+            context,
+            type_parameter_resolutions,
+            provenance,
+            left,
+            argument,
+        ),
         (
             ExpressionType::Collection(CollectionType::Dict(left_key, left_value)),
             ExpressionType::Collection(CollectionType::Dict(right_key, right_value)),
         ) => {
-            find_generic_bindings(generic_args, left_key, right_key);
-            find_generic_bindings(generic_args, left_value, right_value);
-        }
-        (ExpressionType::TypeParameterReference(idx), _) => {
-            if generic_args[*idx] == ExpressionType::Unreachable {
-                generic_args[*idx] = right.clone();
-            }
+            resolve_type_parameters(
+                context,
+                type_parameter_resolutions,
+                provenance,
+                left_key,
+                right_key,
+            )?;
+            resolve_type_parameters(
+                context,
+                type_parameter_resolutions,
+                provenance,
+                left_value,
+                right_value,
+            )
         }
         (
             ExpressionType::Generator {
@@ -2102,8 +2138,20 @@ fn find_generic_bindings(
                 param_ty: right_param_ty,
             },
         ) => {
-            find_generic_bindings(generic_args, left_yield_ty, right_yield_ty);
-            find_generic_bindings(generic_args, left_param_ty, right_param_ty);
+            resolve_type_parameters(
+                context,
+                type_parameter_resolutions,
+                provenance,
+                left_yield_ty,
+                right_yield_ty,
+            )?;
+            resolve_type_parameters(
+                context,
+                type_parameter_resolutions,
+                provenance,
+                left_param_ty,
+                right_param_ty,
+            )
         }
         (ExpressionType::FunctionReference { .. }, _)
         | (_, ExpressionType::FunctionReference { .. }) => {
@@ -2114,7 +2162,7 @@ fn find_generic_bindings(
             todo!("first class functions")
         }
         (ExpressionType::Pointer(_, inner), rhs) => {
-            find_generic_bindings(generic_args, inner, rhs);
+            resolve_type_parameters(context, type_parameter_resolutions, provenance, inner, rhs)
         }
         (
             ExpressionType::Collection(
@@ -2125,26 +2173,28 @@ fn find_generic_bindings(
             ),
             _,
         )
-        | (ExpressionType::Generator { .. }, _) => {}
+        | (ExpressionType::Generator { .. }, _) => Ok(()),
     }
 }
 
 pub fn is_assignable_to(
     context: &DeclarationContext,
-    generic_args: Option<&[ExpressionType]>,
+    type_parameter_resolutions: Option<&HashMap<TypeID, ExpressionType>>,
     left: &ExpressionType,
     right: &ExpressionType,
 ) -> bool {
     use ExpressionType::*;
     use PrimitiveType::*;
 
+    // Before anything else, try resolving type parameters
+    if let Some(left) = lookup_type_parameter(type_parameter_resolutions, left) {
+        return is_assignable_to(context, type_parameter_resolutions, left, right);
+    }
+    if let Some(right) = lookup_type_parameter(type_parameter_resolutions, right) {
+        return is_assignable_to(context, type_parameter_resolutions, left, right);
+    }
+
     match (left, right) {
-        (TypeParameterReference(idx), _) => {
-            is_assignable_to(context, generic_args, &generic_args.unwrap()[*idx], right)
-        }
-        (_, TypeParameterReference(_)) => {
-            todo!("can you ever end up here?")
-        }
         (Unreachable, Unreachable) => true,
         (Unreachable, _) => false,
         (_, Unreachable) => true,
@@ -2158,11 +2208,11 @@ pub fn is_assignable_to(
         (Pointer(left_ty, left_inner), Pointer(right_ty, right_inner)) => {
             (left_ty == right_ty
                 || *left_ty == PointerKind::SharedRef && *right_ty == PointerKind::UniqueRef)
-                && is_assignable_to(context, generic_args, left_inner, right_inner)
+                && is_assignable_to(context, type_parameter_resolutions, left_inner, right_inner)
         }
         // TODO: auto-dereference in the IR
         (left, Pointer(_, right_inner)) => {
-            is_assignable_to(context, generic_args, left, right_inner)
+            is_assignable_to(context, type_parameter_resolutions, left, right_inner)
         }
         // TODO: support auto-dereferencing on lhs
         (Pointer(_, _), _right) => false,
@@ -2170,8 +2220,12 @@ pub fn is_assignable_to(
         // Nullability
         (Nullable(_), Null) => true,
         (_, Null) => false,
-        (Nullable(left), Nullable(right)) => is_assignable_to(context, generic_args, left, right),
-        (Nullable(left), right) => is_assignable_to(context, generic_args, left, right),
+        (Nullable(left), Nullable(right)) => {
+            is_assignable_to(context, type_parameter_resolutions, left, right)
+        }
+        (Nullable(left), right) => {
+            is_assignable_to(context, type_parameter_resolutions, left, right)
+        }
         (_, Nullable(_)) => false,
 
         (Primitive(Float32), Primitive(Int32))
@@ -2224,6 +2278,9 @@ pub fn is_assignable_to(
                 }),
                 (Interface(_), Interface(_)) => left == right,
 
+                (TypeParameter(_), TypeParameter(_)) => left == right,
+                (_, TypeParameter(_)) | (TypeParameter(_), _) => false,
+
                 (_, Module(_)) => false,
                 // You can never assign to a module
                 (Module(_), _) => false,
@@ -2252,12 +2309,15 @@ pub fn is_assignable_to(
             Collection(CollectionType::ReferenceCounter(right)),
         )
         | (Collection(CollectionType::Cell(left)), Collection(CollectionType::Cell(right))) => {
-            left == right
+            are_types_the_same(type_parameter_resolutions, left, right)
         }
         (
             Collection(CollectionType::Dict(left_key, left_value)),
             Collection(CollectionType::Dict(right_key, right_value)),
-        ) => left_key == right_key && left_value == right_value,
+        ) => {
+            are_types_the_same(type_parameter_resolutions, left_key, right_key)
+                && are_types_the_same(type_parameter_resolutions, left_value, right_value)
+        }
         (Collection(CollectionType::String), Collection(CollectionType::String)) => true,
         (Collection(_), Collection(_)) => false,
 
@@ -2269,9 +2329,32 @@ pub fn is_assignable_to(
         | (_, ExpressionType::ReferenceToFunction(_)) => {
             todo!("first class functions")
         }
-
-        (ReferenceToType(_), _) | (_, ReferenceToType(_)) => todo!("{:?} = {:?}", left, right),
+        (ExpressionType::ReferenceToType(_), _) | (_, ExpressionType::ReferenceToType(_)) => {
+            todo!("{left:?} ?= {right:?}")
+        }
     }
+}
+
+fn are_types_the_same(
+    type_parameter_resolutions: Option<&HashMap<TypeID, ExpressionType>>,
+    left: &ExpressionType,
+    right: &ExpressionType,
+) -> bool {
+    if let Some(left) = lookup_type_parameter(type_parameter_resolutions, left) {
+        are_types_the_same(type_parameter_resolutions, left, right)
+    } else if let Some(right) = lookup_type_parameter(type_parameter_resolutions, right) {
+        are_types_the_same(type_parameter_resolutions, left, right)
+    } else {
+        left == right
+    }
+}
+
+fn lookup_type_parameter<'a>(
+    type_parameter_resolutions: Option<&'a HashMap<TypeID, ExpressionType>>,
+    expr: &'a ExpressionType,
+) -> Option<&'a ExpressionType> {
+    expr.type_id()
+        .and_then(|expr| type_parameter_resolutions.and_then(|type_params| type_params.get(expr)))
 }
 
 pub fn fully_dereference(ty: &ExpressionType) -> &ExpressionType {
@@ -2297,6 +2380,24 @@ fn assert_assignable_to(
     rhs: &ExpressionType,
 ) -> Result<(), TypecheckError> {
     if is_assignable_to(declarations, None, lhs, rhs) {
+        Ok(())
+    } else {
+        Err(TypecheckError::TypeMismatch {
+            provenance: provenance.clone(),
+            received: lhs.clone(),
+            expected: rhs.clone(),
+        })
+    }
+}
+
+fn assert_assignable_to_with_type_parameters(
+    declarations: &DeclarationContext,
+    provenance: &SourceRange,
+    type_parameter_resolutions: &HashMap<TypeID, ExpressionType>,
+    lhs: &ExpressionType,
+    rhs: &ExpressionType,
+) -> Result<(), TypecheckError> {
+    if is_assignable_to(declarations, Some(type_parameter_resolutions), lhs, rhs) {
         Ok(())
     } else {
         Err(TypecheckError::TypeMismatch {

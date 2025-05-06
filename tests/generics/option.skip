@@ -1,0 +1,14 @@
+// Compile
+
+// TODO: can these generics be inferred?
+// TODO: how to decide on move semantics?
+
+union Option[T]: Resource {
+    Some(T),
+    None,
+}
+
+struct Value { x: i32 }
+
+//let x = Option.Some(5);
+//let y = Option.Some(Option[Value].None);

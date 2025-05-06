@@ -629,13 +629,13 @@ fn borrow_check_node(
                 );
             }
         }
-        HirNodeValue::Call(_, params)
-        | HirNodeValue::VtableCall(_, _, params)
-        | HirNodeValue::IntrinsicCall(_, params) => {
+        HirNodeValue::Call { args, .. }
+        | HirNodeValue::VtableCall(_, _, args)
+        | HirNodeValue::IntrinsicCall(_, args) => {
             let mut unique_params = HashMap::new();
             let mut shared_params: HashMap<VariableID, (Vec<PathSegment>, Option<SourceRange>)> =
                 HashMap::new();
-            for param in params.iter() {
+            for param in args.iter() {
                 merge_results(
                     &mut results,
                     borrow_check_node(ctx, variable_state, borrow_state, autoclones, param),
@@ -838,7 +838,7 @@ fn find_all_lenders(node: &HirNode) -> Vec<LenderOrigin> {
                 path: find_path_for_lvalue(arg),
             })
             .collect(),
-        HirNodeValue::Call(_, args) | HirNodeValue::IntrinsicCall(_, args) => args
+        HirNodeValue::Call { args, .. } | HirNodeValue::IntrinsicCall(_, args) => args
             .iter()
             .filter(|arg| matches!(arg.ty, ExpressionType::Pointer(_, _)))
             .map(|arg| LenderOrigin {

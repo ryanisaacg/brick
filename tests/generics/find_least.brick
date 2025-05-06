@@ -1,0 +1,38 @@
+// Int | 10
+
+struct X {
+    val: i32,
+
+    fn value(ref self): i32 {
+        self.val
+    }
+}
+
+interface Value {
+    fn value(ref self): i32
+}
+
+fn least[T: Value](values: list[T]): i32 {
+    let lowest_idx = 0;
+    let lowest_value = values[0].value();
+    let index = 1;
+    while index < values.len() {
+        let current_value = values[index].value();
+        if current_value < lowest_value {
+            lowest_idx = index;
+            lowest_value = current_value;
+        }
+        index += 1;
+    }
+
+    lowest_value
+}
+
+least(list[
+    X { val: 11 }, 
+    X { val: 20 }, 
+    X { val: 30 }, 
+    X { val: 10 }, 
+    X { val: 25 }, 
+])
+

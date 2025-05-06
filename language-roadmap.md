@@ -47,14 +47,6 @@ anonymous types:
 - anonymous module
 - anonymous interface
 
-type parameters:
-- non-reified / non-monomorphizing:
-    - generic type syntax
-    - types can be parameterized
-    - nested type parameters are correctly resolved
-- monomorphizing
-- generic types can be constrained by interfaces
-
 destructuring:
 - destructuring syntax in let-statement: store vec of paths and bindings
 - destructuring semantics: node that takes the thing that's being destructured and then a list of assignments, just a marker for the borrowchecker to know that it all happens at once

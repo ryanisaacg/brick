@@ -3,9 +3,10 @@
 use declaration_context::FileDeclarations;
 pub use declaration_context::{DeclarationContext, TypeID};
 use diagnostic::DiagnosticContents;
+use monomorph::monomorphize;
 use std::{collections::HashMap, error::Error, fmt::Display, io};
 
-use hir::HirModule;
+use hir::{HirModule, HirNode};
 use interpreter::{Function, VM};
 pub use linear_ir::{
     expr_ty_to_physical, DeclaredTypeLayout, LinearFunction, LinearNode, LinearNodeValue,
@@ -25,6 +26,7 @@ mod generate_destructors;
 mod hir;
 mod interpreter;
 mod linear_ir;
+mod monomorph;
 mod multi_error;
 pub mod parser;
 mod provenance;
@@ -57,6 +59,7 @@ pub use typecheck::TypecheckError;
 pub enum IntepreterError {
     Abort,
     CompileError(CompileError),
+    NoMainProvided,
 }
 
 impl Display for IntepreterError {
@@ -64,6 +67,7 @@ impl Display for IntepreterError {
         match self {
             IntepreterError::Abort => write!(f, "Panic within interpreter"),
             IntepreterError::CompileError(e) => e.fmt(f),
+            IntepreterError::NoMainProvided => write!(f, "No main module provided to interpreter"),
         }
     }
 }
@@ -141,6 +145,7 @@ pub fn interpret_code(
     sources: &[SourceFile],
     bindings: Vec<(&str, ExternBinding)>,
 ) -> Result<(Vec<Value>, Vec<u8>), IntepreterError> {
+    let compiled_sources = check_types(sources).map_err(IntepreterError::CompileError)?;
     let LowerResults {
         statements,
         statements_ty: _,
@@ -148,8 +153,12 @@ pub fn interpret_code(
         declarations,
         type_layouts: ty_declarations,
         constant_data,
-    } = lower_code(sources, 1, std::mem::size_of::<usize>())
-        .map_err(IntepreterError::CompileError)?;
+    } = lower_code(compiled_sources, 1, std::mem::size_of::<usize>());
+
+    let Some(statements) = statements else {
+        return Err(IntepreterError::NoMainProvided);
+    };
+
     let mut functions: HashMap<_, _> = functions
         .into_iter()
         .map(|func| (func.id, Function::Ir(func)))
@@ -167,14 +176,14 @@ pub fn interpret_code(
     }
 
     let vm = VM::new(ty_declarations, &functions, constant_data);
-    match vm.evaluate_top_level_statements(&statements[..]) {
+    match vm.evaluate_top_level_statements(&statements) {
         Ok(results) => Ok(results),
         Err(_) => Err(IntepreterError::Abort),
     }
 }
 
 pub struct LowerResults {
-    pub statements: Vec<LinearNode>,
+    pub statements: Option<LinearNode>,
     pub statements_ty: Option<PhysicalType>,
     pub functions: Vec<LinearFunction>,
     pub declarations: DeclarationContext,
@@ -183,17 +192,27 @@ pub struct LowerResults {
 }
 
 pub fn lower_code(
-    sources: &[SourceFile],
-    byte_size: usize,
-    pointer_size: usize,
-) -> Result<LowerResults, CompileError> {
-    let single_source = sources.len() == 1;
-
-    let CompilationResults {
+    CompilationResults {
         main,
         modules,
         mut declarations,
-    } = check_types(sources)?;
+    }: CompilationResults,
+    byte_size: usize,
+    pointer_size: usize,
+) -> LowerResults {
+    let mut top_level_statements: Option<HirNode> = None;
+    let mut functions = HashMap::new();
+
+    for (idx, module) in modules.into_iter().enumerate() {
+        if Some(idx) == main {
+            top_level_statements = Some(module.top_level_statements);
+        }
+        for function in module.functions {
+            functions.insert(function.id, function);
+        }
+    }
+
+    monomorphize(&mut declarations, &mut top_level_statements, &mut functions);
 
     let mut type_layouts = HashMap::new();
     layout_types(
@@ -203,8 +222,6 @@ pub fn lower_code(
         pointer_size,
     );
 
-    let mut statements = Vec::new();
-    let mut functions = Vec::new();
     let mut constant_data = Vec::new();
     let mut indirect_function_types = HashMap::new();
 
@@ -217,20 +234,17 @@ pub fn lower_code(
         module: FileDeclarations::new(),
     };
 
-    for (idx, module) in modules.into_iter().enumerate() {
-        if Some(idx) == main || (single_source && idx == 0) {
-            statements.push(module.top_level_statements);
-        }
-        for function in module.functions {
-            functions.push(linear_context.linearize_function(&declarations, function));
-        }
-    }
-
-    let statements_ty = statements.last().and_then(|last| match &last.ty {
-        ExpressionType::Void | ExpressionType::Unreachable => None,
-        return_ty => Some(expr_ty_to_physical(return_ty)),
-    });
-    let statements = linear_context.linearize_nodes(statements);
+    let statements_ty = top_level_statements
+        .as_ref()
+        .and_then(|statement| match &statement.ty {
+            ExpressionType::Void | ExpressionType::Unreachable => None,
+            return_ty => Some(expr_ty_to_physical(return_ty)),
+        });
+    let statements = top_level_statements.map(|statement| linear_context.linearize_node(statement));
+    let functions = functions
+        .into_values()
+        .map(|function| linear_context.linearize_function(&declarations, function))
+        .collect();
 
     for (expr, fn_id) in indirect_function_types {
         let ExpressionType::FunctionReference {
@@ -244,7 +258,6 @@ pub fn lower_code(
             fn_id,
             FuncType {
                 id: fn_id,
-                type_param_count: 0,
                 params: parameters,
                 returns: *returns,
                 is_associated: false,
@@ -252,18 +265,19 @@ pub fn lower_code(
                 is_unsafe: false,
                 is_extern: false,
                 provenance: None,
+                type_parameters: HashMap::new(),
             },
         );
     }
 
-    Ok(LowerResults {
+    LowerResults {
         statements,
         statements_ty,
         functions,
         declarations,
         type_layouts,
         constant_data,
-    })
+    }
 }
 
 pub struct CompilationResults {
@@ -348,6 +362,10 @@ pub fn typecheck_module(
             main = Some(modules.len());
         }
         modules.push(module);
+    }
+    // In single-source mode, count the only source as the main module
+    if main.is_none() && contents.len() == 1 {
+        main = Some(0);
     }
     generate_destructors(&mut modules, &mut declarations);
 

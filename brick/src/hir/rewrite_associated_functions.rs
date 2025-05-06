@@ -11,7 +11,12 @@ use super::{HirNode, HirNodeValue};
 
 pub fn rewrite(declarations: &DeclarationContext, root: &mut HirNode) {
     // We only care about function calls that are an access on the left hand side
-    let HirNodeValue::Call(call_lhs, args) = &mut root.value else {
+    let HirNodeValue::Call {
+        func: call_lhs,
+        args,
+        type_parameter_resolutions: _,
+    } = &mut root.value
+    else {
         return;
     };
     let root_ty = &root.ty;
@@ -21,6 +26,7 @@ pub fn rewrite(declarations: &DeclarationContext, root: &mut HirNode) {
     match fully_dereference(&lhs.ty) {
         ExpressionType::InstanceOf(ty_id) | ExpressionType::ReferenceToType(ty_id) => {
             match declarations.id_to_decl.get(ty_id) {
+                None => unreachable!("ICE: type ID not found ({ty_id:?})"),
                 Some(
                     TypeDeclaration::Struct(StructType {
                         associated_functions,
@@ -80,7 +86,12 @@ pub fn rewrite(declarations: &DeclarationContext, root: &mut HirNode) {
                         std::mem::swap(&mut temp, root);
                         let HirNode {
                             id,
-                            value: HirNodeValue::Call(lhs, args),
+                            value:
+                                HirNodeValue::Call {
+                                    func: lhs,
+                                    args,
+                                    type_parameter_resolutions: _,
+                                },
                             ty,
                             provenance: _,
                         } = temp
@@ -98,7 +109,28 @@ pub fn rewrite(declarations: &DeclarationContext, root: &mut HirNode) {
                         std::mem::swap(&mut temp, root);
                     }
                 }
-                _ => {}
+                Some(TypeDeclaration::TypeParameter(_)) => {
+                    let ty_id = *ty_id;
+                    let HirNodeValue::Access(lhs, name) = &mut call_lhs.value else {
+                        unreachable!();
+                    };
+                    // TODO: given the type parameter, determine what bound this function
+                    // call has. then determine which reference type to take, if necessary.
+                    let lhs = std::mem::take(lhs);
+                    let kind = PointerKind::SharedRef;
+                    let lhs_ty = lhs.ty.clone();
+                    let lhs_provenance = lhs.provenance.clone();
+                    let lhs = Box::new(HirNode {
+                        id: NodeID::new(),
+                        value: HirNodeValue::TakePointer(kind, lhs),
+                        ty: ExpressionType::Pointer(kind, Box::new(lhs_ty)),
+                        provenance: lhs_provenance,
+                    });
+                    let name = std::mem::take(name);
+                    let args = std::mem::take(args);
+                    root.value = HirNodeValue::TypeParameterCall(ty_id, name, lhs, args);
+                }
+                Some(TypeDeclaration::Module(_)) => {}
             }
         }
         ty @ ExpressionType::Collection(col_ty) => {

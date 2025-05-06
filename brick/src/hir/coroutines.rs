@@ -7,7 +7,12 @@ use super::{GeneratorProperties, HirModule, HirNode, HirNodeValue};
 
 pub fn rewrite_generator_calls(module: &mut HirModule) {
     module.par_visit_mut(|_return_ty, node| {
-        let HirNodeValue::Call(func, args) = &mut node.value else {
+        let HirNodeValue::Call {
+            func,
+            args,
+            type_parameter_resolutions: _,
+        } = &mut node.value
+        else {
             return;
         };
         let ExpressionType::Generator { yield_ty, param_ty } = fully_dereference(&func.ty) else {

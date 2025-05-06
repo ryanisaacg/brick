@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use crate::{
     id::{AnyID, ConstantID, FunctionID},
-    SourceRange, TypeID, TypecheckError,
+    DeclarationContext, SourceRange, TypeID, TypecheckError,
 };
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub enum ExpressionType {
+    #[default]
     Void,
     Unreachable,
     Primitive(PrimitiveType),
@@ -17,7 +18,6 @@ pub enum ExpressionType {
     Collection(CollectionType),
     Null,
     Nullable(Box<ExpressionType>),
-    TypeParameterReference(usize),
     Generator {
         yield_ty: Box<ExpressionType>,
         param_ty: Box<ExpressionType>,
@@ -40,7 +40,6 @@ impl ExpressionType {
             | ExpressionType::Collection(_)
             | ExpressionType::Null
             | ExpressionType::Nullable(_)
-            | ExpressionType::TypeParameterReference(_)
             | ExpressionType::Generator { .. }
             | ExpressionType::FunctionReference { .. } => None,
         }
@@ -48,7 +47,8 @@ impl ExpressionType {
 
     pub fn move_semantics(&self, declarations: &HashMap<TypeID, TypeDeclaration>) -> MoveSemantics {
         match self {
-            ExpressionType::Nullable(inner) => inner.move_semantics(declarations),
+            ExpressionType::Nullable(inner)
+                => inner.move_semantics(declarations),
             ExpressionType::Void
                 | ExpressionType::Unreachable
                 | ExpressionType::Null
@@ -58,7 +58,6 @@ impl ExpressionType {
             ExpressionType::InstanceOf(id) => declarations[id].move_semantics(),
             ExpressionType::Collection(CollectionType::ReferenceCounter(_)) => MoveSemantics::Autoclone,
             ExpressionType::ReferenceToType(_)
-            | ExpressionType::TypeParameterReference(_)
             | ExpressionType::Collection(_)
             | ExpressionType::Generator { .. }
             | ExpressionType::ReferenceToFunction(_)
@@ -77,53 +76,10 @@ impl ExpressionType {
             | ExpressionType::Generator { .. }
             | ExpressionType::FunctionReference { .. }
             | ExpressionType::ReferenceToType(_)
-            | ExpressionType::ReferenceToFunction(_)
-            | ExpressionType::TypeParameterReference(_) => false,
+            | ExpressionType::ReferenceToFunction(_) => false,
             ExpressionType::Pointer(PointerKind::SharedRef | PointerKind::UniqueRef, _) => true,
             ExpressionType::Pointer(PointerKind::SharedRaw | PointerKind::UniqueRaw, _) => false,
             ExpressionType::Nullable(inner) => inner.is_reference(),
-        }
-    }
-
-    pub(super) fn resolve_generics(&mut self, bindings: &[ExpressionType]) {
-        match self {
-            ExpressionType::Void
-            | ExpressionType::Unreachable
-            | ExpressionType::Primitive(_)
-            | ExpressionType::InstanceOf(_)
-            | ExpressionType::ReferenceToType(_)
-            | ExpressionType::ReferenceToFunction(_)
-            | ExpressionType::Null
-            | ExpressionType::Collection(CollectionType::String) => {}
-            ExpressionType::Nullable(child)
-            | ExpressionType::Pointer(_, child)
-            | ExpressionType::Collection(
-                CollectionType::Array(child)
-                | CollectionType::ReferenceCounter(child)
-                | CollectionType::Cell(child),
-            ) => {
-                child.resolve_generics(bindings);
-            }
-            ExpressionType::Collection(CollectionType::Dict(key, value)) => {
-                key.resolve_generics(bindings);
-                value.resolve_generics(bindings);
-            }
-            ExpressionType::TypeParameterReference(idx) => {
-                *self = bindings[*idx].clone();
-            }
-            ExpressionType::Generator { yield_ty, param_ty } => {
-                yield_ty.resolve_generics(bindings);
-                param_ty.resolve_generics(bindings);
-            }
-            ExpressionType::FunctionReference {
-                parameters,
-                returns,
-            } => {
-                for param in parameters.iter_mut() {
-                    param.resolve_generics(bindings);
-                }
-                returns.resolve_generics(bindings);
-            }
         }
     }
 }
@@ -151,6 +107,7 @@ pub enum TypeDeclaration {
     Interface(InterfaceType),
     Union(UnionType),
     Module(ModuleType),
+    TypeParameter(TypeParameterType),
 }
 
 impl TypeDeclaration {
@@ -160,6 +117,7 @@ impl TypeDeclaration {
             TypeDeclaration::Interface(inner) => inner.id,
             TypeDeclaration::Union(inner) => inner.id,
             TypeDeclaration::Module(inner) => inner.id,
+            TypeDeclaration::TypeParameter(inner) => inner.id,
         }
     }
 
@@ -169,6 +127,9 @@ impl TypeDeclaration {
             TypeDeclaration::Interface(InterfaceType { provenance, .. }) => provenance.as_ref(),
             TypeDeclaration::Union(UnionType { provenance, .. }) => provenance.as_ref(),
             TypeDeclaration::Module(ModuleType { provenance, .. }) => provenance.as_ref(),
+            TypeDeclaration::TypeParameter(TypeParameterType { provenance, .. }) => {
+                provenance.as_ref()
+            }
         }
     }
 
@@ -178,6 +139,7 @@ impl TypeDeclaration {
             TypeDeclaration::Interface(inner) => inner.id.into(),
             TypeDeclaration::Union(inner) => inner.id.into(),
             TypeDeclaration::Module(inner) => inner.id.into(),
+            TypeDeclaration::TypeParameter(inner) => inner.id.into(),
         }
     }
 
@@ -187,6 +149,7 @@ impl TypeDeclaration {
             TypeDeclaration::Interface(_) => false,
             TypeDeclaration::Union(decl) => decl.is_affine,
             TypeDeclaration::Module(_) => false,
+            TypeDeclaration::TypeParameter(_) => false,
         };
         if is_affine {
             MoveSemantics::Resource
@@ -202,6 +165,7 @@ impl TypeDeclaration {
     pub fn field_access(
         &self,
         field: &str,
+        context: &DeclarationContext,
         provenance: &SourceRange,
     ) -> Result<ExpressionType, TypecheckError> {
         match self {
@@ -254,6 +218,19 @@ impl TypeDeclaration {
                 .ok_or_else(|| {
                     TypecheckError::FieldNotPresent(field.to_string(), provenance.clone())
                 }),
+            TypeDeclaration::TypeParameter(ty_parameter) => {
+                if ty_parameter.constraints.len() != 1 {
+                    todo!("constraints that can overlap?");
+                }
+                let constraint = &ty_parameter.constraints[0];
+                let (ExpressionType::InstanceOf(id) | ExpressionType::ReferenceToType(id)) =
+                    constraint
+                else {
+                    todo!("what do");
+                };
+                let constraint_ty = &context.id_to_decl[id];
+                constraint_ty.field_access(field, context, provenance)
+            }
         }
     }
 
@@ -261,7 +238,8 @@ impl TypeDeclaration {
         match self {
             TypeDeclaration::Struct(_)
             | TypeDeclaration::Interface(_)
-            | TypeDeclaration::Union(_) => None,
+            | TypeDeclaration::Union(_)
+            | TypeDeclaration::TypeParameter(_) => None,
             TypeDeclaration::Module(module) => Some(module),
         }
     }
@@ -275,18 +253,25 @@ pub struct ModuleType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub struct TypeParameterType {
+    pub id: TypeID,
+    pub constraints: Vec<ExpressionType>,
+    pub provenance: Option<SourceRange>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct StructType {
     pub id: TypeID,
     pub fields: HashMap<String, ExpressionType>,
     pub associated_functions: HashMap<String, FunctionID>,
     pub is_affine: bool,
     pub provenance: Option<SourceRange>,
+    pub type_parameters: HashMap<String, TypeID>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FuncType {
     pub id: FunctionID,
-    pub type_param_count: usize,
     pub params: Vec<ExpressionType>,
     pub returns: ExpressionType,
     pub is_associated: bool,
@@ -294,6 +279,7 @@ pub struct FuncType {
     pub is_unsafe: bool,
     pub is_extern: bool,
     pub provenance: Option<SourceRange>,
+    pub type_parameters: HashMap<String, TypeID>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -304,6 +290,7 @@ pub struct UnionType {
     pub associated_functions: HashMap<String, FunctionID>,
     pub is_affine: bool,
     pub provenance: Option<SourceRange>,
+    pub type_parameters: HashMap<String, TypeID>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

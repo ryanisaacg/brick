@@ -17,7 +17,7 @@ pub fn check_safety(
 
     if !is_unsafe_permitted {
         match &node.value {
-            AstNodeValue::Call(lhs, _) => {
+            AstNodeValue::Call(lhs, _, _) => {
                 let lhs_ty = &context.ast.get(*lhs).ty.get().unwrap();
                 match lhs_ty {
                     ExpressionType::ReferenceToFunction(fn_id) => {

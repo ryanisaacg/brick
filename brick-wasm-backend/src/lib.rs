@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use brick::{
-    expr_ty_to_physical, lower_code, CompileError, ExpressionType, LinearFunction, LowerResults,
-    SourceFile,
+    check_types, expr_ty_to_physical, lower_code, CompileError, ExpressionType, LinearFunction,
+    LowerResults, SourceFile,
 };
 use function_bodies::{walk_vals_write_order, FunctionEncoder};
 use wasm_encoder::{
@@ -50,6 +50,7 @@ pub fn compile(
         top_level_name,
     }: BackendOptions,
 ) -> Result<Module, CompileError> {
+    let compiled_sources = check_types(sources)?;
     let LowerResults {
         statements,
         statements_ty,
@@ -57,7 +58,7 @@ pub fn compile(
         declarations,
         type_layouts,
         constant_data,
-    } = lower_code(sources, WASM_BOOL_SIZE, WASM_USIZE)?;
+    } = lower_code(compiled_sources, WASM_BOOL_SIZE, WASM_USIZE);
 
     let mut function_return_types = HashMap::new();
     for func in declarations.id_to_func.values() {
@@ -77,9 +78,13 @@ pub fn compile(
             main_fn_results.push(p)
         });
     }
+    // TODO: optional main?
     let main = LinearFunction {
         id: declarations.intrinsic_module.new_func_id(),
-        body: statements,
+        body: match statements {
+            Some(statements) => vec![statements],
+            None => Vec::new(),
+        },
         params: Vec::new(),
         returns: statements_ty,
     };
@@ -164,9 +169,10 @@ pub fn compile(
         function_id_to_ty_idx.insert(function.id, ty_section.len());
         function_headers::encode_linear(&type_layouts, function, &mut ty_section);
     }
+    let intrinsics: HashSet<_> = declarations.intrinsic_to_id.values().collect();
     for function in declarations.id_to_func.values() {
-        // Skip intrinsics with generics
-        if function.type_param_count > 0 || function_id_to_ty_idx.contains_key(&function.id) {
+        // Skip intrinsics - they're inlined at the call sites
+        if intrinsics.contains(&function.id) || function_id_to_ty_idx.contains_key(&function.id) {
             continue;
         }
         function_id_to_ty_idx.insert(function.id, ty_section.len());

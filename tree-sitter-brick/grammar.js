@@ -48,6 +48,9 @@ module.exports = grammar({
         $.import
       ),
 
+    // Generics
+    _type_parameters: ($) => seq("[", commaSep(choice($.identifier, $.name_and_type)), "]"),
+
     // FUNCTIONS
     function_definition: ($) => seq($._function_header, $.block),
 
@@ -60,6 +63,7 @@ module.exports = grammar({
         optional("unsafe"),
         "fn",
         field("name", $.identifier),
+        optional(field("type_params", $._type_parameters)),
         "(",
         field(
           "params",
@@ -83,6 +87,7 @@ module.exports = grammar({
       seq(
         "struct",
         field("name", $.identifier),
+        optional(field("type_params", $._type_parameters)),
         field("properties", optional($.type_properties)),
         "{",
         field("fields", seq(commaSep($.name_and_type))),
@@ -93,6 +98,7 @@ module.exports = grammar({
       seq(
         "union",
         field("name", $.identifier),
+        optional(field("type_params", $._type_parameters)),
         field("properties", optional($.type_properties)),
         "{",
         field("variants", seq(commaSep1($.union_variant))),

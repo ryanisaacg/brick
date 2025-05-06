@@ -175,11 +175,9 @@ impl<'a> VM<'a> {
 
     pub(crate) fn evaluate_top_level_statements(
         mut self,
-        statements: &[LinearNode],
+        statement: &LinearNode,
     ) -> Result<(Vec<Value>, Vec<u8>), Unwind> {
-        for statement in statements.iter() {
-            self.evaluate_node(&mut [], statement)?;
-        }
+        self.evaluate_node(&mut [], statement)?;
         debug_assert_eq!(self.temporaries.len(), 0);
 
         Ok((self.op_stack, self.memory))
@@ -467,7 +465,7 @@ impl<'a> VM<'a> {
                         ComparisonOp::GreaterEqualThan => bool_value(left >= right),
                         ComparisonOp::EqualTo | ComparisonOp::NotEquals => unreachable!(),
                     },
-                    (_, _) => unreachable!(),
+                    (lhs, rhs) => unreachable!("can't compare: {lhs:?} vs {rhs:?}"),
                 };
                 self.op_stack.push(val);
             }

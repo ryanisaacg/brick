@@ -1,7 +1,14 @@
 generics:
-- ability to define generic functions
 - ability to define polymorphic types - both via pointer and directly
 - some way to store references inside variants to pass / return from functions
+- decide what to do about affinity of type parameters
+- support generic associated functions
+- support param type expectation of TypeParameterCall
+- support multiple constraints on a type parameter
+- support constraints that aren't a simple type ID
+- actually check generic constraints in resolve_type_parameters
+- don't allow existential generics
+- syntax for providing generics without inferring them
 
 standard library:
 - some way of defining a stdlib that is available as an import path
@@ -67,3 +74,4 @@ wasm backend:
 - explicitly handle stack overflows
 - correctly arrange stack, data, and heap segments of memory
 - bigger-than-word types should be returned via allocating on the stack and then writing to them via pointer
+- don't include an empty main if no main is compiled in

@@ -414,13 +414,20 @@ pub fn lower_node(decls: &DeclarationContext, ast: &AstArena, node: &AstNode) ->
                 BinOp::Concat => HirNodeValue::StringConcat(left, right),
             }
         }
-        AstNodeValue::Call(func, params) => {
+        AstNodeValue::Call(func, args, type_parameter_resolutions) => {
             let func = lower_node_alloc(decls, ast, ast.get(*func));
-            let params = params
+            let args = args
                 .iter()
                 .map(|param| lower_node(decls, ast, ast.get(*param)))
                 .collect();
-            HirNodeValue::Call(func, params)
+            HirNodeValue::Call {
+                func,
+                args,
+                type_parameter_resolutions: type_parameter_resolutions
+                    .get()
+                    .cloned()
+                    .unwrap_or_default(),
+            }
         }
         AstNodeValue::RecordLiteral { name, fields } => {
             let name = ast.get(*name);

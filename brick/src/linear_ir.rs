@@ -579,6 +579,10 @@ impl LinearContext<'_> {
         }
     }
 
+    pub fn linearize_node(&mut self, node: HirNode) -> LinearNode {
+        lower_expression(self, node)
+    }
+
     pub fn linearize_nodes(&mut self, nodes: Vec<HirNode>) -> Vec<LinearNode> {
         nodes
             .into_iter()
@@ -638,7 +642,7 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         }
         HirNodeValue::Comparison(op, lhs, rhs) => {
             let ExpressionType::Primitive(ty) = rhs.ty else {
-                unreachable!("binoperands must be primitive not {:?}", ty)
+                unreachable!("binoperands must be primitive not {:?}", rhs.ty)
             };
             let ty = primitive_to_physical(ty);
             LinearNodeValue::Comparison(
@@ -664,25 +668,29 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
                 ty,
             }
         }
-        HirNodeValue::Call(lhs, params) => {
-            let params = params
+        HirNodeValue::Call {
+            func,
+            args,
+            type_parameter_resolutions: _,
+        } => {
+            let params = args
                 .into_iter()
                 .map(|param| lower_expression(ctx, param))
                 .collect();
-            match &lhs.value {
+            match &func.value {
                 HirNodeValue::VariableReference(AnyID::Function(fn_id)) => {
                     LinearNodeValue::Call(*fn_id, params)
                 }
                 _ => {
-                    let indirect_fn = if let Some(fn_id) = ctx.indirect_function_types.get(&lhs.ty)
+                    let indirect_fn = if let Some(fn_id) = ctx.indirect_function_types.get(&func.ty)
                     {
                         *fn_id
                     } else {
                         let fn_id = ctx.module.new_func_id();
-                        ctx.indirect_function_types.insert(lhs.ty.clone(), fn_id);
+                        ctx.indirect_function_types.insert(func.ty.clone(), fn_id);
                         fn_id
                     };
-                    let lhs = lower_expression(ctx, *lhs);
+                    let lhs = lower_expression(ctx, *func);
                     LinearNodeValue::IndirectCall(indirect_fn, Box::new(lhs), params)
                 }
             }
@@ -1654,6 +1662,11 @@ fn lower_expression(ctx: &mut LinearContext<'_>, expression: HirNode) -> LinearN
         HirNodeValue::CellLiteral(inner) => {
             return lower_expression(ctx, *inner);
         }
+        HirNodeValue::TypeParameterCall(..) => {
+            unreachable!(
+                "ICE: type parameter nodes must be monomorphized away before lowering to LIR"
+            )
+        }
     };
 
     LinearNode { value, provenance }
@@ -1673,7 +1686,7 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
 
         HirNodeValue::Parameter(_, _) => todo!(),
         HirNodeValue::Declaration(_) => todo!(),
-        HirNodeValue::Call(_, _) => todo!(),
+        HirNodeValue::Call { .. } => todo!(),
         HirNodeValue::Assignment(_, _) => todo!(),
         HirNodeValue::UnaryLogical(_, _) => todo!(),
         HirNodeValue::Arithmetic(_, _, _) => todo!(),
@@ -1717,6 +1730,7 @@ fn lower_lvalue(ctx: &mut LinearContext<'_>, lvalue: HirNode) -> (LinearNode, us
         HirNodeValue::Discard(_) => todo!(),
         HirNodeValue::CellLiteral(_) => todo!(),
         HirNodeValue::UnaryArithmetic(_, _) => todo!(),
+        HirNodeValue::TypeParameterCall(..) => todo!(),
     }
 }
 
@@ -2357,6 +2371,10 @@ fn layout_static_decl(
             // Modules are completely compiled out
             return 0;
         }
+        TypeDeclaration::TypeParameter(_) => {
+            // Type parameters should be monomorphized out
+            return 0;
+        }
     };
     let size = layout.size;
     layouts.insert(decl.id(), layout);
@@ -2410,7 +2428,6 @@ pub fn expr_ty_to_physical(ty: &ExpressionType) -> PhysicalType {
         }
         ExpressionType::ReferenceToType(_) => todo!(),
         ExpressionType::ReferenceToFunction(_) => todo!(),
-        ExpressionType::TypeParameterReference(_) => todo!(),
         ExpressionType::Generator { .. } => PhysicalType::Generator,
         ExpressionType::FunctionReference { .. } => {
             PhysicalType::Primitive(PhysicalPrimitive::FunctionPointer)

@@ -1,0 +1,26 @@
+// Int | 3
+
+struct X {
+    val: i32,
+
+    fn value(ref self): i32 {
+        self.val
+    }
+
+ fn add[T: Value](ref self, t: T) : X {
+     let val = self.val + t.value();
+     X { val }
+ }
+}
+
+interface Value {
+    fn value(ref self): i32
+}
+
+fn add[T: Value](a: T, b: T): i32 {
+    a.value() + b.value()
+}
+
+let a = X { val: 1 };
+let b = X { val: 2 };
+a.add(b).val

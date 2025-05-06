@@ -5,7 +5,7 @@ use super::HirModule;
 pub fn convert_calls_to_union_literals(module: &mut HirModule, declarations: &DeclarationContext) {
     // Rewrite union variants with values
     module.par_visit_mut(|_return_ty, node| {
-        let HirNodeValue::Call(func, _args) = &node.value else {
+        let HirNodeValue::Call { func, .. } = &node.value else {
             return;
         };
         // Determine if the "function call" is actually a union variant
@@ -24,7 +24,7 @@ pub fn convert_calls_to_union_literals(module: &mut HirModule, declarations: &De
         let ty_id = *ty_id;
         // Rewrite the node - it's a union variant
         let node_value = std::mem::take(&mut node.value);
-        let HirNodeValue::Call(func, mut args) = node_value else {
+        let HirNodeValue::Call { func, mut args, .. } = node_value else {
             unreachable!()
         };
         let HirNodeValue::Access(_, variant) = func.value else {

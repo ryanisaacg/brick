@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use brick::{
     parse_file,
     parser::{
-        AstArena, AstNode, AstNodeValue, BinOp, ParsedFile, SelfParameter, UnaryOp,
+        AstArena, AstNode, AstNodeValue, BinOp, ParsedFile, SelfParameter, TypeParameter, UnaryOp,
         UnionDeclarationVariant,
     },
     CompileError, PointerKind,
@@ -43,6 +43,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 ast,
                 result,
                 &func.name,
+                &func.type_parameters,
                 func.self_param,
                 func.params
                     .iter()
@@ -61,6 +62,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 ast,
                 result,
                 func.name.as_str(),
+                &func.type_parameters,
                 func.self_param,
                 func.params
                     .iter()
@@ -75,6 +77,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
         AstNodeValue::StructDeclaration(decl) => {
             result.push_str("struct ");
             result.push_str(decl.name.as_str());
+            write_type_parameters(ast, result, &decl.type_parameters);
             if !decl.properties.is_empty() {
                 result.push(':');
                 for (idx, property) in decl.properties.iter().enumerate() {
@@ -104,6 +107,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
         AstNodeValue::UnionDeclaration(decl) => {
             result.push_str("union ");
             result.push_str(decl.name.as_str());
+            write_type_parameters(ast, result, &decl.type_parameters);
             if !decl.properties.is_empty() {
                 result.push(':');
                 for (idx, property) in decl.properties.iter().enumerate() {
@@ -154,6 +158,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
                 ast,
                 result,
                 func.name.as_str(),
+                &func.type_parameters,
                 func.self_param,
                 func.params
                     .iter()
@@ -343,7 +348,7 @@ fn write_node(ast: &AstArena, node: &AstNode, result: &mut String, indent: u32) 
             result.push_str("loop ");
             write_node(ast, ast.get(*body), result, indent);
         }
-        AstNodeValue::Call(func, args) => {
+        AstNodeValue::Call(func, args, _) => {
             write_node(ast, ast.get(*func), result, indent);
             result.push('(');
             for (idx, arg) in args.iter().enumerate() {
@@ -528,6 +533,7 @@ fn write_function_header<'iter, 'node: 'iter>(
     ast: &AstArena,
     result: &mut String,
     name: &str,
+    type_parameters: &[TypeParameter],
     self_param: Option<SelfParameter>,
     params: impl Iterator<Item = (&'iter str, &'iter AstNode)>,
     returns: Option<&AstNode>,
@@ -546,6 +552,7 @@ fn write_function_header<'iter, 'node: 'iter>(
     }
     result.push_str("fn ");
     result.push_str(name);
+    write_type_parameters(ast, result, type_parameters);
     result.push('(');
     let mut params = params.peekable();
     if let Some(self_param) = self_param {
@@ -570,6 +577,27 @@ fn write_function_header<'iter, 'node: 'iter>(
     if let Some(returns) = &returns {
         result.push_str(": ");
         write_node(ast, returns, result, 0);
+    }
+}
+
+fn write_type_parameters(ast: &AstArena, result: &mut String, type_parameters: &[TypeParameter]) {
+    if !type_parameters.is_empty() {
+        result.push('[');
+        for type_param in type_parameters.iter() {
+            result.push_str(type_param.name.as_str());
+            if !type_param.constraints.is_empty() {
+                result.push_str(": ");
+                for (i, constraint) in type_param.constraints.iter().enumerate() {
+                    let node = ast.get(*constraint);
+                    write_node(ast, node, result, 0);
+
+                    if i + 1 != type_param.constraints.len() {
+                        result.push_str(", ");
+                    }
+                }
+            }
+        }
+        result.push(']');
     }
 }
 
