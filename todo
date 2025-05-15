@@ -2,7 +2,6 @@ generics:
 - ability to define polymorphic types - both via pointer and directly
 - some way to store references inside variants to pass / return from functions
 - decide what to do about affinity of type parameters
-- support generic associated functions
 - support param type expectation of TypeParameterCall
 - support multiple constraints on a type parameter
 - support constraints that aren't a simple type ID

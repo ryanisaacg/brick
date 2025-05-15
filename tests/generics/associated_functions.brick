@@ -7,10 +7,10 @@ struct X {
         self.val
     }
 
- fn add[T: Value](ref self, t: T) : X {
-     let val = self.val + t.value();
-     X { val }
- }
+    fn add[T: Value](ref self, t: T) : X {
+        let val = self.val + t.value();
+        X { val }
+    }
 }
 
 interface Value {

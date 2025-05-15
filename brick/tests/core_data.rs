@@ -41,8 +41,7 @@ fn specific_files() {
     data_test_driver::test_files(
         vec![
             // Include specific cases here
-            test("tests/generics/add.brick"),
-            test("tests/generics/find_least.brick"),
+            test("tests/generics/associated_functions.brick"),
         ],
         does_compile,
         does_succeed,

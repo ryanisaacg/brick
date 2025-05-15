@@ -264,7 +264,20 @@ impl DeclarationContext {
                         ),
                     );
                 }
-                // TODO: collect type parameters on functions
+
+                merge_results(
+                    &mut result,
+                    fill_in_type_parameter_info_for_associated_functions(
+                        &decl,
+                        statement,
+                        &self.id_to_func,
+                        &self.id_to_decl,
+                        &source.arena,
+                        &names_to_type_id,
+                        &mut declarations,
+                    ),
+                );
+
                 declarations.push(decl);
             }
             let func = match &statement.value {
@@ -312,6 +325,7 @@ impl DeclarationContext {
                 _ => None,
             };
             if let Some((func, type_parameters)) = func {
+                // Fill in type parameters if they exist
                 merge_results(
                     &mut result,
                     fill_in_type_parameters(
@@ -323,6 +337,7 @@ impl DeclarationContext {
                         &mut declarations,
                     ),
                 );
+                // Store the func
                 self.id_to_func.insert(func.id, func);
             }
         }
@@ -372,6 +387,84 @@ impl DeclarationContext {
 
         result
     }
+}
+
+fn fill_in_type_parameter_info_for_associated_functions(
+    decl: &TypeDeclaration,
+    statement: &AstNode,
+    id_to_func: &HashMap<FunctionID, FuncType>,
+    id_to_decl: &HashMap<TypeID, TypeDeclaration>,
+    ast_arena: &AstArena,
+    name_to_type_id: &HashMap<&str, TypeID>,
+    declarations: &mut Vec<TypeDeclaration>,
+) -> Result<(), TypecheckError> {
+    let (TypeDeclaration::Struct(StructType {
+        associated_functions,
+        ..
+    })
+    | TypeDeclaration::Union(UnionType {
+        associated_functions,
+        ..
+    })
+    | TypeDeclaration::Interface(InterfaceType {
+        associated_functions,
+        ..
+    })) = decl
+    else {
+        return Ok(());
+    };
+    let associated_function_node_ids = match &statement.value {
+        AstNodeValue::StructDeclaration(StructDeclarationValue {
+            associated_functions,
+            ..
+        })
+        | AstNodeValue::UnionDeclaration(UnionDeclarationValue {
+            associated_functions,
+            ..
+        })
+        | AstNodeValue::InterfaceDeclaration(InterfaceDeclarationValue {
+            associated_functions,
+            ..
+        }) => associated_functions,
+        _ => unreachable!("ICE: can't produce this {decl:?} from this {statement:?}"),
+    };
+    let mut result = Ok(());
+    for associated_function_node_id in associated_function_node_ids.iter() {
+        let node = ast_arena.get(*associated_function_node_id);
+        let (AstNodeValue::ExternFunctionBinding(FunctionHeaderValue {
+            name,
+            type_parameters,
+            ..
+        })
+        | AstNodeValue::RequiredFunction(FunctionHeaderValue {
+            name,
+            type_parameters,
+            ..
+        })
+        | AstNodeValue::FunctionDeclaration(FunctionDeclarationValue {
+            name,
+            type_parameters,
+            ..
+        })) = &node.value
+        else {
+            unreachable!("ICE: non-function node in associated functions {node:?}");
+        };
+        let function_id = associated_functions[name];
+        let func = &id_to_func[&function_id];
+        merge_results(
+            &mut result,
+            fill_in_type_parameters(
+                ast_arena,
+                name_to_type_id,
+                id_to_decl,
+                &func.type_parameters,
+                type_parameters,
+                declarations,
+            ),
+        );
+    }
+
+    result
 }
 
 pub struct FileDeclarations {
